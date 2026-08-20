@@ -16,6 +16,7 @@ export const PASTURE_TOP_Y = -0.015;
 export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
+export const HORSE_PLACEMENT_DURATION_MS = 520;
 
 const HORSE_MATERIAL: Physics2DMaterial = {
   density: 1,
@@ -90,7 +91,7 @@ export function getHorseSpawnY(
   landingSurfaceY: number,
   verticalExtent = HORSE_HALF_HEIGHT,
 ): number {
-  // The body's center begins 0.625 horse-heights above its resting center.
+  // The placement animation begins 0.625 horse-heights above its resting center.
   return landingSurfaceY + verticalExtent + HORSE_HALF_HEIGHT * 1.25;
 }
 
@@ -100,16 +101,6 @@ export function getNextHorseDelay(horsesDropped: number): number {
 
 export function getPaceLevel(horsesDropped: number): number {
   return Math.min(6, 1 + Math.floor(horsesDropped / 7));
-}
-
-export function getHorseDropMotion(
-  releaseAngularVelocity: number,
-): Pick<RigidBody2D, 'angularVelocity' | 'velocityX' | 'velocityY'> {
-  return {
-    angularVelocity: Math.max(-5.5, Math.min(5.5, releaseAngularVelocity)),
-    velocityX: 0,
-    velocityY: -0.02,
-  };
 }
 
 export function getSupportedStackHeight(

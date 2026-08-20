@@ -7,12 +7,13 @@ renderer handles impact dust and the final celebration.
 
 Each run gives you 30 seconds and an unlimited supply of cow-scale horses.
 Before every drop, the real horse stays hidden and a radiant yellow horse
-previews its approximate landing pose. The marker behaves like a damped
+previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
-imparts visible angular momentum that carries into the released horse. Once
-released, the real horse appears roughly half a horse-height above the marker,
-settles straight down, and is handed to Flight's full physics on contact with
-the green pasture.
+teeters it. On placement, that pose locks and the real horse fades in roughly
+half a horse-height above the marker, eases onto the live pile over 520ms, and
+is handed to Flight's full physics with zero linear or angular impulse at
+contact. The pile can still shift, tip, and tumble, but every horse starts from
+a more stable placement.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. The result
 reports the contact-supported height in meters alongside the combined score.
@@ -25,7 +26,7 @@ npm run dev
 ```
 
 Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
-Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and drop
+Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and place
 the horse.
 
 ## Checks
@@ -36,10 +37,11 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs 64-horse balanced, quick, and frantic cursor
-scenarios using the shipped momentum formulas, then checks for finite body
-state, contacts, a measurable supported pile, direct momentum transfer, a
-gentle release, and a real fall beyond the farm-edge collider.
+The gameplay validation runs 64-horse level, balanced, and teetered placement
+scenarios using the shipped timing and surface-placement rules, then checks for
+finite body state, contacts, a measurable supported pile, zero-impulse physics
+activation, a readable placement path, and a real fall beyond the farm-edge
+collider.
 
 ## Model credits
 

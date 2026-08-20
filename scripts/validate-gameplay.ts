@@ -3,13 +3,14 @@ import {
   addHorseBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
-  getHorseDropMotion,
   getHorseSpawnY,
   getNextHorseDelay,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  HORSE_PLACEMENT_DURATION_MS,
   PASTURE_HALF_WIDTH,
+  PASTURE_TOP_Y,
   PHYSICS_STEP,
   stepHorseStack,
 } from '../src/horseStackPhysics';
@@ -25,12 +26,12 @@ const TARGET_HALF_WIDTH = 0.32;
 const VALIDATION_HORSES = 64;
 
 const scenarios = [
-  runScenario('balanced cursor', 0x42414c41, 0.35, 0.34),
-  runScenario('quick cursor', 0x51554943, 2.2, 0.2),
-  runScenario('frantic cursor', 0x4652414e, 5.2, 0.1),
+  runScenario('level placements', 0x4c455645, 0.04),
+  runScenario('balanced placements', 0x42414c41, 0.28),
+  runScenario('teetered placements', 0x54454554, 0.6),
 ];
-validateMomentumTransfer();
-validateGentleDrop();
+validateStableActivation();
+validatePlacementAnimation();
 validateFarmEdgeFalloff();
 
 console.log(
@@ -45,8 +46,7 @@ console.log(
 function runScenario(
   name: string,
   seed: number,
-  angularMomentum: number,
-  inputCadence: number,
+  maxTilt: number,
 ): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody2D[] = [];
@@ -54,24 +54,24 @@ function runScenario(
   const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
 
   for (let index = 0; index < VALIDATION_HORSES; index++) {
-    const currentHeight = getSupportedStackHeight(world, horses);
-    const spawnY = getHorseSpawnY(currentHeight);
     const horseSeed = random() * Math.PI * 2;
+    const x = Math.sin(horseSeed) * horizontalLimit;
+    const angle = (random() * 2 - 1) * maxTilt;
+    const landingSurfaceY = getPlacementSurfaceY(horses, x);
     const horse = addHorseBody(
       world,
-      Math.sin(horseSeed) * horizontalLimit,
-      spawnY,
-      (random() - 0.5) * Math.min(0.65, angularMomentum * 0.12),
+      x,
+      landingSurfaceY + getVerticalExtent(angle),
+      angle,
     );
-    const motion = getHorseDropMotion((random() < 0.5 ? -1 : 1) * angularMomentum);
-    horse.velocityX = motion.velocityX;
-    horse.velocityY = motion.velocityY;
-    horse.angularVelocity = motion.angularVelocity;
+    horse.velocityX = 0;
+    horse.velocityY = 0;
+    horse.angularVelocity = 0;
     horses.push(horse);
 
     if (index === VALIDATION_HORSES - 1) continue;
     const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    stepForDuration(world, horses, delaySeconds + inputCadence);
+    stepForDuration(world, horses, HORSE_PLACEMENT_DURATION_MS / 1000 + delaySeconds);
   }
 
   stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
@@ -94,33 +94,58 @@ function runScenario(
   return { contacts: world.contacts.length, height, inPasture, name };
 }
 
-function validateMomentumTransfer(): void {
-  const still = getHorseDropMotion(0);
-  const fastLeft = getHorseDropMotion(-4.2);
-  const fastRight = getHorseDropMotion(4.2);
-  if ([still, fastLeft, fastRight].some((motion) => motion.velocityX !== 0)) {
-    throw new Error('direct aim: drops must not receive automatic lateral velocity');
-  }
-  if (still.angularVelocity !== 0) {
-    throw new Error('indicator momentum: a still cursor should release a level horse');
-  }
-  if (fastLeft.angularVelocity >= 0 || fastRight.angularVelocity <= 0) {
-    throw new Error('indicator momentum: pointer direction should transfer to horse spin');
+function validateStableActivation(): void {
+  const world = createHorseStackWorld();
+  const angle = 0.42;
+  const horse = addHorseBody(
+    world,
+    0,
+    PASTURE_TOP_Y + getVerticalExtent(angle),
+    angle,
+  );
+  if (horse.velocityX !== 0 || horse.velocityY !== 0 || horse.angularVelocity !== 0) {
+    throw new Error(
+      'stable placement: a placed horse must activate without linear or angular impulse',
+    );
   }
 }
 
-function validateGentleDrop(): void {
+function validatePlacementAnimation(): void {
   const surfaceY = 0.55;
   const restingCenterY = surfaceY + HORSE_HALF_HEIGHT;
   const releaseGap = getHorseSpawnY(surfaceY) - restingCenterY;
   const horseHeight = HORSE_HALF_HEIGHT * 2;
   if (releaseGap < horseHeight * 0.5 || releaseGap > horseHeight) {
-    throw new Error(`gentle drop: expected a 0.5–1 horse-height gap, received ${releaseGap}`);
+    throw new Error(`placement path: expected a 0.5–1 horse-height gap, received ${releaseGap}`);
   }
-  const teetering = getHorseDropMotion(5.5);
-  if (Math.abs(teetering.velocityY) > 0.15) {
-    throw new Error(`gentle drop: release is too fast at ${teetering.velocityY}m/s`);
+  if (HORSE_PLACEMENT_DURATION_MS < 400 || HORSE_PLACEMENT_DURATION_MS > 800) {
+    throw new Error(
+      `placement path: expected a readable 400–800ms animation, received ${HORSE_PLACEMENT_DURATION_MS}ms`,
+    );
   }
+}
+
+function getPlacementSurfaceY(horses: readonly RigidBody2D[], x: number): number {
+  let surfaceY = PASTURE_TOP_Y;
+  const horizontalReach = HORSE_HALF_WIDTH * 1.85;
+  for (const horse of horses) {
+    if (
+      horse.y < PASTURE_TOP_Y ||
+      Math.abs(horse.x - x) > horizontalReach ||
+      Math.abs(horse.velocityY) > 1.2
+    ) {
+      continue;
+    }
+    surfaceY = Math.max(surfaceY, horse.y + getVerticalExtent(horse.angle));
+  }
+  return surfaceY;
+}
+
+function getVerticalExtent(angle: number): number {
+  return (
+    Math.abs(Math.cos(angle)) * HORSE_HALF_HEIGHT +
+    Math.abs(Math.sin(angle)) * HORSE_HALF_WIDTH
+  );
 }
 
 function validateFarmEdgeFalloff(): void {

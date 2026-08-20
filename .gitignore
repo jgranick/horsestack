@@ -1,4 +1,5 @@
 .quimby
+.tmp
 node_modules
 dist
 *.local

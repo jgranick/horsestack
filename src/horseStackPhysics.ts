@@ -8,10 +8,12 @@ import {
 } from '@flighthq/sdk';
 
 export const TOTAL_HORSES = 40;
-export const HORSE_HALF_WIDTH = 0.4;
-export const HORSE_HALF_HEIGHT = 0.34;
-export const PLATFORM_HALF_WIDTH = 1.25;
-export const PASTURE_HALF_WIDTH = 4.5;
+export const HORSE_HALF_WIDTH = 0.04;
+export const HORSE_HALF_HEIGHT = 0.034;
+export const PLATFORM_HALF_WIDTH = 0.32;
+// The farm ground spans roughly 3.5 world units across the new straight-on view.
+// Keeping the collider inside that silhouette leaves real fall-off edges.
+export const PASTURE_HALF_WIDTH = 1.75;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
@@ -20,10 +22,15 @@ const HORSE_MATERIAL: Physics2DMaterial = {
   friction: 0.56,
   restitution: 0.13,
 };
-const GROUND_MATERIAL: Physics2DMaterial = {
+const PLATFORM_MATERIAL: Physics2DMaterial = {
   density: 0,
   friction: 0.95,
   restitution: 0.02,
+};
+const PASTURE_MATERIAL: Physics2DMaterial = {
+  density: 0,
+  friction: 0.04,
+  restitution: 0.035,
 };
 
 export function createHorseStackWorld(): Physics2DWorld {
@@ -42,24 +49,24 @@ export function createHorseStackWorld(): Physics2DWorld {
         maxX: PLATFORM_HALF_WIDTH,
         maxY: 0.25,
       },
-      GROUND_MATERIAL,
+      PLATFORM_MATERIAL,
     ),
   );
   addPhysics2DBody(world, floor);
 
   // The platform is raised slightly above the farm floor. Missed horses now tumble
   // into the pasture instead of visibly falling through the scenery.
-  const pasture = createRigidBody2D('static', 0, -0.18);
+  const pasture = createRigidBody2D('static', 0, -0.035);
   pasture.colliders.push(
     createPhysics2DCollider(
       {
         kind: 'aabb',
         minX: -PASTURE_HALF_WIDTH,
-        minY: -0.1,
+        minY: -0.02,
         maxX: PASTURE_HALF_WIDTH,
-        maxY: 0.1,
+        maxY: 0.02,
       },
-      GROUND_MATERIAL,
+      PASTURE_MATERIAL,
     ),
   );
   addPhysics2DBody(world, pasture);
@@ -84,8 +91,8 @@ export function addHorseBody(
       {
         kind: 'polygon',
         points: [
-          -0.38, -0.08, -0.27, -0.29, -0.08, -0.34, 0.26, -0.29, 0.4, 0.04, 0.3, 0.34,
-          -0.28, 0.32, -0.4, 0.08,
+          -0.038, -0.008, -0.027, -0.029, -0.008, -0.034, 0.026, -0.029, 0.04,
+          0.004, 0.03, 0.034, -0.028, 0.032, -0.04, 0.008,
         ],
       },
       HORSE_MATERIAL,
@@ -100,7 +107,7 @@ export function stepHorseStack(world: Physics2DWorld): void {
 }
 
 export function getHorseSpawnY(stackHeight: number): number {
-  return Math.max(1.4, stackHeight + 1.12);
+  return Math.max(0.28, stackHeight + 0.22);
 }
 
 export function getDropWindow(horsesDropped: number): number {
@@ -129,8 +136,10 @@ export function getHorseDropMotion(
   const pace = getPaceLevel(horsesDropped);
   const chaos = 0.95 + pace * 0.24;
   return {
-    angularVelocity: spinJitter * chaos + (forced ? sweepDirection * 0.38 : 0),
-    velocityX: sweepDirection * (0.08 + pace * 0.025) + horizontalJitter * 0.16,
+    angularVelocity: spinJitter * chaos + (forced ? sweepDirection * 0.52 : 0),
+    velocityX:
+      sweepDirection * (0.08 + pace * 0.025 + (forced ? 2.8 : 0)) +
+      horizontalJitter * 0.16,
     velocityY: forced ? -0.95 : -0.12,
   };
 }

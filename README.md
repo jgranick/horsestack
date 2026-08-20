@@ -30,9 +30,9 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs all 40 horses at the game's fastest shipped
-cadence and velocity formulas, then checks for finite body state, contacts, and
-a measurable supported pile.
+The gameplay validation runs all 40 horses at both manual-spam and timer-expiry
+cadences using the shipped velocity formulas, then checks for finite body
+state, contacts, and a measurable supported pile.
 
 ## Model credits
 

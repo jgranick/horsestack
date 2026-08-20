@@ -94,22 +94,24 @@ interface StackedHorse {
   node: Node3D;
 }
 
-const STACK_BASE_Y = 0.06;
-// The imported barn's front edge lands around z = -0.7 after its wrapper transform.
-// This puts the pile in the central yard, just in front of it rather than off the diorama.
-const STACK_Z = -0.55;
-const HORSE_SCALE = 0.0124;
-const HORSE_VISUAL_CENTER_Y = 0.35;
+const STACK_BASE_Y = 0.015;
+// At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
+// The barn's near wall is around x = 0.03; the pile sits just ahead of it and
+// centered across the farm's z = -4…-0.4 footprint.
+const STACK_X = 0.15;
+const STACK_Z = -2.15;
+const HORSE_SCALE = 0.00124;
+const HORSE_VISUAL_CENTER_Y = 0.035;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
-  azimuth: 0.08,
+  azimuth: Math.PI / 2,
   distance: 7.6,
   maxDistance: 15,
   minDistance: 6,
   minPolar: 0.02,
   polar: 0.1,
   smoothTime: 0.18,
-  target: createVector3(0, 0.82, STACK_Z),
+  target: createVector3(STACK_X, 0.74, STACK_Z),
 } as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
@@ -202,21 +204,21 @@ const dustConfig: ParticleEmitterConfig = createParticleEmitterConfig({
   directionZ: 0,
   duration: 0,
   emitterConeAngle: 1.35,
-  emitterRadius: 0.08,
+  emitterRadius: 0.012,
   emitterShape: 'cone3d',
-  gravityY: -1.1,
-  lifetimeMax: 0.62,
-  lifetimeMin: 0.24,
+  gravityY: -0.5,
+  lifetimeMax: 0.42,
+  lifetimeMin: 0.18,
   loop: false,
   maxParticles: 96,
   rotationSpeedMax: 2,
   rotationSpeedMin: -2,
-  scaleEnd: 0.02,
-  scaleMax: 0.12,
-  scaleMin: 0.04,
+  scaleEnd: 0.002,
+  scaleMax: 0.018,
+  scaleMin: 0.004,
   spawnRate: 0,
-  speedMax: 1.4,
-  speedMin: 0.35,
+  speedMax: 0.35,
+  speedMin: 0.08,
   worldSpace: true,
 });
 let celebrationState: ParticleEmitterState = createParticleEmitterState();
@@ -311,7 +313,7 @@ async function start(): Promise<void> {
 
 function addStage(root: Node3D): void {
   const platform = createMesh(
-    createBoxMeshGeometry(PLATFORM_HALF_WIDTH * 2, 0.1, 0.5),
+    createBoxMeshGeometry(0.22, 0.015, PLATFORM_HALF_WIDTH * 2),
     [
       createStandardPbrMaterial({
         baseColor: 0xb79a66ff,
@@ -320,7 +322,8 @@ function addStage(root: Node3D): void {
       }),
     ],
   );
-  platform.position.y = STACK_BASE_Y - 0.05;
+  platform.position.x = STACK_X;
+  platform.position.y = STACK_BASE_Y - 0.0075;
   platform.position.z = STACK_Z;
   invalidateNodeLocalTransform(platform);
   addNodeChild(root, platform);
@@ -349,7 +352,7 @@ function createHorseVisual(): Node3D {
   modelTransform.scale.y = HORSE_SCALE;
   modelTransform.scale.z = HORSE_SCALE;
   modelTransform.position.y = -HORSE_VISUAL_CENTER_Y;
-  setQuaternionFromEuler(modelTransform.rotation, 0, Math.PI / 2, 0);
+  setQuaternionFromEuler(modelTransform.rotation, 0, 0, 0);
   invalidateNodeLocalTransform(modelTransform);
   addNodeChild(modelTransform, cloneNode3DHierarchy(horseTemplate.root));
   addNodeChild(pivot, modelTransform);
@@ -465,17 +468,17 @@ function spawnHorse(now: number): void {
   updateActiveHorse(now);
 }
 
-function updateActiveHorse(now: number): void {
+function updateActiveHorse(now: number, allowAutoDrop = true): void {
   const current = activeHorse;
   if (current === null) return;
 
   const sweep = getAutoSweep(current, now);
-  const horizontalLimit = PLATFORM_HALF_WIDTH - HORSE_HALF_WIDTH * 0.55;
+  const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
   current.x = clamp(sweep + aimOffset, -horizontalLimit, horizontalLimit);
   current.angle = Math.sin(now * 0.0051 + current.seed) * (0.09 + getPaceLevel(horsesDropped) * 0.018);
   setHorseVisualTransform(current.node, current.x, current.spawnY, current.angle);
 
-  if (now >= current.deadline) {
+  if (allowAutoDrop && now >= current.deadline) {
     dropActiveHorse(now, true);
   }
 }
@@ -543,7 +546,7 @@ function finishGame(): void {
   resultScore.textContent = `${finalHeight.toFixed(1)} m`;
   resultCopy.textContent = `${survivors} of ${TOTAL_HORSES} horses remained in the general vicinity.`;
   resultPanel.hidden = false;
-  viewer.classList.remove('is-playing', 'is-panicking');
+  viewer.classList.remove('is-playing', 'is-panicking', 'is-bumping');
   viewer.classList.add('is-finished');
   statusCopy.textContent = 'Officially measured';
   gameCallout.textContent =
@@ -554,15 +557,15 @@ function finishGame(): void {
   const burstY = STACK_BASE_Y + Math.max(0.8, finalHeight);
   const colors = [0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff];
   for (let index = 0; index < colors.length; index++) {
-    const x = -2 + (index / (colors.length - 1)) * 4;
+    const horizontalOffset = -1.8 + (index / (colors.length - 1)) * 3.6;
     emitParticleBurst3D(
       celebrationEmitter,
       celebrationState,
       celebrationConfig,
       28,
-      x,
+      STACK_X + (Math.random() - 0.5) * 0.16,
       burstY,
-      STACK_Z + (Math.random() - 0.5) * 0.4,
+      STACK_Z - horizontalOffset,
       colors[index],
     );
   }
@@ -594,9 +597,9 @@ function handlePhysicsContacts(now: number): void {
     dustState,
     dustConfig,
     8,
-    point.x,
+    STACK_X,
     STACK_BASE_Y + point.y,
-    STACK_Z,
+    STACK_Z - point.x,
     0xe8d6a9cc,
   );
 }
@@ -607,7 +610,8 @@ function synchronizeHorseVisuals(): void {
     const body = horse.body;
     setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
 
-    if (body.y < -5 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 0.9) {
+    // Leave enough void beyond the collider for the whole tumble to remain visible.
+    if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
       horse.lost = true;
       horse.node.enabled = false;
       removePhysics2DBody(physicsWorld, body);
@@ -616,19 +620,19 @@ function synchronizeHorseVisuals(): void {
 }
 
 function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angle: number): void {
-  node.position.x = x;
+  node.position.x = STACK_X;
   node.position.y = STACK_BASE_Y + physicsY;
-  node.position.z = STACK_Z;
-  setQuaternionFromEuler(node.rotation, 0, 0, angle);
+  node.position.z = STACK_Z - x;
+  setQuaternionFromEuler(node.rotation, angle, 0, 0);
   invalidateNodeLocalTransform(node);
 }
 
 function updateCamera(deltaTime: number, height: number): void {
-  const desiredTargetY = STACK_BASE_Y + Math.max(0.78, height - 0.42);
+  const desiredTargetY = STACK_BASE_Y + 0.72 + Math.max(0, height - 0.12) * 0.7;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
-  cameraController.target.x += (0 - cameraController.target.x) * follow;
+  cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
   cameraController.goalDistance = Math.min(13.5, 7.6 + height * 0.42);
   updateOrbitCameraController(cameraController, camera, deltaTime);
@@ -665,7 +669,7 @@ function getCurrentStackHeight(): number {
 function getAutoSweep(horse: Readonly<ActiveHorse>, now: number): number {
   return (
     Math.sin(now * 0.001 * getSweepSpeed(horsesDropped) + horse.seed) *
-    (PLATFORM_HALF_WIDTH * 0.68)
+    (PASTURE_HALF_WIDTH * 0.78)
   );
 }
 
@@ -682,7 +686,7 @@ function bindGameControls(): void {
     setAimFromClientX(event.clientX);
     // Touch devices do not necessarily send a pointermove before pointerdown, so
     // commit the fresh tap coordinate to current.x before the body is created.
-    updateActiveHorse(now);
+    updateActiveHorse(now, false);
     dropActiveHorse(now, false);
   });
 
@@ -690,15 +694,15 @@ function bindGameControls(): void {
     if (phase !== 'playing') return;
     if (event.key === 'ArrowLeft') {
       aimOffset = clamp(
-        aimOffset - 0.16,
-        -PLATFORM_HALF_WIDTH * 0.5,
-        PLATFORM_HALF_WIDTH * 0.5,
+        aimOffset - 0.08,
+        -PASTURE_HALF_WIDTH * 0.22,
+        PASTURE_HALF_WIDTH * 0.22,
       );
     } else if (event.key === 'ArrowRight') {
       aimOffset = clamp(
-        aimOffset + 0.16,
-        -PLATFORM_HALF_WIDTH * 0.5,
-        PLATFORM_HALF_WIDTH * 0.5,
+        aimOffset + 0.08,
+        -PASTURE_HALF_WIDTH * 0.22,
+        PASTURE_HALF_WIDTH * 0.22,
       );
     } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
       dropActiveHorse(performance.now(), false);
@@ -718,12 +722,12 @@ function setAimFromClientX(clientX: number): void {
   const current = activeHorse;
   if (current === null) return;
   const normalized = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1) * 2 - 1;
-  const horizontalLimit = PLATFORM_HALF_WIDTH - HORSE_HALF_WIDTH * 0.55;
+  const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
   const targetX = normalized * horizontalLimit;
   aimOffset = clamp(
     targetX - getAutoSweep(current, performance.now()),
-    -PLATFORM_HALF_WIDTH * 0.5,
-    PLATFORM_HALF_WIDTH * 0.5,
+    -PASTURE_HALF_WIDTH * 0.22,
+    PASTURE_HALF_WIDTH * 0.22,
   );
 }
 

@@ -10,7 +10,6 @@ import {
 export const TOTAL_HORSES = 80;
 export const HORSE_HALF_WIDTH = 0.04;
 export const HORSE_HALF_HEIGHT = 0.034;
-export const PLATFORM_HALF_WIDTH = 0.32;
 // The farm ground spans roughly 3.5 world units across the new straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
@@ -24,11 +23,6 @@ const HORSE_MATERIAL: Physics2DMaterial = {
   friction: 0.56,
   restitution: 0.13,
 };
-const PLATFORM_MATERIAL: Physics2DMaterial = {
-  density: 0,
-  friction: 0.95,
-  restitution: 0.02,
-};
 const PASTURE_MATERIAL: Physics2DMaterial = {
   density: 0,
   friction: 0.38,
@@ -41,23 +35,8 @@ export function createHorseStackWorld(): Physics2DWorld {
   world.config.positionIterations = 6;
   world.config.timeToSleep = 0.65;
 
-  const floor = createRigidBody2D('static', 0, -0.25);
-  floor.colliders.push(
-    createPhysics2DCollider(
-      {
-        kind: 'aabb',
-        minX: -PLATFORM_HALF_WIDTH,
-        minY: -0.25,
-        maxX: PLATFORM_HALF_WIDTH,
-        maxY: 0.25,
-      },
-      PLATFORM_MATERIAL,
-    ),
-  );
-  addPhysics2DBody(world, floor);
-
-  // The platform is raised slightly above the farm floor. Missed horses now tumble
-  // into the pasture instead of visibly falling through the scenery.
+  // The farm's green pasture is the only landing surface, with real fall-off edges
+  // at the limits of the floating island.
   const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
   pasture.colliders.push(
     createPhysics2DCollider(
@@ -109,7 +88,7 @@ export function stepHorseStack(world: Physics2DWorld): void {
 }
 
 export function getHorseSpawnY(stackHeight: number): number {
-  return Math.max(0.78, stackHeight + 0.55);
+  return Math.max(0.7, stackHeight + 0.5);
 }
 
 export function getDropWindow(horsesDropped: number): number {
@@ -124,14 +103,8 @@ export function getPaceLevel(horsesDropped: number): number {
   return Math.min(6, 1 + Math.floor(horsesDropped / 7));
 }
 
-export function getSweepSpeed(horsesDropped: number): number {
-  return 1.2 + horsesDropped * 0.052;
-}
-
 export function getHorseDropMotion(
   horsesDropped: number,
-  sweepDirection: number,
-  horizontalJitter: number,
   spinJitter: number,
   forced: boolean,
   placementProgress = 1,
@@ -141,20 +114,14 @@ export function getHorseDropMotion(
   const progress = Math.max(0, Math.min(1, placementProgress));
   const rush = Math.max(0, (0.35 - progress) / 0.35);
   const deadlinePanic = Math.max(0, (progress - 0.72) / 0.28);
+  const spinDirection = spinJitter < 0 ? -1 : 1;
   const motion = {
-    angularVelocity:
-      spinJitter * chaos +
-      sweepDirection * (forced ? 0.72 : deadlinePanic * 0.68),
-    velocityX:
-      sweepDirection * (0.08 + pace * 0.025 + (forced ? 2.8 : 0)) +
-      horizontalJitter * 0.16,
+    angularVelocity: forced
+      ? spinJitter * chaos + spinDirection * 1.5
+      : spinJitter * chaos * (0.5 + rush * 1.5) + spinDirection * deadlinePanic * 1.2,
+    velocityX: 0,
     velocityY: forced ? -0.95 : -0.12 - deadlinePanic * 0.62,
   };
-  if (!forced) {
-    motion.velocityX =
-      motion.velocityX * (0.55 + rush * 1.1) + sweepDirection * deadlinePanic * 2.25;
-    motion.angularVelocity *= 0.5 + rush * 1.5;
-  }
   return motion;
 }
 
@@ -177,7 +144,7 @@ export function getSupportedStackHeight(
   let height = 0;
   for (const horse of horses) {
     const onStack = horse.sleeping || touchingBodies.has(horse.index);
-    const inPasture = Math.abs(horse.x) <= PLATFORM_HALF_WIDTH + HORSE_HALF_WIDTH;
+    const inPasture = Math.abs(horse.x) <= PASTURE_HALF_WIDTH + HORSE_HALF_WIDTH;
     if (!onStack || !inPasture || horse.y < -HORSE_HALF_HEIGHT || Math.abs(horse.velocityY) > 1.2) {
       continue;
     }

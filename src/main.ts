@@ -18,13 +18,11 @@ import {
   configureDirectionalShadowCamera3D,
   createAabb,
   createAmbientLight,
-  createBoxMeshGeometry,
   createCamera3D,
   createDirectionalLight,
   createGlCanvasElement,
   createGlRenderEffectPipeline,
   createGlRenderState,
-  createMesh,
   createNode3D,
   createOrbitCameraController,
   createOrthographicProjection,
@@ -67,7 +65,6 @@ import {
   getNextHorseDelay,
   getPaceLevel,
   getSupportedStackHeight,
-  getSweepSpeed,
   getTempoPoints,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
@@ -75,7 +72,6 @@ import {
   PASTURE_TOP_Y,
   PHYSICS_GRAVITY,
   PHYSICS_STEP,
-  PLATFORM_HALF_WIDTH,
   stepHorseStack,
   TOTAL_HORSES,
 } from './horseStackPhysics';
@@ -86,9 +82,7 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 interface ActiveHorse {
   angle: number;
   deadline: number;
-  horizontalJitter: number;
   node: Node3D;
-  seed: number;
   spinJitter: number;
   spawnY: number;
   x: number;
@@ -112,13 +106,13 @@ const HORSE_VISUAL_CENTER_Y = 0.035;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
-  distance: 1.72,
-  maxDistance: 4.8,
-  minDistance: 1.42,
+  distance: 1.15,
+  maxDistance: 4.2,
+  minDistance: 0.95,
   minPolar: 0.02,
   polar: 0.08,
   smoothTime: 0.2,
-  target: createVector3(STACK_X, 0.38, STACK_Z),
+  target: createVector3(STACK_X, 0.34, STACK_Z),
 } as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
@@ -298,7 +292,6 @@ let hudDirty = true;
 const measurementBodies: RigidBody2D[] = [];
 const inputBounds = { left: 0, width: 1 };
 
-addStage(scene);
 bindGameControls();
 bindRenderingLifecycle();
 resizeCanvas();
@@ -327,24 +320,6 @@ async function start(): Promise<void> {
   } catch (error) {
     showSceneError('Unable to load Horse Stacker.', error);
   }
-}
-
-function addStage(root: Node3D): void {
-  const platform = createMesh(
-    createBoxMeshGeometry(0.22, 0.015, PLATFORM_HALF_WIDTH * 2),
-    [
-      createStandardPbrMaterial({
-        baseColor: 0xb79a66ff,
-        metallic: 0,
-        roughness: 0.9,
-      }),
-    ],
-  );
-  platform.position.x = STACK_X;
-  platform.position.y = STACK_BASE_Y - 0.0075;
-  platform.position.z = STACK_Z;
-  invalidateNodeLocalTransform(platform);
-  addNodeChild(root, platform);
 }
 
 function mountFarm(model: Scene3D): void {
@@ -488,16 +463,13 @@ function spawnHorse(now: number): void {
   activeHorse = {
     angle: 0,
     deadline: now + dropWindow * 1000,
-    horizontalJitter: Math.random() - 0.5,
     node,
-    seed: Math.random() * Math.PI * 2,
     spinJitter: Math.random() - 0.5,
     spawnY,
     x: 0,
     y: spawnY,
   };
   if (landingGhost !== null) landingGhost.enabled = true;
-  aimOffset = (Math.random() - 0.5) * 0.16;
   statusCopy.textContent = `Horse ${String(horsesDropped + 1).padStart(2, '0')} queued`;
   gameCallout.textContent =
     getPaceLevel(horsesDropped) >= 4
@@ -510,10 +482,9 @@ function updateActiveHorse(now: number, allowAutoDrop = true): void {
   const current = activeHorse;
   if (current === null) return;
 
-  const sweep = getAutoSweep(current, now);
-  const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
-  current.x = clamp(sweep + aimOffset, -horizontalLimit, horizontalLimit);
-  current.angle = Math.sin(now * 0.0051 + current.seed) * (0.09 + getPaceLevel(horsesDropped) * 0.018);
+  const horizontalLimit = getAimHalfWidth();
+  current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
+  current.angle = 0;
   current.y = current.spawnY;
   updateLandingGhost(current, now);
 
@@ -528,11 +499,8 @@ function dropActiveHorse(now: number, forced: boolean): void {
 
   const placementProgress = getPlacementProgress(current, now);
   const body = addHorseBody(physicsWorld, current.x, current.y, current.angle);
-  const sweepDirection = Math.cos(now * 0.001 * getSweepSpeed(horsesDropped) + current.seed);
   const motion = getHorseDropMotion(
     horsesDropped,
-    sweepDirection,
-    current.horizontalJitter,
     current.spinJitter,
     forced,
     placementProgress,
@@ -674,30 +642,20 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   if (landingGhost === null) return;
 
   const placementProgress = getPlacementProgress(current, now);
-  const sweepDirection = Math.cos(now * 0.001 * getSweepSpeed(horsesDropped) + current.seed);
   const motion = getHorseDropMotion(
     horsesDropped,
-    sweepDirection,
-    current.horizontalJitter,
     current.spinJitter,
     false,
     placementProgress,
   );
-  let previewX = current.x;
-  let previewAngle = current.angle;
-
-  // Two inexpensive passes account for horizontal drift changing which part of
-  // the irregular pile the horse is projected to meet.
-  for (let pass = 0; pass < 2; pass++) {
-    const landingY = getLandingSurfaceY(previewX) + getHorseVerticalExtent(previewAngle);
-    const fallDistance = Math.max(0, current.y - landingY);
-    const flightTime =
-      (motion.velocityY +
-        Math.sqrt(motion.velocityY * motion.velocityY + 2 * PHYSICS_GRAVITY * fallDistance)) /
-      PHYSICS_GRAVITY;
-    previewX = current.x + motion.velocityX * flightTime;
-    previewAngle = current.angle + motion.angularVelocity * flightTime;
-  }
+  const previewX = current.x;
+  const landingY = getLandingSurfaceY(previewX) + getHorseVerticalExtent(current.angle);
+  const fallDistance = Math.max(0, current.y - landingY);
+  const flightTime =
+    (motion.velocityY +
+      Math.sqrt(motion.velocityY * motion.velocityY + 2 * PHYSICS_GRAVITY * fallDistance)) /
+    PHYSICS_GRAVITY;
+  const previewAngle = current.angle + motion.angularVelocity * flightTime;
 
   landingGhost.enabled = Math.abs(previewX) <= PASTURE_HALF_WIDTH;
   if (!landingGhost.enabled) return;
@@ -708,7 +666,7 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
 }
 
 function getLandingSurfaceY(x: number): number {
-  let surfaceY = Math.abs(x) <= PLATFORM_HALF_WIDTH + HORSE_HALF_WIDTH ? 0 : PASTURE_TOP_Y;
+  let surfaceY = PASTURE_TOP_Y;
   const horizontalReach = HORSE_HALF_WIDTH * 1.85;
 
   for (const horse of stackedHorses) {
@@ -743,15 +701,16 @@ function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angl
 
 function updateCamera(deltaTime: number, height: number): void {
   const rise = clamp(height / 0.72, 0, 1);
-  const desiredTargetY = STACK_BASE_Y + 0.38 + height * 0.58;
+  const herdProgress = clamp(horsesDropped / TOTAL_HORSES, 0, 1);
+  const desiredTargetY = STACK_BASE_Y + 0.34 + height * 0.58;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
-  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.22;
-  cameraController.goalPolar = 0.08 + rise * 0.16;
-  cameraController.goalDistance = Math.min(4.25, 1.72 + height * 1.15);
+  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.2 + herdProgress * 0.05;
+  cameraController.goalPolar = 0.08 + rise * 0.15;
+  cameraController.goalDistance = Math.min(4, 1.15 + height * 1.25 + herdProgress * 0.45);
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
@@ -786,13 +745,6 @@ function getCurrentStackHeight(): number {
   return getSupportedStackHeight(physicsWorld, measurementBodies);
 }
 
-function getAutoSweep(horse: Readonly<ActiveHorse>, now: number): number {
-  return (
-    Math.sin(now * 0.001 * getSweepSpeed(horsesDropped) + horse.seed) *
-    (PLATFORM_HALF_WIDTH * 0.35)
-  );
-}
-
 function getPlacementProgress(horse: Readonly<ActiveHorse>, now: number): number {
   const windowMs = getDropWindow(horsesDropped) * 1000;
   return clamp(1 - (horse.deadline - now) / windowMs, 0, 1);
@@ -819,14 +771,14 @@ function bindGameControls(): void {
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
     if (phase !== 'playing') return;
     if (event.key === 'ArrowLeft') {
-      const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
+      const horizontalLimit = getAimHalfWidth();
       aimOffset = clamp(
         aimOffset - 0.08,
         -horizontalLimit,
         horizontalLimit,
       );
     } else if (event.key === 'ArrowRight') {
-      const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
+      const horizontalLimit = getAimHalfWidth();
       aimOffset = clamp(
         aimOffset + 0.08,
         -horizontalLimit,
@@ -858,13 +810,18 @@ function setAimFromClientX(clientX: number): void {
   const current = activeHorse;
   if (current === null) return;
   const normalized = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1) * 2 - 1;
-  const horizontalLimit = PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2;
+  const horizontalLimit = getAimHalfWidth();
   const targetX = normalized * horizontalLimit;
-  aimOffset = clamp(
-    targetX - getAutoSweep(current, performance.now()),
-    -horizontalLimit,
-    horizontalLimit,
-  );
+  aimOffset = clamp(targetX, -horizontalLimit, horizontalLimit);
+}
+
+function getAimHalfWidth(): number {
+  if (camera.projection.kind !== 'perspective') return 0.36;
+  const visibleHalfWidth =
+    cameraController.distance *
+    Math.tan(camera.projection.fovY / 2) *
+    camera.projection.aspect;
+  return Math.min(PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2, visibleHalfWidth * 0.88);
 }
 
 function resizeCanvas(): void {

@@ -11,9 +11,11 @@ landing pose. Guide the marker horizontally and release before the shrinking
 timer commits the horse automatically. Fast drops earn tempo points but carry
 extra wobble; the middle of the window offers the steadiest placement; and the
 marker turns frantic as a forced drop approaches. Once released, the visible
-horse is handed to Flight's full physics. The close camera rises and changes
-angle with the supported pile, and the result reports its contact-supported
-height in meters alongside the combined score.
+horse falls straight down at the marker's position and is handed to Flight's
+full physics on contact with the green pasture. The close camera gradually
+pulls back, rises, and changes angle with the herd and supported pile, and the
+result reports its contact-supported height in meters alongside the combined
+score.
 
 ## Run locally
 

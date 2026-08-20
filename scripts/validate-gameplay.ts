@@ -12,7 +12,6 @@ import {
   HORSE_HALF_HEIGHT,
   PASTURE_HALF_WIDTH,
   PHYSICS_STEP,
-  PLATFORM_HALF_WIDTH,
   stepHorseStack,
   TOTAL_HORSES,
 } from '../src/horseStackPhysics';
@@ -23,6 +22,8 @@ interface ScenarioResult {
   inPasture: number;
   name: string;
 }
+
+const TARGET_HALF_WIDTH = 0.32;
 
 const scenarios = [
   runScenario('rushed drops', 0x484f5253, 0.12, false),
@@ -50,7 +51,7 @@ function runScenario(
   const world = createHorseStackWorld();
   const horses: RigidBody2D[] = [];
   const random = mulberry32(seed);
-  const horizontalLimit = PLATFORM_HALF_WIDTH * (forced ? 0.6 : 0.85);
+  const horizontalLimit = TARGET_HALF_WIDTH * (forced ? 0.6 : 0.85);
 
   for (let index = 0; index < TOTAL_HORSES; index++) {
     const currentHeight = getSupportedStackHeight(world, horses);
@@ -64,8 +65,6 @@ function runScenario(
     );
     const motion = getHorseDropMotion(
       index,
-      Math.cos(horseSeed),
-      random() - 0.5,
       random() - 0.5,
       forced,
       placementProgress,
@@ -102,14 +101,17 @@ function runScenario(
 }
 
 function validatePlacementTradeoff(): void {
-  const rushed = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.05);
-  const careful = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.52);
-  const deadline = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.96);
-  if (Math.abs(rushed.velocityX) <= Math.abs(careful.velocityX)) {
-    throw new Error('placement tradeoff: a rushed drop should carry more lateral wobble');
+  const rushed = getHorseDropMotion(20, 0.35, false, 0.05);
+  const careful = getHorseDropMotion(20, 0.35, false, 0.52);
+  const deadline = getHorseDropMotion(20, 0.35, false, 0.96);
+  if ([rushed, careful, deadline].some((motion) => motion.velocityX !== 0)) {
+    throw new Error('direct aim: drops must not receive automatic lateral velocity');
   }
-  if (Math.abs(deadline.velocityX) <= Math.abs(careful.velocityX)) {
-    throw new Error('placement tradeoff: the deadline should destabilize the landing marker');
+  if (Math.abs(rushed.angularVelocity) <= Math.abs(careful.angularVelocity)) {
+    throw new Error('placement tradeoff: a rushed drop should carry more rotational wobble');
+  }
+  if (Math.abs(deadline.angularVelocity) <= Math.abs(careful.angularVelocity)) {
+    throw new Error('placement tradeoff: the deadline should destabilize the landing pose');
   }
   if (getTempoPoints(0.05) <= getTempoPoints(0.52)) {
     throw new Error('placement tradeoff: a rushed manual drop should earn more tempo points');

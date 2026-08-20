@@ -82,7 +82,6 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 interface ActiveHorse {
   angle: number;
   deadline: number;
-  node: Node3D;
   spinJitter: number;
   x: number;
   y: number;
@@ -92,7 +91,6 @@ interface StackedHorse {
   body: RigidBody2D;
   lost: boolean;
   node: Node3D;
-  revealedAt: number;
 }
 
 const STACK_BASE_Y = 0.015;
@@ -103,7 +101,6 @@ const STACK_X = 0.9;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
-const HORSE_REVEAL_DURATION_MS = 160;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
@@ -456,15 +453,11 @@ function startGame(): void {
 function spawnHorse(now: number): void {
   if (phase !== 'playing' || horsesDropped >= TOTAL_HORSES) return;
 
-  const node = createHorseVisual();
-  node.enabled = false;
-  addNodeChild(horseLayer, node);
   const dropWindow = getDropWindow(horsesDropped);
   const spawnY = getHorseSpawnY(cachedStackHeight);
   activeHorse = {
     angle: 0,
     deadline: now + dropWindow * 1000,
-    node,
     spinJitter: Math.random() - 0.5,
     x: 0,
     y: spawnY,
@@ -484,8 +477,9 @@ function updateActiveHorse(now: number, allowAutoDrop = true): void {
 
   const horizontalLimit = getAimHalfWidth();
   current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
-  current.angle = 0;
-  current.y = getHorseSpawnY(getLandingSurfaceY(current.x));
+  const landingSurface = getLandingSurface(current.x);
+  current.angle = landingSurface.angle;
+  current.y = getHorseSpawnY(landingSurface.y, getHorseVerticalExtent(current.angle));
   updateLandingGhost(current, now);
 
   if (allowAutoDrop && now >= current.deadline) {
@@ -508,10 +502,10 @@ function dropActiveHorse(now: number, forced: boolean): void {
   body.velocityX = motion.velocityX;
   body.velocityY = motion.velocityY;
   body.angularVelocity = motion.angularVelocity;
-  current.node.enabled = true;
-  current.node.alpha = reducedMotion.matches ? 1 : 0;
-  setHorseVisualTransform(current.node, current.x, current.y, current.angle);
-  stackedHorses.push({ body, lost: false, node: current.node, revealedAt: now });
+  const node = createHorseVisual();
+  setHorseVisualTransform(node, current.x, current.y, current.angle);
+  addNodeChild(horseLayer, node);
+  stackedHorses.push({ body, lost: false, node });
   activeHorse = null;
   if (landingGhost !== null) landingGhost.enabled = false;
   horsesDropped++;
@@ -624,13 +618,10 @@ function handlePhysicsContacts(now: number): void {
   );
 }
 
-function synchronizeHorseVisuals(now: number): void {
+function synchronizeHorseVisuals(): void {
   for (const horse of stackedHorses) {
     if (horse.lost) continue;
     const body = horse.body;
-    if (!reducedMotion.matches && horse.node.alpha < 1) {
-      horse.node.alpha = clamp((now - horse.revealedAt) / HORSE_REVEAL_DURATION_MS, 0, 1);
-    }
     setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
 
     // Leave enough void beyond the collider for the whole tumble to remain visible.
@@ -653,7 +644,8 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
     placementProgress,
   );
   const previewX = current.x;
-  const landingY = getLandingSurfaceY(previewX) + getHorseVerticalExtent(current.angle);
+  const landingSurface = getLandingSurface(previewX);
+  const landingY = landingSurface.y + getHorseVerticalExtent(current.angle);
   const fallDistance = Math.max(0, current.y - landingY);
   const flightTime =
     (motion.velocityY +
@@ -665,12 +657,13 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   if (!landingGhost.enabled) return;
   const deadlinePulse = placementProgress > 0.72 ? Math.sin(now * 0.035) * 0.08 : 0;
   landingGhost.alpha = clamp(0.3 + placementProgress * 0.25 + deadlinePulse, 0.24, 0.64);
-  const previewY = getLandingSurfaceY(previewX) + getHorseVerticalExtent(previewAngle) + 0.003;
+  const previewY = landingSurface.y + getHorseVerticalExtent(previewAngle) + 0.003;
   setHorseVisualTransform(landingGhost, previewX, previewY, previewAngle);
 }
 
-function getLandingSurfaceY(x: number): number {
+function getLandingSurface(x: number): { angle: number; y: number } {
   let surfaceY = PASTURE_TOP_Y;
+  let surfaceAngle = 0;
   const horizontalReach = HORSE_HALF_WIDTH * 1.85;
 
   for (const horse of stackedHorses) {
@@ -683,9 +676,19 @@ function getLandingSurfaceY(x: number): number {
     ) {
       continue;
     }
-    surfaceY = Math.max(surfaceY, body.y + getHorseVerticalExtent(body.angle));
+    const horseTop = body.y + getHorseVerticalExtent(body.angle);
+    if (horseTop > surfaceY) {
+      surfaceY = horseTop;
+      surfaceAngle = getReadableSurfaceAngle(body.angle);
+    }
   }
-  return surfaceY;
+  return { angle: surfaceAngle, y: surfaceY };
+}
+
+function getReadableSurfaceAngle(angle: number): number {
+  const halfTurn = Math.PI / 2;
+  const normalized = ((((angle + halfTurn) % Math.PI) + Math.PI) % Math.PI) - halfTurn;
+  return clamp(normalized, -0.55, 0.55);
 }
 
 function getHorseVerticalExtent(angle: number): number {
@@ -879,7 +882,7 @@ function enterFrame(now: number): void {
     if (gameIsMoving) {
       updateGame(now);
       stepGamePhysics(now, deltaTime);
-      synchronizeHorseVisuals(now);
+      synchronizeHorseVisuals();
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
       renderRequested = true;
     }

@@ -10,9 +10,9 @@ horse stays hidden and a translucent yellow horse previews its approximate
 landing pose. Guide the marker horizontally and release before the shrinking
 timer commits the horse automatically. Fast drops earn tempo points but carry
 extra wobble; the middle of the window offers the steadiest placement; and the
-marker turns frantic as a forced drop approaches. Once released, the visible
-horse fades in roughly half a horse-height above the marker, settles straight
-down, and is handed to Flight's full physics on contact with the green pasture.
+marker turns frantic as a forced drop approaches. Once released, the real horse
+appears roughly half a horse-height above the marker, settles straight down,
+and is handed to Flight's full physics on contact with the green pasture.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. The result
 reports the contact-supported height in meters alongside the combined score.

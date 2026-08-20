@@ -87,9 +87,12 @@ export function stepHorseStack(world: Physics2DWorld): void {
   stepPhysics2D(world, PHYSICS_STEP);
 }
 
-export function getHorseSpawnY(landingSurfaceY: number): number {
+export function getHorseSpawnY(
+  landingSurfaceY: number,
+  verticalExtent = HORSE_HALF_HEIGHT,
+): number {
   // The body's center begins 0.625 horse-heights above its resting center.
-  return landingSurfaceY + HORSE_HALF_HEIGHT * 2.25;
+  return landingSurfaceY + verticalExtent + HORSE_HALF_HEIGHT * 1.25;
 }
 
 export function getDropWindow(horsesDropped: number): number {

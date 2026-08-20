@@ -7,7 +7,6 @@ import {
   stepPhysics2D,
 } from '@flighthq/sdk';
 
-export const TOTAL_HORSES = 80;
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
 // The farm ground spans roughly 3.5 world units across the new straight-on view.
@@ -95,10 +94,6 @@ export function getHorseSpawnY(
   return landingSurfaceY + verticalExtent + HORSE_HALF_HEIGHT * 1.25;
 }
 
-export function getDropWindow(horsesDropped: number): number {
-  return Math.max(0.8, 2.9 - horsesDropped * 0.07);
-}
-
 export function getNextHorseDelay(horsesDropped: number): number {
   return Math.max(80, 210 - horsesDropped * 3.25);
 }
@@ -108,30 +103,13 @@ export function getPaceLevel(horsesDropped: number): number {
 }
 
 export function getHorseDropMotion(
-  horsesDropped: number,
-  spinJitter: number,
-  forced: boolean,
-  placementProgress = 1,
+  releaseAngularVelocity: number,
 ): Pick<RigidBody2D, 'angularVelocity' | 'velocityX' | 'velocityY'> {
-  const pace = getPaceLevel(horsesDropped);
-  const chaos = 0.95 + pace * 0.24;
-  const progress = Math.max(0, Math.min(1, placementProgress));
-  const rush = Math.max(0, (0.35 - progress) / 0.35);
-  const deadlinePanic = Math.max(0, (progress - 0.72) / 0.28);
-  const spinDirection = spinJitter < 0 ? -1 : 1;
-  const motion = {
-    angularVelocity: forced
-      ? spinJitter * chaos + spinDirection
-      : spinJitter * chaos * (0.5 + rush * 1.5) + spinDirection * deadlinePanic * 0.85,
+  return {
+    angularVelocity: Math.max(-5.5, Math.min(5.5, releaseAngularVelocity)),
     velocityX: 0,
-    velocityY: forced ? -0.1 : -0.02 - deadlinePanic * 0.04,
+    velocityY: -0.02,
   };
-  return motion;
-}
-
-export function getTempoPoints(placementProgress: number): number {
-  const rush = 1 - Math.max(0, Math.min(1, placementProgress));
-  return Math.round(rush * 12);
 }
 
 export function getSupportedStackHeight(

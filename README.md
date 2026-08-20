@@ -5,14 +5,14 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you a generous herd of 80 cow-scale horses. Before every drop, the real
-horse stays hidden and a translucent yellow horse previews its approximate
-landing pose. Guide the marker horizontally and release before the shrinking
-timer commits the horse automatically. Fast drops earn tempo points but carry
-extra wobble; the middle of the window offers the steadiest placement; and the
-marker turns frantic as a forced drop approaches. Once released, the real horse
-appears roughly half a horse-height above the marker, settles straight down,
-and is handed to Flight's full physics on contact with the green pasture.
+Each run gives you 30 seconds and an unlimited supply of cow-scale horses.
+Before every drop, the real horse stays hidden and a radiant yellow horse
+previews its approximate landing pose. The marker behaves like a damped
+pendulum: a still pointer lets it balance level, while quick horizontal movement
+imparts visible angular momentum that carries into the released horse. Once
+released, the real horse appears roughly half a horse-height above the marker,
+settles straight down, and is handed to Flight's full physics on contact with
+the green pasture.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. The result
 reports the contact-supported height in meters alongside the combined score.
@@ -36,10 +36,10 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs all 80 horses at rushed, careful, and timer-lock
-cadences using the shipped velocity formulas, then checks for finite
-body state, contacts, a measurable supported pile, and a real fall beyond the
-farm-edge collider.
+The gameplay validation runs 64-horse balanced, quick, and frantic cursor
+scenarios using the shipped momentum formulas, then checks for finite body
+state, contacts, a measurable supported pile, direct momentum transfer, a
+gentle release, and a real fall beyond the farm-edge collider.
 
 ## Model credits
 

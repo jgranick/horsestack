@@ -3,18 +3,15 @@ import {
   addHorseBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
-  getDropWindow,
   getHorseDropMotion,
   getHorseSpawnY,
   getNextHorseDelay,
   getSupportedStackHeight,
-  getTempoPoints,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
   PASTURE_HALF_WIDTH,
   PHYSICS_STEP,
   stepHorseStack,
-  TOTAL_HORSES,
 } from '../src/horseStackPhysics';
 
 interface ScenarioResult {
@@ -25,13 +22,14 @@ interface ScenarioResult {
 }
 
 const TARGET_HALF_WIDTH = 0.32;
+const VALIDATION_HORSES = 64;
 
 const scenarios = [
-  runScenario('rushed drops', 0x484f5253, 0.12, false),
-  runScenario('careful drops', 0x53544541, 0.54, false),
-  runScenario('timer lock drops', 0x54494d45, 1, true),
+  runScenario('balanced cursor', 0x42414c41, 0.35, 0.34),
+  runScenario('quick cursor', 0x51554943, 2.2, 0.2),
+  runScenario('frantic cursor', 0x4652414e, 5.2, 0.1),
 ];
-validatePlacementTradeoff();
+validateMomentumTransfer();
 validateGentleDrop();
 validateFarmEdgeFalloff();
 
@@ -39,7 +37,7 @@ console.log(
   `gameplay: ${scenarios
     .map(
       ({ contacts, height, inPasture, name }) =>
-        `${name} ${inPasture}/${TOTAL_HORSES} in farm, ${contacts} contacts, ${height.toFixed(2)}m`,
+        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${height.toFixed(2)}m`,
     )
     .join('; ')}; farm-edge falloff verified`,
 );
@@ -47,15 +45,15 @@ console.log(
 function runScenario(
   name: string,
   seed: number,
-  placementProgress: number,
-  forced: boolean,
+  angularMomentum: number,
+  inputCadence: number,
 ): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody2D[] = [];
   const random = mulberry32(seed);
-  const horizontalLimit = TARGET_HALF_WIDTH * (forced ? 0.6 : 0.85);
+  const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
 
-  for (let index = 0; index < TOTAL_HORSES; index++) {
+  for (let index = 0; index < VALIDATION_HORSES; index++) {
     const currentHeight = getSupportedStackHeight(world, horses);
     const spawnY = getHorseSpawnY(currentHeight);
     const horseSeed = random() * Math.PI * 2;
@@ -63,23 +61,17 @@ function runScenario(
       world,
       Math.sin(horseSeed) * horizontalLimit,
       spawnY,
-      (random() - 0.5) * 0.28,
+      (random() - 0.5) * Math.min(0.65, angularMomentum * 0.12),
     );
-    const motion = getHorseDropMotion(
-      index,
-      random() - 0.5,
-      forced,
-      placementProgress,
-    );
+    const motion = getHorseDropMotion((random() < 0.5 ? -1 : 1) * angularMomentum);
     horse.velocityX = motion.velocityX;
     horse.velocityY = motion.velocityY;
     horse.angularVelocity = motion.angularVelocity;
     horses.push(horse);
 
-    if (index === TOTAL_HORSES - 1) continue;
+    if (index === VALIDATION_HORSES - 1) continue;
     const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    const cadenceSeconds = delaySeconds + getDropWindow(index + 1) * placementProgress;
-    stepForDuration(world, horses, cadenceSeconds);
+    stepForDuration(world, horses, delaySeconds + inputCadence);
   }
 
   stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
@@ -88,10 +80,10 @@ function runScenario(
   const inPasture = horses.filter(
     (horse) => Math.abs(horse.x) <= PASTURE_HALF_WIDTH && horse.y > -1,
   ).length;
-  if (inPasture < TOTAL_HORSES / 2) {
+  if (inPasture < VALIDATION_HORSES / 2) {
     throw new Error(`${name}: expected at least half the herd in the farm, received ${inPasture}`);
   }
-  const minimumHeight = forced ? 0.05 : 0.12;
+  const minimumHeight = 0.12;
   if (height < minimumHeight) {
     throw new Error(
       `${name}: expected a pile over ${minimumHeight}m, received ${height.toFixed(2)}m`,
@@ -102,21 +94,18 @@ function runScenario(
   return { contacts: world.contacts.length, height, inPasture, name };
 }
 
-function validatePlacementTradeoff(): void {
-  const rushed = getHorseDropMotion(20, 0.35, false, 0.05);
-  const careful = getHorseDropMotion(20, 0.35, false, 0.52);
-  const deadline = getHorseDropMotion(20, 0.35, false, 0.96);
-  if ([rushed, careful, deadline].some((motion) => motion.velocityX !== 0)) {
+function validateMomentumTransfer(): void {
+  const still = getHorseDropMotion(0);
+  const fastLeft = getHorseDropMotion(-4.2);
+  const fastRight = getHorseDropMotion(4.2);
+  if ([still, fastLeft, fastRight].some((motion) => motion.velocityX !== 0)) {
     throw new Error('direct aim: drops must not receive automatic lateral velocity');
   }
-  if (Math.abs(rushed.angularVelocity) <= Math.abs(careful.angularVelocity)) {
-    throw new Error('placement tradeoff: a rushed drop should carry more rotational wobble');
+  if (still.angularVelocity !== 0) {
+    throw new Error('indicator momentum: a still cursor should release a level horse');
   }
-  if (Math.abs(deadline.angularVelocity) <= Math.abs(careful.angularVelocity)) {
-    throw new Error('placement tradeoff: the deadline should destabilize the landing pose');
-  }
-  if (getTempoPoints(0.05) <= getTempoPoints(0.52)) {
-    throw new Error('placement tradeoff: a rushed manual drop should earn more tempo points');
+  if (fastLeft.angularVelocity >= 0 || fastRight.angularVelocity <= 0) {
+    throw new Error('indicator momentum: pointer direction should transfer to horse spin');
   }
 }
 
@@ -128,9 +117,9 @@ function validateGentleDrop(): void {
   if (releaseGap < horseHeight * 0.5 || releaseGap > horseHeight) {
     throw new Error(`gentle drop: expected a 0.5–1 horse-height gap, received ${releaseGap}`);
   }
-  const forced = getHorseDropMotion(79, 0.5, true, 1);
-  if (Math.abs(forced.velocityY) > 0.15) {
-    throw new Error(`gentle drop: forced release is too fast at ${forced.velocityY}m/s`);
+  const teetering = getHorseDropMotion(5.5);
+  if (Math.abs(teetering.velocityY) > 0.15) {
+    throw new Error(`gentle drop: release is too fast at ${teetering.velocityY}m/s`);
   }
 }
 

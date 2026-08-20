@@ -6,6 +6,7 @@ import type {
   ParticleEmitterConfig,
   ParticleEmitterState,
   Physics2DWorld,
+  PointLight,
   RigidBody2D,
   Scene3D,
   Scene3DLightsLike,
@@ -19,10 +20,12 @@ import {
   createAabb,
   createAmbientLight,
   createCamera3D,
+  createCylinderMeshGeometry,
   createDirectionalLight,
   createGlCanvasElement,
   createGlRenderEffectPipeline,
   createGlRenderState,
+  createMesh,
   createNode3D,
   createOrbitCameraController,
   createOrthographicProjection,
@@ -30,6 +33,8 @@ import {
   createParticleEmitterConfig,
   createParticleEmitterState,
   createPerspectiveProjection,
+  createPointLight,
+  createRingMeshGeometry,
   createStandardPbrMaterial,
   createVector3,
   emitParticleBurst3D,
@@ -59,13 +64,11 @@ import {
   addHorseBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
-  getDropWindow,
   getHorseDropMotion,
   getHorseSpawnY,
   getNextHorseDelay,
   getPaceLevel,
   getSupportedStackHeight,
-  getTempoPoints,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
   PASTURE_HALF_WIDTH,
@@ -73,7 +76,6 @@ import {
   PHYSICS_GRAVITY,
   PHYSICS_STEP,
   stepHorseStack,
-  TOTAL_HORSES,
 } from './horseStackPhysics';
 import './styles.css';
 
@@ -81,8 +83,6 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 
 interface ActiveHorse {
   angle: number;
-  deadline: number;
-  spinJitter: number;
   x: number;
   y: number;
 }
@@ -101,6 +101,11 @@ const STACK_X = 0.9;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
+const GAME_DURATION_MS = 30_000;
+const INDICATOR_SPRING = 22;
+const INDICATOR_DAMPING = 6.2;
+const INDICATOR_MAX_ANGLE = 0.65;
+const INDICATOR_MAX_SPIN = 5.5;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
@@ -150,9 +155,27 @@ const landingGhostMaterial = createStandardPbrMaterial({
   baseColor: 0xffd447ff,
   doubleSided: true,
   emissive: 0x5b3b00ff,
-  emissiveStrength: 0.45,
+  emissiveStrength: 0.9,
   metallic: 0,
   roughness: 0.48,
+});
+const landingBeamMaterial = createStandardPbrMaterial({
+  alphaMode: 'blend',
+  baseColor: 0xffd968ff,
+  doubleSided: true,
+  emissive: 0xffc83dff,
+  emissiveStrength: 2.4,
+  metallic: 0,
+  roughness: 0.7,
+});
+const landingHaloMaterial = createStandardPbrMaterial({
+  alphaMode: 'blend',
+  baseColor: 0xffef9cff,
+  doubleSided: true,
+  emissive: 0xffcf4aff,
+  emissiveStrength: 3.2,
+  metallic: 0,
+  roughness: 0.55,
 });
 
 const dustEmitter: ParticleEmitter3D = createParticleEmitter3D({
@@ -250,10 +273,16 @@ const directionalLight = createDirectionalLight({
   pcfRadius: 1,
   shadowBias: 0.001,
 });
+const indicatorLight: PointLight = createPointLight({
+  color: 0xffd56aff,
+  intensity: 0,
+  position: createVector3(STACK_X + 0.16, 0.2, STACK_Z),
+  range: 1.1,
+});
 const lights: Scene3DLightsLike = {
   ambient: createAmbientLight({ color: 0xbdd0b5ff, intensity: 0.72 }),
   directional: directionalLight,
-  point: [],
+  point: [indicatorLight],
 };
 const shadowCamera = createCamera3D({
   far: 55,
@@ -269,13 +298,18 @@ configureDirectionalShadowCamera3D(
 let phase: GamePhase = 'loading';
 let horseTemplate: Scene3D | null = null;
 let landingGhost: Node3D | null = null;
+let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
 let activeHorse: ActiveHorse | null = null;
 let stackedHorses: StackedHorse[] = [];
 let horsesDropped = 0;
-let tempoScore = 0;
 let aimOffset = 0;
+let indicatorAngle = 0;
+let indicatorAngularVelocity = 0;
+let indicatorUpdatedAt = performance.now();
+let lastAimAt = performance.now();
 let nextHorseAt = 0;
+let gameEndsAt = 0;
 let finishAt = 0;
 let finalHeight = 0;
 let cachedStackHeight = 0;
@@ -284,7 +318,6 @@ let previousTime = performance.now();
 let isViewerVisible = true;
 let renderRequested = true;
 let impactFlashUntil = 0;
-let panicFlashUntil = 0;
 let lastImpactAt = 0;
 let hudDirty = true;
 const measurementBodies: RigidBody2D[] = [];
@@ -354,6 +387,26 @@ function createHorseVisual(
   return pivot;
 }
 
+function createLandingRadiance(): Node3D {
+  const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
+  const beam = createMesh(
+    createCylinderMeshGeometry(0.22, 0.025, 0.75, 18, false),
+    [landingBeamMaterial],
+  );
+  beam.alpha = 0.11;
+  beam.position.y = 0.375;
+  invalidateNodeLocalTransform(beam);
+  addNodeChild(root, beam);
+
+  const halo = createMesh(createRingMeshGeometry(0.1, 0.155, 28), [landingHaloMaterial]);
+  halo.alpha = 0.5;
+  halo.position.x = 0.012;
+  setQuaternionFromEuler(halo.rotation, 0, 0, Math.PI / 2);
+  invalidateNodeLocalTransform(halo);
+  addNodeChild(root, halo);
+  return root;
+}
+
 function cloneNode3DHierarchy(
   source: Readonly<Node3D>,
   materialOverride: ReturnType<typeof createStandardPbrMaterial> | null = null,
@@ -412,24 +465,31 @@ async function loadGltfScene(basePath: string): Promise<Scene3D> {
 function startGame(): void {
   if (horseTemplate === null || phase === 'loading') return;
 
+  const now = performance.now();
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
   activeHorse = null;
   stackedHorses = [];
   horsesDropped = 0;
-  tempoScore = 0;
   aimOffset = 0;
+  indicatorAngle = 0;
+  indicatorAngularVelocity = 0;
+  indicatorUpdatedAt = now;
+  lastAimAt = now;
   nextHorseAt = 0;
+  gameEndsAt = now + GAME_DURATION_MS;
   finishAt = 0;
   finalHeight = 0;
   cachedStackHeight = 0;
   impactFlashUntil = 0;
-  panicFlashUntil = 0;
   lastImpactAt = 0;
   removeNodeChildren(horseLayer);
   landingGhost = createHorseVisual(landingGhostMaterial, 0.36);
   landingGhost.name = 'landing-preview';
   addNodeChild(horseLayer, landingGhost);
+  landingRadiance = createLandingRadiance();
+  addNodeChild(horseLayer, landingRadiance);
+  indicatorLight.intensity = 0;
   clearParticleEmitter3D(dustEmitter);
   clearParticleEmitter3D(celebrationEmitter);
   dustState = createParticleEmitterState();
@@ -443,62 +503,53 @@ function startGame(): void {
   viewer.classList.add('is-playing');
   viewer.classList.remove('is-finished', 'is-bumping', 'is-panicking');
   sceneStatus.classList.add('is-ready');
-  statusCopy.textContent = 'Horse 01 queued';
-  gameCallout.textContent = 'Aim the yellow landing marker…';
+  statusCopy.textContent = '30 seconds. Go!';
+  gameCallout.textContent = 'Move fast to make it teeter…';
   hudDirty = true;
-  spawnHorse(performance.now());
+  spawnHorse(now);
   renderRequested = true;
 }
 
 function spawnHorse(now: number): void {
-  if (phase !== 'playing' || horsesDropped >= TOTAL_HORSES) return;
+  if (phase !== 'playing' || now >= gameEndsAt) return;
 
-  const dropWindow = getDropWindow(horsesDropped);
   const spawnY = getHorseSpawnY(cachedStackHeight);
+  indicatorAngle = 0;
+  indicatorAngularVelocity = 0;
+  indicatorUpdatedAt = now;
+  lastAimAt = now;
   activeHorse = {
     angle: 0,
-    deadline: now + dropWindow * 1000,
-    spinJitter: Math.random() - 0.5,
     x: 0,
     y: spawnY,
   };
   if (landingGhost !== null) landingGhost.enabled = true;
+  if (landingRadiance !== null) landingRadiance.enabled = true;
   statusCopy.textContent = `Horse ${String(horsesDropped + 1).padStart(2, '0')} queued`;
   gameCallout.textContent =
-    getPaceLevel(horsesDropped) >= 4
-      ? 'The marker is getting twitchy.'
-      : 'Click when the yellow marker looks good.';
+    getPaceLevel(horsesDropped) >= 4 ? 'Keep the glowing horse upright.' : 'Move, balance, drop.';
   updateActiveHorse(now);
 }
 
-function updateActiveHorse(now: number, allowAutoDrop = true): void {
+function updateActiveHorse(now: number): void {
   const current = activeHorse;
   if (current === null) return;
 
+  updateIndicatorTeeter(now);
   const horizontalLimit = getAimHalfWidth();
   current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
-  const landingSurface = getLandingSurface(current.x);
-  current.angle = landingSurface.angle;
-  current.y = getHorseSpawnY(landingSurface.y, getHorseVerticalExtent(current.angle));
+  const landingSurfaceY = getLandingSurfaceY(current.x);
+  current.angle = indicatorAngle;
+  current.y = getHorseSpawnY(landingSurfaceY, getHorseVerticalExtent(current.angle));
   updateLandingGhost(current, now);
-
-  if (allowAutoDrop && now >= current.deadline) {
-    dropActiveHorse(now, true);
-  }
 }
 
-function dropActiveHorse(now: number, forced: boolean): void {
+function dropActiveHorse(now: number): void {
   const current = activeHorse;
   if (current === null || phase !== 'playing') return;
 
-  const placementProgress = getPlacementProgress(current, now);
   const body = addHorseBody(physicsWorld, current.x, current.y, current.angle);
-  const motion = getHorseDropMotion(
-    horsesDropped,
-    current.spinJitter,
-    forced,
-    placementProgress,
-  );
+  const motion = getHorseDropMotion(indicatorAngularVelocity);
   body.velocityX = motion.velocityX;
   body.velocityY = motion.velocityY;
   body.angularVelocity = motion.angularVelocity;
@@ -508,37 +559,23 @@ function dropActiveHorse(now: number, forced: boolean): void {
   stackedHorses.push({ body, lost: false, node });
   activeHorse = null;
   if (landingGhost !== null) landingGhost.enabled = false;
+  if (landingRadiance !== null) landingRadiance.enabled = false;
+  indicatorLight.intensity = 0;
   horsesDropped++;
 
-  if (forced) {
-    panicFlashUntil = now + 440;
-    gameCallout.textContent = 'PANIC DROP!';
-  } else {
-    const tempoPoints = getTempoPoints(placementProgress);
-    tempoScore += tempoPoints;
-    gameCallout.textContent =
-      tempoPoints >= 9
-        ? `FAST +${tempoPoints}`
-        : placementProgress >= 0.72
-          ? 'Cutting it close!'
-          : `Steady +${tempoPoints}`;
-  }
-
-  if (horsesDropped >= TOTAL_HORSES) {
-    phase = 'settling';
-    finishAt = now + FINAL_SETTLE_SECONDS * 1000;
-    dropButton.disabled = true;
-    statusCopy.textContent = 'Everybody hold still';
-    gameCallout.textContent = 'The judges are measuring…';
-  } else {
-    nextHorseAt = now + getNextHorseDelay(horsesDropped);
-  }
+  const spin = Math.abs(indicatorAngularVelocity);
+  gameCallout.textContent = spin > 3.2 ? 'WOBBLE DROP!' : spin > 1.3 ? 'Teetering!' : 'Level landing.';
+  nextHorseAt = now + getNextHorseDelay(horsesDropped);
   hudDirty = true;
   renderRequested = true;
 }
 
 function updateGame(now: number): void {
   if (phase === 'playing') {
+    if (now >= gameEndsAt) {
+      beginSettling(now);
+      return;
+    }
     if (activeHorse !== null) {
       updateActiveHorse(now);
     } else if (now >= nextHorseAt) {
@@ -547,6 +584,20 @@ function updateGame(now: number): void {
   } else if (phase === 'settling' && now >= finishAt) {
     finishGame();
   }
+}
+
+function beginSettling(now: number): void {
+  phase = 'settling';
+  activeHorse = null;
+  finishAt = now + FINAL_SETTLE_SECONDS * 1000;
+  dropButton.disabled = true;
+  if (landingGhost !== null) landingGhost.enabled = false;
+  if (landingRadiance !== null) landingRadiance.enabled = false;
+  indicatorLight.intensity = 0;
+  statusCopy.textContent = 'Time! Everybody hold still';
+  gameCallout.textContent = 'The judges are measuring…';
+  hudDirty = true;
+  renderRequested = true;
 }
 
 function finishGame(): void {
@@ -562,6 +613,7 @@ function finishGame(): void {
   resultPanel.hidden = false;
   viewer.classList.remove('is-playing', 'is-panicking', 'is-bumping');
   viewer.classList.add('is-finished');
+  indicatorLight.intensity = 0;
   statusCopy.textContent = 'Officially measured';
   gameCallout.textContent =
     finalHeight >= 0.45
@@ -636,16 +688,10 @@ function synchronizeHorseVisuals(): void {
 function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   if (landingGhost === null) return;
 
-  const placementProgress = getPlacementProgress(current, now);
-  const motion = getHorseDropMotion(
-    horsesDropped,
-    current.spinJitter,
-    false,
-    placementProgress,
-  );
+  const motion = getHorseDropMotion(indicatorAngularVelocity);
   const previewX = current.x;
-  const landingSurface = getLandingSurface(previewX);
-  const landingY = landingSurface.y + getHorseVerticalExtent(current.angle);
+  const landingSurfaceY = getLandingSurfaceY(previewX);
+  const landingY = landingSurfaceY + getHorseVerticalExtent(current.angle);
   const fallDistance = Math.max(0, current.y - landingY);
   const flightTime =
     (motion.velocityY +
@@ -654,16 +700,39 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   const previewAngle = current.angle + motion.angularVelocity * flightTime;
 
   landingGhost.enabled = Math.abs(previewX) <= PASTURE_HALF_WIDTH;
-  if (!landingGhost.enabled) return;
-  const deadlinePulse = placementProgress > 0.72 ? Math.sin(now * 0.035) * 0.08 : 0;
-  landingGhost.alpha = clamp(0.3 + placementProgress * 0.25 + deadlinePulse, 0.24, 0.64);
-  const previewY = landingSurface.y + getHorseVerticalExtent(previewAngle) + 0.003;
+  if (!landingGhost.enabled) {
+    if (landingRadiance !== null) landingRadiance.enabled = false;
+    indicatorLight.intensity = 0;
+    return;
+  }
+  landingGhost.alpha = 0.42 + Math.sin(now * 0.009) * 0.05;
+  const previewY = landingSurfaceY + getHorseVerticalExtent(previewAngle) + 0.003;
   setHorseVisualTransform(landingGhost, previewX, previewY, previewAngle);
+  updateLandingRadiance(previewX, previewY, now);
 }
 
-function getLandingSurface(x: number): { angle: number; y: number } {
+function updateLandingRadiance(x: number, physicsY: number, now: number): void {
+  const radiance = landingRadiance;
+  if (radiance === null) return;
+  const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.055;
+  radiance.enabled = true;
+  radiance.alpha = 0.82 + Math.sin(now * 0.008) * 0.12;
+  radiance.position.x = STACK_X + 0.006;
+  radiance.position.y = STACK_BASE_Y + physicsY;
+  radiance.position.z = STACK_Z - x;
+  radiance.scale.x = pulse;
+  radiance.scale.y = pulse;
+  radiance.scale.z = pulse;
+  invalidateNodeLocalTransform(radiance);
+
+  indicatorLight.position.x = STACK_X + 0.16;
+  indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.12;
+  indicatorLight.position.z = STACK_Z - x;
+  indicatorLight.intensity = 3.2 + Math.sin(now * 0.008) * 0.45;
+}
+
+function getLandingSurfaceY(x: number): number {
   let surfaceY = PASTURE_TOP_Y;
-  let surfaceAngle = 0;
   const horizontalReach = HORSE_HALF_WIDTH * 1.85;
 
   for (const horse of stackedHorses) {
@@ -677,18 +746,9 @@ function getLandingSurface(x: number): { angle: number; y: number } {
       continue;
     }
     const horseTop = body.y + getHorseVerticalExtent(body.angle);
-    if (horseTop > surfaceY) {
-      surfaceY = horseTop;
-      surfaceAngle = getReadableSurfaceAngle(body.angle);
-    }
+    surfaceY = Math.max(surfaceY, horseTop);
   }
-  return { angle: surfaceAngle, y: surfaceY };
-}
-
-function getReadableSurfaceAngle(angle: number): number {
-  const halfTurn = Math.PI / 2;
-  const normalized = ((((angle + halfTurn) % Math.PI) + Math.PI) % Math.PI) - halfTurn;
-  return clamp(normalized, -0.55, 0.55);
+  return surfaceY;
 }
 
 function getHorseVerticalExtent(angle: number): number {
@@ -708,7 +768,7 @@ function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angl
 
 function updateCamera(deltaTime: number, height: number): void {
   const rise = clamp(height / 1.1, 0, 1);
-  const herdProgress = clamp(horsesDropped / TOTAL_HORSES, 0, 1);
+  const herdProgress = clamp(horsesDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
   const desiredTargetY =
     STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
@@ -728,21 +788,19 @@ function updateHud(now: number, stackHeight = cachedStackHeight): void {
   setTextIfChanged(heightCopy, formatHeight(stackHeight));
   setTextIfChanged(paceCopy, `${getScore(stackHeight).toLocaleString()} pts`);
 
-  if (activeHorse === null || phase !== 'playing') {
+  if (phase !== 'playing') {
     setTextIfChanged(timerCopy, phase === 'settling' ? 'measuring' : '—');
     setStyleTransformIfChanged(timerFill, 'scaleX(0)');
     timerFill.classList.remove('is-urgent');
   } else {
-    const windowSeconds = getDropWindow(horsesDropped);
-    const remaining = Math.max(0, (activeHorse.deadline - now) / 1000);
-    const placementProgress = getPlacementProgress(activeHorse, now);
+    const remainingMs = Math.max(0, gameEndsAt - now);
+    const remaining = remainingMs / 1000;
     setTextIfChanged(timerCopy, `${remaining.toFixed(1)}s`);
-    setStyleTransformIfChanged(timerFill, `scaleX(${clamp(remaining / windowSeconds, 0, 1)})`);
-    timerFill.classList.toggle('is-urgent', placementProgress >= 0.72);
+    setStyleTransformIfChanged(timerFill, `scaleX(${clamp(remainingMs / GAME_DURATION_MS, 0, 1)})`);
+    timerFill.classList.toggle('is-urgent', remaining <= 5);
   }
 
   viewer.classList.toggle('is-bumping', now < impactFlashUntil && !reducedMotion.matches);
-  viewer.classList.toggle('is-panicking', now < panicFlashUntil && !reducedMotion.matches);
   hudDirty = false;
 }
 
@@ -754,47 +812,53 @@ function getCurrentStackHeight(): number {
   return getSupportedStackHeight(physicsWorld, measurementBodies);
 }
 
-function getPlacementProgress(horse: Readonly<ActiveHorse>, now: number): number {
-  const windowMs = getDropWindow(horsesDropped) * 1000;
-  return clamp(1 - (horse.deadline - now) / windowMs, 0, 1);
+function updateIndicatorTeeter(now: number): void {
+  const deltaTime = clamp((now - indicatorUpdatedAt) / 1000, 0, 0.05);
+  indicatorUpdatedAt = now;
+  if (deltaTime === 0) return;
+  const acceleration =
+    -indicatorAngle * INDICATOR_SPRING - indicatorAngularVelocity * INDICATOR_DAMPING;
+  indicatorAngularVelocity = clamp(
+    indicatorAngularVelocity + acceleration * deltaTime,
+    -INDICATOR_MAX_SPIN,
+    INDICATOR_MAX_SPIN,
+  );
+  indicatorAngle = clamp(
+    indicatorAngle + indicatorAngularVelocity * deltaTime,
+    -INDICATOR_MAX_ANGLE,
+    INDICATOR_MAX_ANGLE,
+  );
 }
 
 function getScore(height: number): number {
-  return Math.round(height * 2500) + tempoScore;
+  return Math.round(height * 2500);
 }
 
 function bindGameControls(): void {
   canvas.addEventListener('pointermove', (event: PointerEvent) => {
     if (phase !== 'playing' || activeHorse === null) return;
-    setAimFromClientX(event.clientX);
+    setAimFromClientX(event.clientX, performance.now());
   });
 
   canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0 || phase !== 'playing') return;
     canvas.focus({ preventScroll: true });
     const now = performance.now();
-    setAimFromClientX(event.clientX);
+    setAimFromClientX(event.clientX, now);
     hardDropActiveHorse(now);
   });
 
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
     if (phase !== 'playing') return;
+    const now = performance.now();
     if (event.key === 'ArrowLeft') {
       const horizontalLimit = getAimHalfWidth();
-      aimOffset = clamp(
-        aimOffset - 0.08,
-        -horizontalLimit,
-        horizontalLimit,
-      );
+      setAimOffset(aimOffset - 0.08, horizontalLimit, now);
     } else if (event.key === 'ArrowRight') {
       const horizontalLimit = getAimHalfWidth();
-      aimOffset = clamp(
-        aimOffset + 0.08,
-        -horizontalLimit,
-        horizontalLimit,
-      );
+      setAimOffset(aimOffset + 0.08, horizontalLimit, now);
     } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
-      hardDropActiveHorse(performance.now());
+      hardDropActiveHorse(now);
     } else {
       return;
     }
@@ -809,19 +873,35 @@ function bindGameControls(): void {
 
 function hardDropActiveHorse(now: number): void {
   if (activeHorse === null) return;
+  if (now >= gameEndsAt) {
+    beginSettling(now);
+    return;
+  }
   // Touch devices do not necessarily send a pointermove before pointerdown, so refresh
   // the hidden horse's projected landing pose at the exact moment it is released.
-  updateActiveHorse(now, false);
-  dropActiveHorse(now, false);
+  updateActiveHorse(now);
+  dropActiveHorse(now);
 }
 
-function setAimFromClientX(clientX: number): void {
+function setAimFromClientX(clientX: number, now: number): void {
   const current = activeHorse;
   if (current === null) return;
   const normalized = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1) * 2 - 1;
   const horizontalLimit = getAimHalfWidth();
-  const targetX = normalized * horizontalLimit;
-  aimOffset = clamp(targetX, -horizontalLimit, horizontalLimit);
+  setAimOffset(normalized * horizontalLimit, horizontalLimit, now);
+}
+
+function setAimOffset(targetX: number, horizontalLimit: number, now: number): void {
+  const nextAim = clamp(targetX, -horizontalLimit, horizontalLimit);
+  const elapsed = clamp((now - lastAimAt) / 1000, 0.008, 0.08);
+  const pointerVelocity = (nextAim - aimOffset) / elapsed;
+  indicatorAngularVelocity = clamp(
+    indicatorAngularVelocity - clamp(pointerVelocity * 0.32, -4.2, 4.2),
+    -INDICATOR_MAX_SPIN,
+    INDICATOR_MAX_SPIN,
+  );
+  aimOffset = nextAim;
+  lastAimAt = now;
 }
 
 function getAimHalfWidth(): number {
@@ -861,9 +941,12 @@ function setLoadingState(copy: string): void {
 
 function renderFrame(): void {
   const ghostEnabled = landingGhost?.enabled ?? false;
+  const radianceEnabled = landingRadiance?.enabled ?? false;
   if (landingGhost !== null) landingGhost.enabled = false;
+  if (landingRadiance !== null) landingRadiance.enabled = false;
   drawGlScene3DShadowMap(renderState, scene, shadowCamera, directionalLight);
   if (landingGhost !== null) landingGhost.enabled = ghostEnabled;
+  if (landingRadiance !== null) landingRadiance.enabled = radianceEnabled;
   beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
   renderGlBackground(renderState);
   renderState.gl.depthMask(true);

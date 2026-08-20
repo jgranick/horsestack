@@ -10,6 +10,7 @@ import {
   getSupportedStackHeight,
   getTempoPoints,
   HORSE_HALF_HEIGHT,
+  HORSE_HALF_WIDTH,
   PASTURE_HALF_WIDTH,
   PHYSICS_STEP,
   stepHorseStack,
@@ -31,6 +32,7 @@ const scenarios = [
   runScenario('timer lock drops', 0x54494d45, 1, true),
 ];
 validatePlacementTradeoff();
+validateGentleDrop();
 validateFarmEdgeFalloff();
 
 console.log(
@@ -118,9 +120,23 @@ function validatePlacementTradeoff(): void {
   }
 }
 
+function validateGentleDrop(): void {
+  const surfaceY = 0.55;
+  const restingCenterY = surfaceY + HORSE_HALF_HEIGHT;
+  const releaseGap = getHorseSpawnY(surfaceY) - restingCenterY;
+  const horseHeight = HORSE_HALF_HEIGHT * 2;
+  if (releaseGap < horseHeight * 0.5 || releaseGap > horseHeight) {
+    throw new Error(`gentle drop: expected a 0.5–1 horse-height gap, received ${releaseGap}`);
+  }
+  const forced = getHorseDropMotion(79, 0.5, true, 1);
+  if (Math.abs(forced.velocityY) > 0.15) {
+    throw new Error(`gentle drop: forced release is too fast at ${forced.velocityY}m/s`);
+  }
+}
+
 function validateFarmEdgeFalloff(): void {
   const world = createHorseStackWorld();
-  const horse = addHorseBody(world, PASTURE_HALF_WIDTH - HORSE_HALF_HEIGHT, 0.12, 0);
+  const horse = addHorseBody(world, PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH, 0.2, 0);
   horse.velocityX = 1.4;
   stepForDuration(world, [horse], 1);
   if (horse.y >= -0.1) {

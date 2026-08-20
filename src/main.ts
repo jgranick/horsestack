@@ -84,7 +84,6 @@ interface ActiveHorse {
   deadline: number;
   node: Node3D;
   spinJitter: number;
-  spawnY: number;
   x: number;
   y: number;
 }
@@ -93,6 +92,7 @@ interface StackedHorse {
   body: RigidBody2D;
   lost: boolean;
   node: Node3D;
+  revealedAt: number;
 }
 
 const STACK_BASE_Y = 0.015;
@@ -101,18 +101,19 @@ const STACK_BASE_Y = 0.015;
 // centered across the farm's z = -4…-0.4 footprint.
 const STACK_X = 0.9;
 const STACK_Z = -2.15;
-const HORSE_SCALE = 0.00124;
-const HORSE_VISUAL_CENTER_Y = 0.035;
+const HORSE_SCALE = 0.00279;
+const HORSE_VISUAL_CENTER_Y = 0.07875;
+const HORSE_REVEAL_DURATION_MS = 160;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
-  distance: 1.15,
-  maxDistance: 4.2,
-  minDistance: 0.95,
+  distance: 0.82,
+  maxDistance: 3.4,
+  minDistance: 0.68,
   minPolar: 0.02,
   polar: 0.08,
   smoothTime: 0.2,
-  target: createVector3(STACK_X, 0.34, STACK_Z),
+  target: createVector3(STACK_X, 0.1, STACK_Z),
 } as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
@@ -465,7 +466,6 @@ function spawnHorse(now: number): void {
     deadline: now + dropWindow * 1000,
     node,
     spinJitter: Math.random() - 0.5,
-    spawnY,
     x: 0,
     y: spawnY,
   };
@@ -485,7 +485,7 @@ function updateActiveHorse(now: number, allowAutoDrop = true): void {
   const horizontalLimit = getAimHalfWidth();
   current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
   current.angle = 0;
-  current.y = current.spawnY;
+  current.y = getHorseSpawnY(getLandingSurfaceY(current.x));
   updateLandingGhost(current, now);
 
   if (allowAutoDrop && now >= current.deadline) {
@@ -509,8 +509,9 @@ function dropActiveHorse(now: number, forced: boolean): void {
   body.velocityY = motion.velocityY;
   body.angularVelocity = motion.angularVelocity;
   current.node.enabled = true;
+  current.node.alpha = reducedMotion.matches ? 1 : 0;
   setHorseVisualTransform(current.node, current.x, current.y, current.angle);
-  stackedHorses.push({ body, lost: false, node: current.node });
+  stackedHorses.push({ body, lost: false, node: current.node, revealedAt: now });
   activeHorse = null;
   if (landingGhost !== null) landingGhost.enabled = false;
   horsesDropped++;
@@ -623,10 +624,13 @@ function handlePhysicsContacts(now: number): void {
   );
 }
 
-function synchronizeHorseVisuals(): void {
+function synchronizeHorseVisuals(now: number): void {
   for (const horse of stackedHorses) {
     if (horse.lost) continue;
     const body = horse.body;
+    if (!reducedMotion.matches && horse.node.alpha < 1) {
+      horse.node.alpha = clamp((now - horse.revealedAt) / HORSE_REVEAL_DURATION_MS, 0, 1);
+    }
     setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
 
     // Leave enough void beyond the collider for the whole tumble to remain visible.
@@ -700,17 +704,19 @@ function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angl
 }
 
 function updateCamera(deltaTime: number, height: number): void {
-  const rise = clamp(height / 0.72, 0, 1);
+  const rise = clamp(height / 1.1, 0, 1);
   const herdProgress = clamp(horsesDropped / TOTAL_HORSES, 0, 1);
-  const desiredTargetY = STACK_BASE_Y + 0.34 + height * 0.58;
+  const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
+  const desiredTargetY =
+    STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
-  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.2 + herdProgress * 0.05;
-  cameraController.goalPolar = 0.08 + rise * 0.15;
-  cameraController.goalDistance = Math.min(4, 1.15 + height * 1.25 + herdProgress * 0.45);
+  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.18 + herdProgress * 0.04;
+  cameraController.goalPolar = 0.06 + rise * 0.14;
+  cameraController.goalDistance = Math.min(3.25, 0.82 + height * 0.85 + herdProgress * 0.28);
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
@@ -873,7 +879,7 @@ function enterFrame(now: number): void {
     if (gameIsMoving) {
       updateGame(now);
       stepGamePhysics(now, deltaTime);
-      synchronizeHorseVisuals();
+      synchronizeHorseVisuals(now);
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
       renderRequested = true;
     }

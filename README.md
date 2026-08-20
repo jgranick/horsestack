@@ -5,17 +5,17 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you a generous herd of 80 tiny horses. Before every drop, the real
+Each run gives you a generous herd of 80 cow-scale horses. Before every drop, the real
 horse stays hidden and a translucent yellow horse previews its approximate
 landing pose. Guide the marker horizontally and release before the shrinking
 timer commits the horse automatically. Fast drops earn tempo points but carry
 extra wobble; the middle of the window offers the steadiest placement; and the
 marker turns frantic as a forced drop approaches. Once released, the visible
-horse falls straight down at the marker's position and is handed to Flight's
-full physics on contact with the green pasture. The close camera gradually
-pulls back, rises, and changes angle with the herd and supported pile, and the
-result reports its contact-supported height in meters alongside the combined
-score.
+horse fades in roughly half a horse-height above the marker, settles straight
+down, and is handed to Flight's full physics on contact with the green pasture.
+The cow-scale horses stay readable under a close camera that tracks the pile's
+top while gradually pulling back and changing angle with its growth. The result
+reports the contact-supported height in meters alongside the combined score.
 
 ## Run locally
 

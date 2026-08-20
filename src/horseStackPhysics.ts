@@ -8,8 +8,8 @@ import {
 } from '@flighthq/sdk';
 
 export const TOTAL_HORSES = 80;
-export const HORSE_HALF_WIDTH = 0.04;
-export const HORSE_HALF_HEIGHT = 0.034;
+export const HORSE_HALF_WIDTH = 0.09;
+export const HORSE_HALF_HEIGHT = 0.0765;
 // The farm ground spans roughly 3.5 world units across the new straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
@@ -65,15 +65,15 @@ export function addHorseBody(
   body.angularDamping = 0.06;
   body.bullet = true;
 
-  // A rounded, uneven proxy makes the tiny horses accumulate as a pile instead
+  // A rounded, uneven proxy makes the horses accumulate as a pile instead
   // of clicking together into a neat tower.
   body.colliders.push(
     createPhysics2DCollider(
       {
         kind: 'polygon',
         points: [
-          -0.038, -0.008, -0.027, -0.029, -0.008, -0.034, 0.026, -0.029, 0.04,
-          0.004, 0.03, 0.034, -0.028, 0.032, -0.04, 0.008,
+          -0.0855, -0.018, -0.06075, -0.06525, -0.018, -0.0765, 0.0585,
+          -0.06525, 0.09, 0.009, 0.0675, 0.0765, -0.063, 0.072, -0.09, 0.018,
         ],
       },
       HORSE_MATERIAL,
@@ -87,8 +87,9 @@ export function stepHorseStack(world: Physics2DWorld): void {
   stepPhysics2D(world, PHYSICS_STEP);
 }
 
-export function getHorseSpawnY(stackHeight: number): number {
-  return Math.max(0.7, stackHeight + 0.5);
+export function getHorseSpawnY(landingSurfaceY: number): number {
+  // The body's center begins 0.625 horse-heights above its resting center.
+  return landingSurfaceY + HORSE_HALF_HEIGHT * 2.25;
 }
 
 export function getDropWindow(horsesDropped: number): number {
@@ -117,10 +118,10 @@ export function getHorseDropMotion(
   const spinDirection = spinJitter < 0 ? -1 : 1;
   const motion = {
     angularVelocity: forced
-      ? spinJitter * chaos + spinDirection * 1.5
-      : spinJitter * chaos * (0.5 + rush * 1.5) + spinDirection * deadlinePanic * 1.2,
+      ? spinJitter * chaos + spinDirection
+      : spinJitter * chaos * (0.5 + rush * 1.5) + spinDirection * deadlinePanic * 0.85,
     velocityX: 0,
-    velocityY: forced ? -0.95 : -0.12 - deadlinePanic * 0.62,
+    velocityY: forced ? -0.1 : -0.02 - deadlinePanic * 0.04,
   };
   return motion;
 }

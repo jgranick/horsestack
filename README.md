@@ -5,12 +5,14 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you 40 tiny horses. The active horse sweeps across a platform in
-the farmyard until you drop it—or the shrinking timer drops it for you. The
-rounded physics proxies, loose friction, and escalating spin turn the result
-into a pile-up rather than a tidy tower. The camera follows the supported pile
-upward, and the final score is its contact-supported height in meters rather
-than the altitude of a horse still flying through the scene.
+Each run gives you 40 tiny horses. A Tetris-style active horse descends over the
+front of the farm while a translucent yellow horse previews its approximate
+landing pose. Guide it horizontally and hard-drop when the pose looks suitably
+unsafe—or let the shrinking timer commit it automatically. A hard drop hands
+the horse to Flight's full physics from its current height with a consistent
+initial impulse, so early drops have farther to fall. The camera follows the
+supported pile upward, and the final score is its contact-supported height in
+meters rather than the altitude of a horse still flying through the scene.
 
 ## Run locally
 
@@ -19,8 +21,8 @@ npm install
 npm run dev
 ```
 
-Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to influence the active horse.
-Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to drop it.
+Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the descending horse.
+Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to hard-drop it.
 
 ## Checks
 
@@ -30,9 +32,10 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs all 40 horses at both manual-spam and timer-expiry
-cadences using the shipped velocity formulas, then checks for finite body
-state, contacts, and a measurable supported pile.
+The gameplay validation runs all 40 horses at both early-hard-drop and
+timer-lock cadences using the shipped velocity formulas, then checks for finite
+body state, contacts, a measurable supported pile, and a real fall beyond the
+farm-edge collider.
 
 ## Model credits
 

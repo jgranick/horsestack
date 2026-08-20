@@ -7,6 +7,10 @@
       name="description"
       content="A chaotic low-poly horse stacking game powered by Flight 2D physics."
     />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f3c84b'/%3E%3Cpath d='M14 45V17h9v10h18V17h9v28h-9V35H23v10z' fill='%23252420'/%3E%3C/svg%3E"
+    />
     <title>Horse Stacker — An Unstable Pasture</title>
   </head>
   <body>
@@ -28,7 +32,8 @@
           <p class="eyebrow"><span>01</span> Experimental agriculture</p>
           <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            Forty tiny horses. One farmyard. Less time and worse decisions with every drop.
+            Forty tiny horses descend over one farmyard. Guide the fall, trust the ghost, embrace
+            the consequences.
           </p>
 
           <div class="scoreboard" aria-label="Game status">
@@ -43,7 +48,7 @@
             </div>
             <div class="score-cell">
               <span class="score-label">Height</span>
-              <strong id="stack-height">0.0 m</strong>
+              <strong id="stack-height">0.00 m</strong>
             </div>
             <div class="score-cell pace-cell">
               <span class="score-label">Current panic</span>
@@ -54,8 +59,8 @@
           <div class="interaction-note">
             <span class="interaction-icon" aria-hidden="true"><span></span></span>
             <span>
-              <strong>Nudge, then let go</strong>
-              Influence the sweep with pointer or ← → · Click, tap, Space or Enter to drop
+              <strong>Guide the falling horse</strong>
+              Position with pointer or ← → · Click, tap, Space or Enter for a hard drop
             </span>
           </div>
         </section>
@@ -70,13 +75,13 @@
             <div class="game-panel start-panel" id="start-panel" hidden>
               <p class="panel-kicker">Flight 2D physics presents</p>
               <h2>Ready to make<br />poor choices?</h2>
-              <p>The tiny horse drops itself when time runs out. Soon they arrive like weather.</p>
+              <p>Match the falling horse to its yellow landing ghost, then commit to the physics.</p>
               <button type="button" id="start-button" disabled>Start stacking</button>
             </div>
 
             <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
               <p class="panel-kicker">Official-ish height</p>
-              <h2><span id="result-score">0.0 m</span></h2>
+              <h2><span id="result-score">0.00 m</span></h2>
               <p id="result-copy">The pasture is still assessing the situation.</p>
               <button type="button" id="replay-button">Stack again</button>
             </div>
@@ -94,7 +99,7 @@
             </button>
 
             <button class="drop-horse" id="drop-horse" type="button" disabled>
-              Drop horse
+              Hard drop
               <span aria-hidden="true">↓</span>
             </button>
 

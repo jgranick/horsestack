@@ -14,6 +14,8 @@ export const PLATFORM_HALF_WIDTH = 0.32;
 // The farm ground spans roughly 3.5 world units across the new straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
+export const PASTURE_TOP_Y = -0.015;
+export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
@@ -29,12 +31,12 @@ const PLATFORM_MATERIAL: Physics2DMaterial = {
 };
 const PASTURE_MATERIAL: Physics2DMaterial = {
   density: 0,
-  friction: 0.04,
+  friction: 0.38,
   restitution: 0.035,
 };
 
 export function createHorseStackWorld(): Physics2DWorld {
-  const world = createPhysics2DWorld(0, -10.8);
+  const world = createPhysics2DWorld(0, -PHYSICS_GRAVITY);
   world.config.velocityIterations = 12;
   world.config.positionIterations = 6;
   world.config.timeToSleep = 0.65;
@@ -56,7 +58,7 @@ export function createHorseStackWorld(): Physics2DWorld {
 
   // The platform is raised slightly above the farm floor. Missed horses now tumble
   // into the pasture instead of visibly falling through the scenery.
-  const pasture = createRigidBody2D('static', 0, -0.035);
+  const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
   pasture.colliders.push(
     createPhysics2DCollider(
       {
@@ -107,7 +109,7 @@ export function stepHorseStack(world: Physics2DWorld): void {
 }
 
 export function getHorseSpawnY(stackHeight: number): number {
-  return Math.max(0.28, stackHeight + 0.22);
+  return Math.max(1.65, stackHeight + 1.1);
 }
 
 export function getDropWindow(horsesDropped: number): number {

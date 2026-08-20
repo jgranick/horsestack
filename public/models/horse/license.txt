@@ -1,0 +1,11 @@
+Model Information:
+* title:	Horse
+* source:	https://sketchfab.com/3d-models/horse-e9f1f7d5684c4e8881eb24a1d57e71b3
+* author:	SleepyPineapple (https://sketchfab.com/SleepyPineapple)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Horse" (https://sketchfab.com/3d-models/horse-e9f1f7d5684c4e8881eb24a1d57e71b3) by SleepyPineapple (https://sketchfab.com/SleepyPineapple) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -51,7 +51,8 @@ const resetViewButton = requireElement<HTMLButtonElement>('reset-view');
 const sceneStatus = requireElement<HTMLDivElement>('scene-status');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const modelRoot = `${import.meta.env.BASE_URL}models`;
+const modelPathFromModule = '../models/';
+const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 const HOME_VIEW = {
   azimuth: 0.72,
   distance: 9.1,
@@ -65,7 +66,6 @@ const HOME_VIEW = {
 
 retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
-let pixelRatio = renderState.pixelRatio;
 
 const scene = createNode3D(Node3DKind);
 const camera: Camera3D = createCamera3D({
@@ -249,12 +249,12 @@ function bindCameraControls(): void {
     'wheel',
     (event: WheelEvent) => {
       const delta = normalizeWheelDelta(event);
+      lastInteraction = performance.now();
       const atNearLimit = delta < 0 && cameraController.goalDistance <= cameraController.minDistance;
       const atFarLimit = delta > 0 && cameraController.goalDistance >= cameraController.maxDistance;
       if (atNearLimit || atFarLimit) return;
 
       event.preventDefault();
-      lastInteraction = performance.now();
       dollyOrbitCameraController(cameraController, delta * 0.006);
     },
     { passive: false },
@@ -312,8 +312,7 @@ function resizeCanvas(): void {
   const backingHeight = Math.round(height * nextPixelRatio);
 
   if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-    pixelRatio = nextPixelRatio;
-    renderState.pixelRatio = pixelRatio;
+    renderState.pixelRatio = nextPixelRatio;
     canvas.width = backingWidth;
     canvas.height = backingHeight;
     canvas.style.width = `${width}px`;
@@ -381,7 +380,7 @@ function initializeRenderer() {
     const nextRenderState = createGlRenderState(nextCanvas, {
       pixelRatio: initialPixelRatio,
       backgroundColor: 0xdbe5d1ff,
-      contextAttributes: { alpha: false },
+      contextAttributes: { alpha: false, antialias: false },
       powerPreference: 'high-performance',
     });
     if (import.meta.env.DEV) enableFlightDiagnostics(nextRenderState);
@@ -425,7 +424,7 @@ function bindRenderingLifecycle(): void {
 }
 
 function normalizeWheelDelta(event: WheelEvent): number {
-  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 40;
   if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
     return event.deltaY * Math.max(viewer.clientHeight, 1);
   }

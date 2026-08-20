@@ -51,6 +51,7 @@ const resetViewButton = requireElement<HTMLButtonElement>('reset-view');
 const sceneStatus = requireElement<HTMLDivElement>('scene-status');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+// Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 const HOME_VIEW = {

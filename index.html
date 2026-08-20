@@ -5,18 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="An interactive low-poly farm and horse rendered with Flight."
+      content="A chaotic low-poly horse stacking game powered by Flight 2D physics."
     />
-    <title>Pasture House — Low Poly Farm</title>
+    <title>Horse Stacker — An Unstable Pasture</title>
   </head>
   <body>
     <div class="site-shell">
       <header class="site-header">
-        <a class="brand" href="./" aria-label="Pasture House home">
-          <span class="brand-mark" aria-hidden="true">
-            <span></span>
-          </span>
-          <span>Pasture House</span>
+        <a class="brand" href="./" aria-label="Horse Stacker home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>Horse Stacker</span>
         </a>
 
         <div class="scene-status" id="scene-status" role="status">
@@ -27,28 +25,60 @@
 
       <main class="experience">
         <section class="intro" aria-labelledby="page-title">
-          <p class="eyebrow"><span>01</span> A small digital homestead</p>
-          <h1 id="page-title">Slow down.<br />Stay awhile.</h1>
+          <p class="eyebrow"><span>01</span> Experimental agriculture</p>
+          <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            A hand-built low-poly farm, settled into an open pasture with one
-            very good horse keeping watch.
+            Eighteen horses. One small platform. Less time and worse decisions with every drop.
           </p>
 
+          <div class="scoreboard" aria-label="Game status">
+            <div class="score-cell">
+              <span class="score-label">Horses left</span>
+              <strong id="horses-left">18</strong>
+            </div>
+            <div class="score-cell timer-cell">
+              <span class="score-label">Drop in</span>
+              <strong id="drop-timer">—</strong>
+              <span class="timer-track" aria-hidden="true"><span id="timer-fill"></span></span>
+            </div>
+            <div class="score-cell">
+              <span class="score-label">Height</span>
+              <strong id="stack-height">0.0 m</strong>
+            </div>
+            <div class="score-cell pace-cell">
+              <span class="score-label">Current panic</span>
+              <strong id="pace-copy">Pace 01</strong>
+            </div>
+          </div>
+
           <div class="interaction-note">
-            <span class="interaction-icon" aria-hidden="true">
-              <span></span>
+            <span class="interaction-icon" aria-hidden="true"><span></span></span>
+            <span>
+              <strong>Aim, then let go</strong>
+              Move pointer or ← → · Click, tap, Space or Enter to drop
             </span>
-            <span><strong>Explore the scene</strong>Drag to orbit · Scroll to zoom</span>
           </div>
         </section>
 
-        <section class="viewer-wrap" aria-label="Interactive 3D farm scene">
+        <section class="viewer-wrap" aria-label="Horse Stacker game">
           <div class="viewer" id="viewer">
             <div class="loading-panel" id="loading-panel">
-              <div class="loader-mark" aria-hidden="true">
-                <span></span>
-              </div>
-              <p id="loading-copy">Unpacking the farm…</p>
+              <div class="loader-mark" aria-hidden="true"><span></span></div>
+              <p id="loading-copy">Herding the horses…</p>
+            </div>
+
+            <div class="game-panel start-panel" id="start-panel" hidden>
+              <p class="panel-kicker">Flight 2D physics presents</p>
+              <h2>Ready to make<br />poor choices?</h2>
+              <p>The horse drops itself when the timer runs out. The timer gets shorter.</p>
+              <button type="button" id="start-button" disabled>Start stacking</button>
+            </div>
+
+            <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
+              <p class="panel-kicker">Official-ish height</p>
+              <h2><span id="result-score">0.0 m</span></h2>
+              <p id="result-copy">The pasture is still assessing the situation.</p>
+              <button type="button" id="replay-button">Stack again</button>
             </div>
 
             <div class="error-panel" id="error-panel" hidden>
@@ -56,21 +86,28 @@
               <button type="button" id="retry-button">Try again</button>
             </div>
 
-            <button class="reset-view" id="reset-view" type="button" aria-label="Reset camera view">
+            <div class="game-callout" id="game-callout" aria-live="polite">Awaiting horses…</div>
+
+            <button class="restart-game" id="restart-game" type="button" hidden>
               <span aria-hidden="true">↺</span>
-              Reset view
+              Start over
+            </button>
+
+            <button class="drop-horse" id="drop-horse" type="button" disabled>
+              Drop horse
+              <span aria-hidden="true">↓</span>
             </button>
 
             <div class="viewer-label" aria-hidden="true">
-              <span>EdwinRC</span>
-              <span>Low Poly Farm</span>
+              <span>Flight Physics 2D</span>
+              <span>Very serious simulation</span>
             </div>
           </div>
         </section>
       </main>
 
       <footer class="site-footer">
-        <span>Rendered with Flight</span>
+        <span>Built with Flight</span>
         <span class="footer-rule" aria-hidden="true"></span>
         <span>
           Models by

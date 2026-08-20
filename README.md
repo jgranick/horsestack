@@ -1,8 +1,14 @@
-# Pasture House
+# Horse Stacker
 
-An interactive low-poly farm scene built in TypeScript with
-[`@flighthq/sdk`](https://github.com/flighthq/flight). The farm and horse are
-loaded from glTF at runtime and rendered through Flight's WebGL scene renderer.
+A chaotic low-poly stacking game built in TypeScript with
+[`@flighthq/sdk`](https://github.com/flighthq/flight). Flight's 2D rigid-body
+physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
+renderer handles impact dust and the final celebration.
+
+Each run gives you 18 horses. The active horse sweeps over the platform until
+you drop it—or the shrinking timer drops it for you. The camera follows the
+supported stack upward, and the final score is its contact-supported height in
+meters rather than the altitude of a horse still flying through the scene.
 
 ## Run locally
 
@@ -11,8 +17,19 @@ npm install
 npm run dev
 ```
 
-Use the pointer to orbit the scene and the wheel or trackpad to zoom. Run
-`npm run build` for a typechecked production build.
+Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to influence the active horse.
+Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to drop it.
+
+## Checks
+
+```bash
+npm run build
+npm run validate:assets
+npm run validate:game
+```
+
+The gameplay validation runs a deterministic six-horse Flight physics stack and
+checks for finite body state, contacts, and a measurable supported stack.
 
 ## Model credits
 

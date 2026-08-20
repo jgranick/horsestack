@@ -5,10 +5,12 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you 18 horses. The active horse sweeps over the platform until
-you drop it—or the shrinking timer drops it for you. The camera follows the
-supported stack upward, and the final score is its contact-supported height in
-meters rather than the altitude of a horse still flying through the scene.
+Each run gives you 40 tiny horses. The active horse sweeps across a platform in
+the farmyard until you drop it—or the shrinking timer drops it for you. The
+rounded physics proxies, loose friction, and escalating spin turn the result
+into a pile-up rather than a tidy tower. The camera follows the supported pile
+upward, and the final score is its contact-supported height in meters rather
+than the altitude of a horse still flying through the scene.
 
 ## Run locally
 
@@ -28,8 +30,9 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs a deterministic six-horse Flight physics stack and
-checks for finite body state, contacts, and a measurable supported stack.
+The gameplay validation runs all 40 horses at the game's fastest shipped
+cadence and velocity formulas, then checks for finite body state, contacts, and
+a measurable supported pile.
 
 ## Model credits
 

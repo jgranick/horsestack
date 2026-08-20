@@ -5,14 +5,15 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you 40 tiny horses. A Tetris-style active horse descends over the
-front of the farm while a translucent yellow horse previews its approximate
-landing pose. Guide it horizontally and hard-drop when the pose looks suitably
-unsafe—or let the shrinking timer commit it automatically. A hard drop hands
-the horse to Flight's full physics from its current height with a consistent
-initial impulse, so early drops have farther to fall. The camera follows the
-supported pile upward, and the final score is its contact-supported height in
-meters rather than the altitude of a horse still flying through the scene.
+Each run gives you a generous herd of 80 tiny horses. Before every drop, the real
+horse stays hidden and a translucent yellow horse previews its approximate
+landing pose. Guide the marker horizontally and release before the shrinking
+timer commits the horse automatically. Fast drops earn tempo points but carry
+extra wobble; the middle of the window offers the steadiest placement; and the
+marker turns frantic as a forced drop approaches. Once released, the visible
+horse is handed to Flight's full physics. The close camera rises and changes
+angle with the supported pile, and the result reports its contact-supported
+height in meters alongside the combined score.
 
 ## Run locally
 
@@ -21,8 +22,9 @@ npm install
 npm run dev
 ```
 
-Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the descending horse.
-Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to hard-drop it.
+Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
+Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and drop
+the horse.
 
 ## Checks
 
@@ -32,8 +34,8 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs all 40 horses at both early-hard-drop and
-timer-lock cadences using the shipped velocity formulas, then checks for finite
+The gameplay validation runs all 80 horses at rushed, careful, and timer-lock
+cadences using the shipped velocity formulas, then checks for finite
 body state, contacts, a measurable supported pile, and a real fall beyond the
 farm-edge collider.
 

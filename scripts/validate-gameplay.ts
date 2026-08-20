@@ -8,6 +8,7 @@ import {
   getHorseSpawnY,
   getNextHorseDelay,
   getSupportedStackHeight,
+  getTempoPoints,
   HORSE_HALF_HEIGHT,
   PASTURE_HALF_WIDTH,
   PHYSICS_STEP,
@@ -24,9 +25,11 @@ interface ScenarioResult {
 }
 
 const scenarios = [
-  runScenario('early hard drops', 0x484f5253, false),
-  runScenario('timer lock drops', 0x54494d45, true),
+  runScenario('rushed drops', 0x484f5253, 0.12, false),
+  runScenario('careful drops', 0x53544541, 0.54, false),
+  runScenario('timer lock drops', 0x54494d45, 1, true),
 ];
+validatePlacementTradeoff();
 validateFarmEdgeFalloff();
 
 console.log(
@@ -38,22 +41,25 @@ console.log(
     .join('; ')}; farm-edge falloff verified`,
 );
 
-function runScenario(name: string, seed: number, forced: boolean): ScenarioResult {
+function runScenario(
+  name: string,
+  seed: number,
+  placementProgress: number,
+  forced: boolean,
+): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody2D[] = [];
   const random = mulberry32(seed);
   const horizontalLimit = PLATFORM_HALF_WIDTH * (forced ? 0.6 : 0.85);
-  const descentProgress = forced ? 1 : 0.35;
 
   for (let index = 0; index < TOTAL_HORSES; index++) {
     const currentHeight = getSupportedStackHeight(world, horses);
     const spawnY = getHorseSpawnY(currentHeight);
-    const lockY = currentHeight + HORSE_HALF_HEIGHT * 3.5;
     const horseSeed = random() * Math.PI * 2;
     const horse = addHorseBody(
       world,
       Math.sin(horseSeed) * horizontalLimit,
-      spawnY + (lockY - spawnY) * descentProgress,
+      spawnY,
       (random() - 0.5) * 0.28,
     );
     const motion = getHorseDropMotion(
@@ -62,6 +68,7 @@ function runScenario(name: string, seed: number, forced: boolean): ScenarioResul
       random() - 0.5,
       random() - 0.5,
       forced,
+      placementProgress,
     );
     horse.velocityX = motion.velocityX;
     horse.velocityY = motion.velocityY;
@@ -70,7 +77,7 @@ function runScenario(name: string, seed: number, forced: boolean): ScenarioResul
 
     if (index === TOTAL_HORSES - 1) continue;
     const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    const cadenceSeconds = delaySeconds + getDropWindow(index + 1) * descentProgress;
+    const cadenceSeconds = delaySeconds + getDropWindow(index + 1) * placementProgress;
     stepForDuration(world, horses, cadenceSeconds);
   }
 
@@ -92,6 +99,21 @@ function runScenario(name: string, seed: number, forced: boolean): ScenarioResul
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
 
   return { contacts: world.contacts.length, height, inPasture, name };
+}
+
+function validatePlacementTradeoff(): void {
+  const rushed = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.05);
+  const careful = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.52);
+  const deadline = getHorseDropMotion(20, 0.8, 0.35, 0.35, false, 0.96);
+  if (Math.abs(rushed.velocityX) <= Math.abs(careful.velocityX)) {
+    throw new Error('placement tradeoff: a rushed drop should carry more lateral wobble');
+  }
+  if (Math.abs(deadline.velocityX) <= Math.abs(careful.velocityX)) {
+    throw new Error('placement tradeoff: the deadline should destabilize the landing marker');
+  }
+  if (getTempoPoints(0.05) <= getTempoPoints(0.52)) {
+    throw new Error('placement tradeoff: a rushed manual drop should earn more tempo points');
+  }
 }
 
 function validateFarmEdgeFalloff(): void {

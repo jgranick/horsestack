@@ -7,7 +7,7 @@ import {
   stepPhysics2D,
 } from '@flighthq/sdk';
 
-export const TOTAL_HORSES = 40;
+export const TOTAL_HORSES = 80;
 export const HORSE_HALF_WIDTH = 0.04;
 export const HORSE_HALF_HEIGHT = 0.034;
 export const PLATFORM_HALF_WIDTH = 0.32;
@@ -86,7 +86,7 @@ export function addHorseBody(
   body.angularDamping = 0.06;
   body.bullet = true;
 
-  // A rounded, uneven proxy makes forty tiny horses accumulate as a pile instead
+  // A rounded, uneven proxy makes the tiny horses accumulate as a pile instead
   // of clicking together into a neat tower.
   body.colliders.push(
     createPhysics2DCollider(
@@ -109,7 +109,7 @@ export function stepHorseStack(world: Physics2DWorld): void {
 }
 
 export function getHorseSpawnY(stackHeight: number): number {
-  return Math.max(1.65, stackHeight + 1.1);
+  return Math.max(0.78, stackHeight + 0.55);
 }
 
 export function getDropWindow(horsesDropped: number): number {
@@ -134,16 +134,33 @@ export function getHorseDropMotion(
   horizontalJitter: number,
   spinJitter: number,
   forced: boolean,
+  placementProgress = 1,
 ): Pick<RigidBody2D, 'angularVelocity' | 'velocityX' | 'velocityY'> {
   const pace = getPaceLevel(horsesDropped);
   const chaos = 0.95 + pace * 0.24;
-  return {
-    angularVelocity: spinJitter * chaos + (forced ? sweepDirection * 0.52 : 0),
+  const progress = Math.max(0, Math.min(1, placementProgress));
+  const rush = Math.max(0, (0.35 - progress) / 0.35);
+  const deadlinePanic = Math.max(0, (progress - 0.72) / 0.28);
+  const motion = {
+    angularVelocity:
+      spinJitter * chaos +
+      sweepDirection * (forced ? 0.72 : deadlinePanic * 0.68),
     velocityX:
       sweepDirection * (0.08 + pace * 0.025 + (forced ? 2.8 : 0)) +
       horizontalJitter * 0.16,
-    velocityY: forced ? -0.95 : -0.12,
+    velocityY: forced ? -0.95 : -0.12 - deadlinePanic * 0.62,
   };
+  if (!forced) {
+    motion.velocityX =
+      motion.velocityX * (0.55 + rush * 1.1) + sweepDirection * deadlinePanic * 2.25;
+    motion.angularVelocity *= 0.5 + rush * 1.5;
+  }
+  return motion;
+}
+
+export function getTempoPoints(placementProgress: number): number {
+  const rush = 1 - Math.max(0, Math.min(1, placementProgress));
+  return Math.round(rush * 12);
 }
 
 export function getSupportedStackHeight(

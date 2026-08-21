@@ -61,6 +61,8 @@ import {
 } from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import { createFlightGameUi } from './gameUi';
+import type { FlightGameUi, GameUiModel } from './gameUi';
 import {
   addHorseBody,
   createHorseStackWorld,
@@ -108,7 +110,6 @@ const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
 const GAME_DURATION_MS = 60_000;
-const HANDS_PER_EMOJI_COLUMN = 12;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 const RESULT_TICK_INTERVAL_MS = 32;
@@ -151,7 +152,6 @@ const startPanel = requireElement<HTMLDivElement>('start-panel');
 const startButton = requireElement<HTMLButtonElement>('start-button');
 const timeUpPanel = requireElement<HTMLDivElement>('time-up-panel');
 const resultPanel = requireElement<HTMLDivElement>('result-panel');
-const resultHorseStack = requireElement<HTMLDivElement>('result-horse-stack');
 const resultHandCount = requireElement<HTMLElement>('result-hand-count');
 const resultScore = requireElement<HTMLSpanElement>('result-score');
 const resultCopy = requireElement<HTMLParagraphElement>('result-copy');
@@ -181,7 +181,22 @@ const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 
 retryButton.addEventListener('click', () => window.location.reload());
+let gameUiForError: FlightGameUi | null = null;
 const { canvas, pipeline, renderState } = initializeRenderer();
+const gameUi = createFlightGameUi(renderState, reducedMotion.matches);
+gameUiForError = gameUi;
+const gameUiModel: GameUiModel = {
+  callout: 'Awaiting horses…',
+  canPlace: false,
+  handsShown: 0,
+  height: '0.00 m',
+  horsesPlaced: 0,
+  resultComplete: false,
+  resultCopy: 'The pasture is still assessing the situation.',
+  resultHeight: '0.00 m',
+  score: '0 pts',
+  secondsRemaining: 0,
+};
 
 const scene = createNode3D(Node3DKind);
 const horseLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
@@ -386,14 +401,17 @@ async function start(): Promise<void> {
     mountFarm(farm);
     horseTemplate = horse;
     phase = 'ready';
+    gameUi.setPhase('ready');
     updateCamera(1, cachedStackHeight);
-    renderFrame();
     loadingPanel.classList.add('is-hidden');
     startPanel.hidden = false;
     startButton.disabled = false;
     sceneStatus.classList.add('is-ready');
     statusCopy.textContent = 'Stable enough';
-    updateHud(performance.now());
+    const now = performance.now();
+    updateHud(now);
+    updateFlightUi(0, now, cachedStackHeight);
+    renderFrame();
   } catch (error) {
     showSceneError('Unable to load Horse Stacker.', error);
   }
@@ -548,11 +566,11 @@ function startGame(): void {
   celebrationState = createParticleEmitterState();
 
   phase = 'playing';
+  gameUi.setPhase('playing');
   startPanel.hidden = true;
   timeUpPanel.hidden = true;
   resultPanel.hidden = true;
   resultPanel.classList.remove('is-total-revealed');
-  resultHorseStack.replaceChildren();
   resultHandCount.textContent = '0';
   resultScore.textContent = '0.00 m';
   resultCopy.textContent = 'The pasture is still assessing the situation.';
@@ -652,11 +670,13 @@ function updateGame(now: number): void {
 
 function beginSettling(now: number): void {
   phase = 'settling';
+  gameUi.setPhase('settling');
   stopAudioTrack(soundtrack);
   restartAudioTrack(countFanfare, 'Count fanfare');
   activeHorse = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
   dropButton.disabled = true;
+  restartButton.hidden = true;
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
@@ -671,6 +691,7 @@ function beginSettling(now: number): void {
 
 function finishGame(now: number): void {
   phase = 'finished';
+  gameUi.setPhase('finished');
   finalHeight = getCurrentStackHeight();
   cachedStackHeight = finalHeight;
   finalSurvivors = stackedHorses.filter(
@@ -689,7 +710,6 @@ function finishGame(now: number): void {
         MIN_RESULT_COUNT_DURATION_MS,
         MAX_RESULT_COUNT_DURATION_MS,
       );
-  resultHorseStack.replaceChildren();
   resultHandCount.textContent = '0';
   resultScore.textContent = '0.00 m';
   resultCopy.textContent = 'Counting the herd, one hand at a time…';
@@ -720,20 +740,7 @@ function updateResultAnimation(now: number): void {
 
 function appendHorseHands(targetCount: number): boolean {
   const previousCount = resultHandsShown;
-  while (resultHandsShown < targetCount) {
-    const columnIndex = Math.floor(resultHandsShown / HANDS_PER_EMOJI_COLUMN);
-    let column = resultHorseStack.children.item(columnIndex);
-    if (!(column instanceof HTMLElement)) {
-      column = document.createElement('span');
-      column.className = 'horse-hand-column';
-      resultHorseStack.append(column);
-    }
-    const horse = document.createElement('span');
-    horse.className = 'horse-hand';
-    horse.textContent = '🐴';
-    column.append(horse);
-    resultHandsShown++;
-  }
+  resultHandsShown = Math.max(resultHandsShown, targetCount);
   return resultHandsShown > previousCount;
 }
 
@@ -1072,6 +1079,7 @@ function resizeCanvas(): void {
     if (camera.projection.kind === 'perspective') camera.projection.aspect = width / height;
     renderRequested = true;
   }
+  gameUi.resize(width, height, nextPixelRatio);
 }
 
 function setLoadingState(copy: string): void {
@@ -1094,6 +1102,17 @@ function renderFrame(): void {
   renderState.gl.clear(renderState.gl.DEPTH_BUFFER_BIT);
   drawGlScene3D(renderState, scene, camera, lights);
   endGlRenderEffectPipeline(renderState, pipeline, []);
+  // Composite the sRGB Scene2D UI directly onto the presented frame so it
+  // remains crisp and is not gamma-encoded a second time.
+  renderState.gl.disable(renderState.gl.DEPTH_TEST);
+  renderState.gl.disable(renderState.gl.CULL_FACE);
+  renderState.gl.enable(renderState.gl.BLEND);
+  renderState.gl.depthMask(false);
+  gameUi.render();
+  renderState.gl.depthMask(true);
+  renderState.gl.disable(renderState.gl.BLEND);
+  renderState.gl.enable(renderState.gl.CULL_FACE);
+  renderState.gl.enable(renderState.gl.DEPTH_TEST);
 }
 
 function enterFrame(now: number): void {
@@ -1128,11 +1147,12 @@ function enterFrame(now: number): void {
     const displayedHeight = phase === 'finished' ? finalHeight : cachedStackHeight;
     updateCamera(deltaTime, displayedHeight);
     if (gameIsMoving || hudDirty) updateHud(now, displayedHeight);
+    const uiIsAnimating = updateFlightUi(deltaTime, now, displayedHeight);
     const cameraIsMoving =
       Math.abs(cameraController.distance - cameraController.goalDistance) > 0.001 ||
       Math.abs(cameraController.polar - cameraController.goalPolar) > 0.0001 ||
       Math.abs(cameraController.azimuth - cameraController.goalAzimuth) > 0.0001;
-    if (renderRequested || gameIsMoving || particlesAreMoving || cameraIsMoving) {
+    if (renderRequested || gameIsMoving || particlesAreMoving || cameraIsMoving || uiIsAnimating) {
       renderFrame();
       renderRequested = false;
     }
@@ -1312,6 +1332,7 @@ function stopAllAudio(): void {
 
 function showSceneError(message: string, error: unknown): void {
   stopAllAudio();
+  gameUiForError?.hide();
   console.error(message, error);
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;
@@ -1322,6 +1343,21 @@ function showSceneError(message: string, error: unknown): void {
   sceneStatus.classList.remove('is-ready');
   sceneStatus.classList.add('is-error');
   statusCopy.textContent = 'Game unavailable';
+}
+
+function updateFlightUi(deltaTime: number, now: number, stackHeight: number): boolean {
+  gameUiModel.callout = gameCallout.textContent ?? '';
+  gameUiModel.canPlace = phase === 'playing' && activeHorse !== null;
+  gameUiModel.handsShown = resultHandsShown;
+  gameUiModel.height = heightCopy.textContent ?? formatHeight(stackHeight);
+  gameUiModel.horsesPlaced = horsesDropped;
+  gameUiModel.resultComplete = phase === 'finished' && resultAnimationStart === 0;
+  gameUiModel.resultCopy = resultCopy.textContent ?? '';
+  gameUiModel.resultHeight = resultScore.textContent ?? '0.00 m';
+  gameUiModel.score = paceCopy.textContent ?? `${getScore(stackHeight).toLocaleString()} pts`;
+  gameUiModel.secondsRemaining =
+    phase === 'playing' ? Math.max(0, gameEndsAt - now) / 1000 : 0;
+  return gameUi.update(deltaTime, now, gameUiModel);
 }
 
 function setTextIfChanged(element: HTMLElement, value: string): void {

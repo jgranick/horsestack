@@ -78,6 +78,7 @@ import {
   stepHorseStack,
 } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
+import horseThudUrl from '../free-sound-1674747349.mp3?url';
 import resultTadaUrl from '../free-sound-1674895520.mp3?url';
 import countFanfareUrl from '../free-sound-1674977569.mp3?url';
 import farmAmbienceUrl from '../free-sound-1674978362.mp3?url';
@@ -153,6 +154,7 @@ const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const soundtrack = createAudioTrack(soundtrackUrl, 0.36);
 const farmAmbience = createAudioTrack(farmAmbienceUrl, 0.16, true);
+const horseThud = createAudioTrack(horseThudUrl, 0.24);
 const countFanfare = createAudioTrack(countFanfareUrl, 0.46);
 const resultTada = createAudioTrack(resultTadaUrl, 0.52);
 // Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
@@ -594,6 +596,7 @@ function commitHorsePlacement(now: number): void {
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
   horsesDropped++;
+  restartAudioTrack(horseThud, 'Horse thud');
 
   const tilt = Math.abs(current.angle);
   gameCallout.textContent =
@@ -1174,6 +1177,7 @@ function createAudioTrack(source: string, volume: number, loop = false): HTMLAud
 
 function playAudioTrack(audio: HTMLAudioElement, label: string): void {
   void audio.play().catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === 'AbortError') return;
     // Audio permission or device failures should never prevent a game from running.
     console.info(`${label} could not start.`, error);
   });
@@ -1190,6 +1194,7 @@ function stopAudioTrack(audio: HTMLAudioElement): void {
 }
 
 function startGameAudio(): void {
+  stopAudioTrack(horseThud);
   stopAudioTrack(countFanfare);
   stopAudioTrack(resultTada);
   if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
@@ -1199,6 +1204,7 @@ function startGameAudio(): void {
 function stopAllAudio(): void {
   stopAudioTrack(soundtrack);
   stopAudioTrack(farmAmbience);
+  stopAudioTrack(horseThud);
   stopAudioTrack(countFanfare);
   stopAudioTrack(resultTada);
 }

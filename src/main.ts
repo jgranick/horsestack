@@ -78,6 +78,9 @@ import {
   stepHorseStack,
 } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
+import resultTadaUrl from '../free-sound-1674895520.mp3?url';
+import countFanfareUrl from '../free-sound-1674977569.mp3?url';
+import farmAmbienceUrl from '../free-sound-1674978362.mp3?url';
 import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
@@ -148,9 +151,10 @@ const gameCallout = requireElement<HTMLDivElement>('game-callout');
 const heroTimer = requireElement<HTMLDivElement>('hero-timer');
 const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const soundtrack = new Audio(soundtrackUrl);
-soundtrack.preload = 'auto';
-soundtrack.volume = 0.36;
+const soundtrack = createAudioTrack(soundtrackUrl, 0.36);
+const farmAmbience = createAudioTrack(farmAmbienceUrl, 0.16, true);
+const countFanfare = createAudioTrack(countFanfareUrl, 0.46);
+const resultTada = createAudioTrack(resultTadaUrl, 0.52);
 // Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
@@ -482,7 +486,7 @@ function startGame(): void {
   if (horseTemplate === null || phase === 'loading') return;
 
   const now = performance.now();
-  restartSoundtrack();
+  startGameAudio();
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
   activeHorse = null;
@@ -621,7 +625,8 @@ function updateGame(now: number): void {
 
 function beginSettling(now: number): void {
   phase = 'settling';
-  stopSoundtrack();
+  stopAudioTrack(soundtrack);
+  restartAudioTrack(countFanfare, 'Count fanfare');
   activeHorse = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
   dropButton.disabled = true;
@@ -703,6 +708,7 @@ function appendHorseHands(targetCount: number): void {
 
 function completeResultAnimation(): void {
   resultAnimationStart = 0;
+  restartAudioTrack(resultTada, 'Result fanfare');
   appendHorseHands(resultHands);
   resultHandCount.textContent = String(resultHands);
   resultScore.textContent = formatHeight(finalHeight);
@@ -1158,22 +1164,47 @@ function bindRenderingLifecycle(): void {
   });
 }
 
-function restartSoundtrack(): void {
-  soundtrack.pause();
-  soundtrack.currentTime = 0;
-  void soundtrack.play().catch((error: unknown) => {
-    // Audio permission or device failures should never prevent a game from starting.
-    console.info('Background music could not start.', error);
+function createAudioTrack(source: string, volume: number, loop = false): HTMLAudioElement {
+  const audio = new Audio(source);
+  audio.preload = 'auto';
+  audio.volume = volume;
+  audio.loop = loop;
+  return audio;
+}
+
+function playAudioTrack(audio: HTMLAudioElement, label: string): void {
+  void audio.play().catch((error: unknown) => {
+    // Audio permission or device failures should never prevent a game from running.
+    console.info(`${label} could not start.`, error);
   });
 }
 
-function stopSoundtrack(): void {
-  soundtrack.pause();
-  soundtrack.currentTime = 0;
+function restartAudioTrack(audio: HTMLAudioElement, label: string): void {
+  stopAudioTrack(audio);
+  playAudioTrack(audio, label);
+}
+
+function stopAudioTrack(audio: HTMLAudioElement): void {
+  audio.pause();
+  audio.currentTime = 0;
+}
+
+function startGameAudio(): void {
+  stopAudioTrack(countFanfare);
+  stopAudioTrack(resultTada);
+  if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
+  restartAudioTrack(soundtrack, 'Background music');
+}
+
+function stopAllAudio(): void {
+  stopAudioTrack(soundtrack);
+  stopAudioTrack(farmAmbience);
+  stopAudioTrack(countFanfare);
+  stopAudioTrack(resultTada);
 }
 
 function showSceneError(message: string, error: unknown): void {
-  stopSoundtrack();
+  stopAllAudio();
   console.error(message, error);
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;

@@ -58,3 +58,6 @@ farm-edge collider.
 
 - “The Mountain's Happy Song” by Elijah_K, sourced from
   [Free Music Archive](https://freemusicarchive.org/) and licensed under CC BY.
+- “Farm Early Morning (Loop),” “Fanfare Arpeggio Resolution,” and
+  “Ta Da Brass Fanfare 1” sourced from
+  [Free Sound Effects](https://free-sound-effects.net/).

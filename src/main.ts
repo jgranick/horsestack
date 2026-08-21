@@ -1205,6 +1205,14 @@ function stopAudioTrack(audio: HTMLAudioElement): void {
   audio.currentTime = 0;
 }
 
+function reloadAudioTrack(audio: HTMLAudioElement): void {
+  audio.pause();
+  // load() clears an ended or interrupted media pipeline and starts a fresh
+  // preload. Re-arming short effects here gives them the entire next round to
+  // buffer instead of discovering an evicted resource during the result beat.
+  audio.load();
+}
+
 function playResultTick(now: number): void {
   if (reducedMotion.matches || now < nextResultTickAt) return;
   const tick = resultTicks[resultTickIndex % resultTicks.length];
@@ -1220,11 +1228,17 @@ function stopResultTicks(): void {
   nextResultTickAt = 0;
 }
 
+function reloadGameEffects(): void {
+  reloadAudioTrack(horseThud);
+  reloadAudioTrack(countFanfare);
+  reloadAudioTrack(resultTada);
+  for (const tick of resultTicks) reloadAudioTrack(tick);
+  resultTickIndex = 0;
+  nextResultTickAt = 0;
+}
+
 function startGameAudio(): void {
-  stopAudioTrack(horseThud);
-  stopAudioTrack(countFanfare);
-  stopAudioTrack(resultTada);
-  stopResultTicks();
+  reloadGameEffects();
   if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
   restartAudioTrack(soundtrack, 'Background music');
 }

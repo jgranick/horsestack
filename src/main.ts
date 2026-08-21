@@ -52,6 +52,7 @@ import {
   removeNodeChildren,
   removePhysics2DBody,
   renderGlBackground,
+  setNode3DAlpha,
   setNodeLocalMatrix4,
   setNodeTransform3D,
   setQuaternionFromEuler,
@@ -560,7 +561,7 @@ function beginHorsePlacement(now: number): void {
   const current = activeHorse;
   if (current === null || phase !== 'playing' || placingHorse !== null) return;
 
-  const node = createHorseVisual(null, 0);
+  const node = createHorseVisual(null, 0.35);
   setHorseVisualTransform(node, current.x, current.y, current.angle);
   addNodeChild(horseLayer, node);
   placingHorse = {
@@ -589,7 +590,8 @@ function updateHorsePlacement(now: number): void {
   const landingY =
     getLandingSurfaceY(current.x) + getHorseVerticalExtent(current.angle);
   const visualY = current.startY + (landingY - current.startY) * easedProgress;
-  current.node.alpha = clamp(progress * 4, 0, 1);
+  // Flight caches inherited opacity, so its setter must invalidate the horse subtree.
+  setNode3DAlpha(current.node, 0.35 + clamp(progress * 3, 0, 1) * 0.65);
   setHorseVisualTransform(current.node, current.x, visualY, current.angle);
   renderRequested = true;
 
@@ -599,7 +601,7 @@ function updateHorsePlacement(now: number): void {
   body.velocityX = 0;
   body.velocityY = 0;
   body.angularVelocity = 0;
-  current.node.alpha = 1;
+  setNode3DAlpha(current.node, 1);
   stackedHorses.push({ body, lost: false, node: current.node });
   placingHorse = null;
   horsesDropped++;
@@ -773,7 +775,7 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
     indicatorLight.intensity = 0;
     return;
   }
-  landingGhost.alpha = 0.42 + Math.sin(now * 0.009) * 0.05;
+  setNode3DAlpha(landingGhost, 0.42 + Math.sin(now * 0.009) * 0.05);
   const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle) + 0.003;
   setHorseVisualTransform(landingGhost, previewX, previewY, current.angle);
   updateLandingRadiance(previewX, previewY, now);
@@ -784,7 +786,7 @@ function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   if (radiance === null) return;
   const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.055;
   radiance.enabled = true;
-  radiance.alpha = 0.82 + Math.sin(now * 0.008) * 0.12;
+  setNode3DAlpha(radiance, 0.82 + Math.sin(now * 0.008) * 0.12);
   radiance.position.x = STACK_X + 0.006;
   radiance.position.y = STACK_BASE_Y + physicsY;
   radiance.position.z = STACK_Z - x;

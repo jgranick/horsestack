@@ -83,6 +83,7 @@ import resultTickUrl from '../free-sound-1674778893.mp3?url';
 import resultTadaUrl from '../free-sound-1674895520.mp3?url';
 import countFanfareUrl from '../free-sound-1674977569.mp3?url';
 import farmAmbienceUrl from '../free-sound-1674978362.mp3?url';
+import horseWhinniesUrl from '../free-sound-effects-HORSE3.mp3?url';
 import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
@@ -112,6 +113,17 @@ const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 const RESULT_TICK_INTERVAL_MS = 32;
 const RESULT_TICK_POOL_SIZE = 8;
+const HORSE_WHINNY_MIN_INTERVAL_MS = 9_000;
+const HORSE_WHINNY_INTERVAL_JITTER_MS = 6_000;
+const FINAL_WHINNY_CHANCE = 0.28;
+// Quiet regions in the source sample separate these four calls. Cueing the
+// original file avoids shipping four near-identical derived assets.
+const HORSE_WHINNY_CUES = [
+  { duration: 2.1, start: 0.08 },
+  { duration: 1.2, start: 3.7 },
+  { duration: 1.7, start: 5.7 },
+  { duration: 1.25, start: 8.82 },
+] as const;
 const INDICATOR_SPRING = 22;
 const INDICATOR_DAMPING = 6.2;
 const INDICATOR_MAX_ANGLE = 0.65;
@@ -160,6 +172,7 @@ const farmAmbience = createAudioTrack(farmAmbienceUrl, 0.16, true);
 const horseThud = createAudioTrack(horseThudUrl, 0.24);
 const countFanfare = createAudioTrack(countFanfareUrl, 0.46);
 const resultTada = createAudioTrack(resultTadaUrl, 0.52);
+const horseWhinnies = createAudioTrack(horseWhinniesUrl, 0.22);
 const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
   createAudioTrack(resultTickUrl, 0.1),
 );
@@ -343,6 +356,9 @@ let resultHands = 0;
 let resultHandsShown = 0;
 let resultTickIndex = 0;
 let nextResultTickAt = 0;
+let nextHorseWhinnyAt = 0;
+let horseWhinnyStopTimer: number | null = null;
+let scheduledHorseWhinnyTimer: number | null = null;
 let physicsAccumulator = 0;
 let previousTime = performance.now();
 let isViewerVisible = true;
@@ -496,7 +512,7 @@ function startGame(): void {
   if (horseTemplate === null || phase === 'loading') return;
 
   const now = performance.now();
-  startGameAudio();
+  startGameAudio(now);
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
   activeHorse = null;
@@ -724,6 +740,7 @@ function appendHorseHands(targetCount: number): boolean {
 function completeResultAnimation(): void {
   resultAnimationStart = 0;
   restartAudioTrack(resultTada, 'Result fanfare');
+  maybePlayCelebrationWhinny();
   appendHorseHands(resultHands);
   resultHandCount.textContent = String(resultHands);
   resultScore.textContent = formatHeight(finalHeight);
@@ -786,6 +803,7 @@ function handlePhysicsContacts(now: number): void {
     STACK_Z - point.x,
     0xe8d6a9cc,
   );
+  maybePlayCollisionWhinny(now);
 }
 
 function synchronizeHorseVisuals(): void {
@@ -1205,6 +1223,41 @@ function stopAudioTrack(audio: HTMLAudioElement): void {
   audio.currentTime = 0;
 }
 
+function stopHorseWhinny(): void {
+  if (horseWhinnyStopTimer !== null) window.clearTimeout(horseWhinnyStopTimer);
+  if (scheduledHorseWhinnyTimer !== null) window.clearTimeout(scheduledHorseWhinnyTimer);
+  horseWhinnyStopTimer = null;
+  scheduledHorseWhinnyTimer = null;
+  stopAudioTrack(horseWhinnies);
+}
+
+function playHorseWhinny(): void {
+  stopHorseWhinny();
+  const cue = HORSE_WHINNY_CUES[Math.floor(Math.random() * HORSE_WHINNY_CUES.length)];
+  if (cue === undefined) return;
+  horseWhinnies.currentTime = cue.start;
+  playAudioTrack(horseWhinnies, 'Horse whinny');
+  horseWhinnyStopTimer = window.setTimeout(() => {
+    horseWhinnyStopTimer = null;
+    stopAudioTrack(horseWhinnies);
+  }, cue.duration * 1000);
+}
+
+function maybePlayCollisionWhinny(now: number): void {
+  if (now < nextHorseWhinnyAt) return;
+  playHorseWhinny();
+  nextHorseWhinnyAt =
+    now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
+}
+
+function maybePlayCelebrationWhinny(): void {
+  if (Math.random() >= FINAL_WHINNY_CHANCE) return;
+  scheduledHorseWhinnyTimer = window.setTimeout(() => {
+    scheduledHorseWhinnyTimer = null;
+    playHorseWhinny();
+  }, 180);
+}
+
 function reloadAudioTrack(audio: HTMLAudioElement): void {
   audio.pause();
   // load() clears an ended or interrupted media pipeline and starts a fresh
@@ -1229,7 +1282,9 @@ function stopResultTicks(): void {
 }
 
 function reloadGameEffects(): void {
+  stopHorseWhinny();
   reloadAudioTrack(horseThud);
+  reloadAudioTrack(horseWhinnies);
   reloadAudioTrack(countFanfare);
   reloadAudioTrack(resultTada);
   for (const tick of resultTicks) reloadAudioTrack(tick);
@@ -1237,8 +1292,10 @@ function reloadGameEffects(): void {
   nextResultTickAt = 0;
 }
 
-function startGameAudio(): void {
+function startGameAudio(now: number): void {
   reloadGameEffects();
+  nextHorseWhinnyAt =
+    now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
   if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
   restartAudioTrack(soundtrack, 'Background music');
 }
@@ -1250,6 +1307,7 @@ function stopAllAudio(): void {
   stopAudioTrack(countFanfare);
   stopAudioTrack(resultTada);
   stopResultTicks();
+  stopHorseWhinny();
 }
 
 function showSceneError(message: string, error: unknown): void {

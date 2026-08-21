@@ -79,6 +79,7 @@ import {
 } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
 import horseThudUrl from '../free-sound-1674747349.mp3?url';
+import resultTickUrl from '../free-sound-1674778893.mp3?url';
 import resultTadaUrl from '../free-sound-1674895520.mp3?url';
 import countFanfareUrl from '../free-sound-1674977569.mp3?url';
 import farmAmbienceUrl from '../free-sound-1674978362.mp3?url';
@@ -109,6 +110,8 @@ const GAME_DURATION_MS = 60_000;
 const HANDS_PER_EMOJI_COLUMN = 12;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
+const RESULT_TICK_INTERVAL_MS = 32;
+const RESULT_TICK_POOL_SIZE = 8;
 const INDICATOR_SPRING = 22;
 const INDICATOR_DAMPING = 6.2;
 const INDICATOR_MAX_ANGLE = 0.65;
@@ -157,6 +160,9 @@ const farmAmbience = createAudioTrack(farmAmbienceUrl, 0.16, true);
 const horseThud = createAudioTrack(horseThudUrl, 0.24);
 const countFanfare = createAudioTrack(countFanfareUrl, 0.46);
 const resultTada = createAudioTrack(resultTadaUrl, 0.52);
+const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
+  createAudioTrack(resultTickUrl, 0.1),
+);
 // Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
@@ -335,6 +341,8 @@ let resultAnimationStart = 0;
 let resultAnimationDuration = 0;
 let resultHands = 0;
 let resultHandsShown = 0;
+let resultTickIndex = 0;
+let nextResultTickAt = 0;
 let physicsAccumulator = 0;
 let previousTime = performance.now();
 let isViewerVisible = true;
@@ -655,6 +663,8 @@ function finishGame(now: number): void {
   ).length;
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
+  resultTickIndex = 0;
+  nextResultTickAt = now;
   resultAnimationStart = now;
   resultAnimationDuration = reducedMotion.matches
     ? 1
@@ -685,14 +695,15 @@ function updateResultAnimation(now: number): void {
   const progress = clamp((now - resultAnimationStart) / resultAnimationDuration, 0, 1);
   const easedProgress = 1 - Math.pow(1 - progress, 3);
   const handsToShow = Math.min(resultHands, Math.floor(resultHands * easedProgress));
-  appendHorseHands(handsToShow);
+  if (appendHorseHands(handsToShow)) playResultTick(now);
   resultHandCount.textContent = String(handsToShow);
   resultScore.textContent = formatMeters(getStackHeightMeters(finalHeight) * easedProgress);
 
   if (progress >= 1) completeResultAnimation();
 }
 
-function appendHorseHands(targetCount: number): void {
+function appendHorseHands(targetCount: number): boolean {
+  const previousCount = resultHandsShown;
   while (resultHandsShown < targetCount) {
     const columnIndex = Math.floor(resultHandsShown / HANDS_PER_EMOJI_COLUMN);
     let column = resultHorseStack.children.item(columnIndex);
@@ -707,6 +718,7 @@ function appendHorseHands(targetCount: number): void {
     column.append(horse);
     resultHandsShown++;
   }
+  return resultHandsShown > previousCount;
 }
 
 function completeResultAnimation(): void {
@@ -1193,10 +1205,26 @@ function stopAudioTrack(audio: HTMLAudioElement): void {
   audio.currentTime = 0;
 }
 
+function playResultTick(now: number): void {
+  if (reducedMotion.matches || now < nextResultTickAt) return;
+  const tick = resultTicks[resultTickIndex % resultTicks.length];
+  if (tick === undefined) return;
+  resultTickIndex++;
+  nextResultTickAt = now + RESULT_TICK_INTERVAL_MS;
+  restartAudioTrack(tick, 'Result tick');
+}
+
+function stopResultTicks(): void {
+  for (const tick of resultTicks) stopAudioTrack(tick);
+  resultTickIndex = 0;
+  nextResultTickAt = 0;
+}
+
 function startGameAudio(): void {
   stopAudioTrack(horseThud);
   stopAudioTrack(countFanfare);
   stopAudioTrack(resultTada);
+  stopResultTicks();
   if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
   restartAudioTrack(soundtrack, 'Background music');
 }
@@ -1207,6 +1235,7 @@ function stopAllAudio(): void {
   stopAudioTrack(horseThud);
   stopAudioTrack(countFanfare);
   stopAudioTrack(resultTada);
+  stopResultTicks();
 }
 
 function showSceneError(message: string, error: unknown): void {

@@ -53,3 +53,8 @@ farm-edge collider.
 - [Horse](https://sketchfab.com/3d-models/horse-e9f1f7d5684c4e8881eb24a1d57e71b3)
   by [SleepyPineapple](https://sketchfab.com/SleepyPineapple), licensed under
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## Music credit
+
+- “The Mountain's Happy Song” by Elijah_K, sourced from
+  [Free Music Archive](https://freemusicarchive.org/) and licensed under CC BY.

@@ -77,6 +77,7 @@ import {
   PHYSICS_STEP,
   stepHorseStack,
 } from './horseStackPhysics';
+import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
 import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
@@ -147,6 +148,9 @@ const gameCallout = requireElement<HTMLDivElement>('game-callout');
 const heroTimer = requireElement<HTMLDivElement>('hero-timer');
 const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const soundtrack = new Audio(soundtrackUrl);
+soundtrack.preload = 'auto';
+soundtrack.volume = 0.36;
 // Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
@@ -478,6 +482,7 @@ function startGame(): void {
   if (horseTemplate === null || phase === 'loading') return;
 
   const now = performance.now();
+  restartSoundtrack();
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
   activeHorse = null;
@@ -616,6 +621,7 @@ function updateGame(now: number): void {
 
 function beginSettling(now: number): void {
   phase = 'settling';
+  stopSoundtrack();
   activeHorse = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
   dropButton.disabled = true;
@@ -1152,7 +1158,22 @@ function bindRenderingLifecycle(): void {
   });
 }
 
+function restartSoundtrack(): void {
+  soundtrack.pause();
+  soundtrack.currentTime = 0;
+  void soundtrack.play().catch((error: unknown) => {
+    // Audio permission or device failures should never prevent a game from starting.
+    console.info('Background music could not start.', error);
+  });
+}
+
+function stopSoundtrack(): void {
+  soundtrack.pause();
+  soundtrack.currentTime = 0;
+}
+
 function showSceneError(message: string, error: unknown): void {
+  stopSoundtrack();
   console.error(message, error);
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;

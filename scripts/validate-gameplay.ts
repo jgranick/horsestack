@@ -118,6 +118,9 @@ function validateStableActivation(): void {
       'stable placement: a placed horse must activate without linear or angular impulse',
     );
   }
+  if (horse.bullet) {
+    throw new Error('stable placement: a gently placed horse should not enable continuous collision');
+  }
 }
 
 function validateHeightCalibration(): void {

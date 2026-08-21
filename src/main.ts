@@ -762,18 +762,25 @@ function handlePhysicsContacts(now: number): void {
 }
 
 function synchronizeHorseVisuals(): void {
+  let retainedCount = 0;
   for (const horse of stackedHorses) {
     if (horse.lost) continue;
     const body = horse.body;
-    setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
 
     // Leave enough void beyond the collider for the whole tumble to remain visible.
     if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
       horse.lost = true;
       horse.node.enabled = false;
       removePhysics2DBody(physicsWorld, body);
+      continue;
     }
+
+    setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
+    stackedHorses[retainedCount++] = horse;
   }
+  // Fallen horses have already left the physics world and score calculation;
+  // keep them out of every subsequent placement, height, and visual scan too.
+  stackedHorses.length = retainedCount;
 }
 
 function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {

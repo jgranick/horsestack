@@ -4,6 +4,7 @@ import {
   createPhysics2DCollider,
   createPhysics2DWorld,
   createRigidBody2D,
+  createUniformGridSpatialBackend,
   stepPhysics2D,
 } from '@flighthq/sdk';
 
@@ -19,6 +20,11 @@ export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
+// Match broadphase buckets to the objects that dominate this world. The SDK's
+// one-unit default is several horse lengths wide and produces many unrelated
+// candidate pairs in a dense pile.
+const PHYSICS_GRID_CELL_SIZE = 0.2;
+
 const HORSE_MATERIAL: Physics2DMaterial = {
   density: 1,
   friction: 0.56,
@@ -31,7 +37,11 @@ const PASTURE_MATERIAL: Physics2DMaterial = {
 };
 
 export function createHorseStackWorld(): Physics2DWorld {
-  const world = createPhysics2DWorld(0, -PHYSICS_GRAVITY);
+  const world = createPhysics2DWorld(
+    0,
+    -PHYSICS_GRAVITY,
+    createUniformGridSpatialBackend(PHYSICS_GRID_CELL_SIZE),
+  );
   world.config.velocityIterations = 12;
   world.config.positionIterations = 6;
   world.config.timeToSleep = 0.65;
@@ -64,7 +74,10 @@ export function addHorseBody(
   const body = createRigidBody2D('dynamic', x, y, angle);
   body.linearDamping = 0.08;
   body.angularDamping = 0.06;
-  body.bullet = true;
+  // Horses appear directly at the previewed landing pose with no launch
+  // velocity. Discrete collision is sufficient and avoids putting the entire
+  // awake pile through the continuous-collision path every step.
+  body.bullet = false;
 
   // A rounded, uneven proxy makes the horses accumulate as a pile instead
   // of clicking together into a neat tower.

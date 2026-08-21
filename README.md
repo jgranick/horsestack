@@ -9,11 +9,10 @@ Each run gives you 30 seconds and an unlimited supply of cow-scale horses.
 Before every drop, the real horse stays hidden and a radiant yellow horse
 previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
-teeters it. On placement, that pose locks and the real horse fades in roughly
-half a horse-height above the marker, eases onto the live pile over 520ms, and
-is handed to Flight's full physics with zero linear or angular impulse at
-contact. The pile can still shift, tip, and tumble, but every horse starts from
-a more stable placement.
+teeters it. On placement, the marker is immediately replaced by a fully visible
+real horse at that exact position and angle. Flight physics activates there
+with zero linear or angular impulse, so the pile can still shift, tip, and
+tumble without an artificial drop destabilizing it.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. The result
 reports the contact-supported height in meters alongside the combined score.
@@ -40,8 +39,7 @@ npm run validate:game
 The gameplay validation runs 64-horse level, balanced, and teetered placement
 scenarios using the shipped timing and surface-placement rules, then checks for
 finite body state, contacts, a measurable supported pile, zero-impulse physics
-activation, a readable placement path, and a real fall beyond the farm-edge
-collider.
+activation, and a real fall beyond the farm-edge collider.
 
 ## Model credits
 

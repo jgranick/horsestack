@@ -3,12 +3,10 @@ import {
   addHorseBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
-  getHorseSpawnY,
   getNextHorseDelay,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
-  HORSE_PLACEMENT_DURATION_MS,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
@@ -26,12 +24,11 @@ const TARGET_HALF_WIDTH = 0.32;
 const VALIDATION_HORSES = 64;
 
 const scenarios = [
-  runScenario('level placements', 0x4c455645, 0.04),
-  runScenario('balanced placements', 0x42414c41, 0.28),
-  runScenario('teetered placements', 0x54454554, 0.6),
+  runScenario('level placements', 0x4c455645, 0.04, 0.34),
+  runScenario('balanced placements', 0x42414c41, 0.28, 0.2),
+  runScenario('teetered placements', 0x54454554, 0.6, 0.1),
 ];
 validateStableActivation();
-validatePlacementAnimation();
 validateFarmEdgeFalloff();
 
 console.log(
@@ -47,6 +44,7 @@ function runScenario(
   name: string,
   seed: number,
   maxTilt: number,
+  inputCadence: number,
 ): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody2D[] = [];
@@ -71,7 +69,7 @@ function runScenario(
 
     if (index === VALIDATION_HORSES - 1) continue;
     const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    stepForDuration(world, horses, HORSE_PLACEMENT_DURATION_MS / 1000 + delaySeconds);
+    stepForDuration(world, horses, inputCadence + delaySeconds);
   }
 
   stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
@@ -106,21 +104,6 @@ function validateStableActivation(): void {
   if (horse.velocityX !== 0 || horse.velocityY !== 0 || horse.angularVelocity !== 0) {
     throw new Error(
       'stable placement: a placed horse must activate without linear or angular impulse',
-    );
-  }
-}
-
-function validatePlacementAnimation(): void {
-  const surfaceY = 0.55;
-  const restingCenterY = surfaceY + HORSE_HALF_HEIGHT;
-  const releaseGap = getHorseSpawnY(surfaceY) - restingCenterY;
-  const horseHeight = HORSE_HALF_HEIGHT * 2;
-  if (releaseGap < horseHeight * 0.5 || releaseGap > horseHeight) {
-    throw new Error(`placement path: expected a 0.5–1 horse-height gap, received ${releaseGap}`);
-  }
-  if (HORSE_PLACEMENT_DURATION_MS < 400 || HORSE_PLACEMENT_DURATION_MS > 800) {
-    throw new Error(
-      `placement path: expected a readable 400–800ms animation, received ${HORSE_PLACEMENT_DURATION_MS}ms`,
     );
   }
 }

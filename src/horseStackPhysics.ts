@@ -16,7 +16,6 @@ export const PASTURE_TOP_Y = -0.015;
 export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
-export const HORSE_PLACEMENT_DURATION_MS = 520;
 
 const HORSE_MATERIAL: Physics2DMaterial = {
   density: 1,
@@ -85,14 +84,6 @@ export function addHorseBody(
 
 export function stepHorseStack(world: Physics2DWorld): void {
   stepPhysics2D(world, PHYSICS_STEP);
-}
-
-export function getHorseSpawnY(
-  landingSurfaceY: number,
-  verticalExtent = HORSE_HALF_HEIGHT,
-): number {
-  // The placement animation begins 0.625 horse-heights above its resting center.
-  return landingSurfaceY + verticalExtent + HORSE_HALF_HEIGHT * 1.25;
 }
 
 export function getNextHorseDelay(horsesDropped: number): number {

@@ -9,6 +9,8 @@ import {
 
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
+export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
+export const METERS_PER_HAND = 0.1016;
 // The farm ground spans roughly 3.5 world units across the new straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
@@ -92,6 +94,16 @@ export function getNextHorseDelay(horsesDropped: number): number {
 
 export function getPaceLevel(horsesDropped: number): number {
   return Math.min(6, 1 + Math.floor(horsesDropped / 7));
+}
+
+export function getStackHeightMeters(stackTopY: number): number {
+  if (stackTopY <= 0) return 0;
+  const heightAbovePasture = Math.max(0, stackTopY - PASTURE_TOP_Y);
+  return heightAbovePasture * (TYPICAL_HORSE_WITHERS_METERS / (HORSE_HALF_HEIGHT * 2));
+}
+
+export function getStackHeightHands(stackTopY: number): number {
+  return Math.round(getStackHeightMeters(stackTopY) / METERS_PER_HAND);
 }
 
 export function getSupportedStackHeight(

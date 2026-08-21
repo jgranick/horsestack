@@ -67,6 +67,8 @@ import {
   FINAL_SETTLE_SECONDS,
   getNextHorseDelay,
   getPaceLevel,
+  getStackHeightHands,
+  getStackHeightMeters,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
@@ -98,7 +100,10 @@ const STACK_X = 0.9;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
-const GAME_DURATION_MS = 30_000;
+const GAME_DURATION_MS = 60_000;
+const HANDS_PER_EMOJI_COLUMN = 12;
+const MIN_RESULT_COUNT_DURATION_MS = 2_200;
+const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 const INDICATOR_SPRING = 22;
 const INDICATOR_DAMPING = 6.2;
 const INDICATOR_MAX_ANGLE = 0.65;
@@ -124,7 +129,10 @@ const sceneStatus = requireElement<HTMLDivElement>('scene-status');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
 const startPanel = requireElement<HTMLDivElement>('start-panel');
 const startButton = requireElement<HTMLButtonElement>('start-button');
+const timeUpPanel = requireElement<HTMLDivElement>('time-up-panel');
 const resultPanel = requireElement<HTMLDivElement>('result-panel');
+const resultHorseStack = requireElement<HTMLDivElement>('result-horse-stack');
+const resultHandCount = requireElement<HTMLElement>('result-hand-count');
 const resultScore = requireElement<HTMLSpanElement>('result-score');
 const resultCopy = requireElement<HTMLParagraphElement>('result-copy');
 const replayButton = requireElement<HTMLButtonElement>('replay-button');
@@ -136,6 +144,8 @@ const timerFill = requireElement<HTMLSpanElement>('timer-fill');
 const heightCopy = requireElement<HTMLSpanElement>('stack-height');
 const paceCopy = requireElement<HTMLSpanElement>('pace-copy');
 const gameCallout = requireElement<HTMLDivElement>('game-callout');
+const heroTimer = requireElement<HTMLDivElement>('hero-timer');
+const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 // Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
 const modelPathFromModule = '../models/';
@@ -149,30 +159,30 @@ const horseLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
 addNodeChild(scene, horseLayer);
 const landingGhostMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
-  baseColor: 0xffd447ff,
+  baseColor: 0xe2b83fff,
   doubleSided: true,
-  emissive: 0x5b3b00ff,
-  emissiveStrength: 0.9,
-  metallic: 0,
-  roughness: 0.48,
+  emissive: 0x8a5a0bff,
+  emissiveStrength: 0.7,
+  metallic: 0.18,
+  roughness: 0.38,
 });
 const landingBeamMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
-  baseColor: 0xffd968ff,
+  baseColor: 0xf1d88aff,
   doubleSided: true,
-  emissive: 0xffc83dff,
-  emissiveStrength: 2.4,
+  emissive: 0xc58a18ff,
+  emissiveStrength: 0.65,
   metallic: 0,
-  roughness: 0.7,
+  roughness: 0.62,
 });
 const landingHaloMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
-  baseColor: 0xffef9cff,
+  baseColor: 0xf5d36aff,
   doubleSided: true,
-  emissive: 0xffcf4aff,
-  emissiveStrength: 3.2,
-  metallic: 0,
-  roughness: 0.55,
+  emissive: 0xd49a22ff,
+  emissiveStrength: 1.15,
+  metallic: 0.1,
+  roughness: 0.42,
 });
 
 const dustEmitter: ParticleEmitter3D = createParticleEmitter3D({
@@ -274,7 +284,7 @@ const indicatorLight: PointLight = createPointLight({
   color: 0xffd56aff,
   intensity: 0,
   position: createVector3(STACK_X + 0.16, 0.2, STACK_Z),
-  range: 1.1,
+  range: 0.68,
 });
 const lights: Scene3DLightsLike = {
   ambient: createAmbientLight({ color: 0xbdd0b5ff, intensity: 0.72 }),
@@ -310,6 +320,11 @@ let gameEndsAt = 0;
 let finishAt = 0;
 let finalHeight = 0;
 let cachedStackHeight = 0;
+let finalSurvivors = 0;
+let resultAnimationStart = 0;
+let resultAnimationDuration = 0;
+let resultHands = 0;
+let resultHandsShown = 0;
 let physicsAccumulator = 0;
 let previousTime = performance.now();
 let isViewerVisible = true;
@@ -387,16 +402,16 @@ function createHorseVisual(
 function createLandingRadiance(): Node3D {
   const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
   const beam = createMesh(
-    createCylinderMeshGeometry(0.22, 0.025, 0.75, 18, false),
+    createCylinderMeshGeometry(0.16, 0.022, 0.58, 18, false),
     [landingBeamMaterial],
   );
-  beam.alpha = 0.11;
-  beam.position.y = 0.375;
+  beam.alpha = 0.045;
+  beam.position.y = 0.29;
   invalidateNodeLocalTransform(beam);
   addNodeChild(root, beam);
 
-  const halo = createMesh(createRingMeshGeometry(0.1, 0.155, 28), [landingHaloMaterial]);
-  halo.alpha = 0.5;
+  const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
+  halo.alpha = 0.24;
   halo.position.x = 0.012;
   setQuaternionFromEuler(halo.rotation, 0, 0, Math.PI / 2);
   invalidateNodeLocalTransform(halo);
@@ -478,6 +493,11 @@ function startGame(): void {
   finishAt = 0;
   finalHeight = 0;
   cachedStackHeight = 0;
+  finalSurvivors = 0;
+  resultAnimationStart = 0;
+  resultAnimationDuration = 0;
+  resultHands = 0;
+  resultHandsShown = 0;
   impactFlashUntil = 0;
   lastImpactAt = 0;
   removeNodeChildren(horseLayer);
@@ -494,13 +514,20 @@ function startGame(): void {
 
   phase = 'playing';
   startPanel.hidden = true;
+  timeUpPanel.hidden = true;
   resultPanel.hidden = true;
+  resultPanel.classList.remove('is-total-revealed');
+  resultHorseStack.replaceChildren();
+  resultHandCount.textContent = '0';
+  resultScore.textContent = '0.00 m';
+  resultCopy.textContent = 'The pasture is still assessing the situation.';
+  replayButton.hidden = true;
   restartButton.hidden = false;
   dropButton.disabled = true;
   viewer.classList.add('is-playing');
-  viewer.classList.remove('is-finished', 'is-bumping', 'is-panicking');
+  viewer.classList.remove('is-finished', 'is-time-up', 'is-bumping', 'is-panicking');
   sceneStatus.classList.add('is-ready');
-  statusCopy.textContent = '30 seconds. Go!';
+  statusCopy.textContent = '60 seconds. Go!';
   gameCallout.textContent = 'Move fast to make it teeter…';
   hudDirty = true;
   spawnHorse(now);
@@ -583,7 +610,7 @@ function updateGame(now: number): void {
       spawnHorse(now);
     }
   } else if (phase === 'settling' && now >= finishAt) {
-    finishGame();
+    finishGame(now);
   }
 }
 
@@ -595,32 +622,96 @@ function beginSettling(now: number): void {
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
-  statusCopy.textContent = 'Time! Everybody hold still';
-  gameCallout.textContent = 'The judges are measuring…';
+  timeUpPanel.hidden = false;
+  viewer.classList.remove('is-playing', 'is-panicking');
+  viewer.classList.add('is-time-up');
+  statusCopy.textContent = 'Time up!';
+  gameCallout.textContent = 'Hands off the herd!';
   hudDirty = true;
   renderRequested = true;
 }
 
-function finishGame(): void {
+function finishGame(now: number): void {
   phase = 'finished';
   finalHeight = getCurrentStackHeight();
   cachedStackHeight = finalHeight;
-  const survivors = stackedHorses.filter(
+  finalSurvivors = stackedHorses.filter(
     ({ body, lost }) =>
       !lost && body.y > -1 && Math.abs(body.x) <= PASTURE_HALF_WIDTH + HORSE_HALF_WIDTH,
   ).length;
-  resultScore.textContent = formatHeight(finalHeight);
-  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points · ${survivors} of ${horsesDropped} horses remained in the general vicinity.`;
+  resultHands = getStackHeightHands(finalHeight);
+  resultHandsShown = 0;
+  resultAnimationStart = now;
+  resultAnimationDuration = reducedMotion.matches
+    ? 1
+    : clamp(
+        1_800 + resultHands * 14,
+        MIN_RESULT_COUNT_DURATION_MS,
+        MAX_RESULT_COUNT_DURATION_MS,
+      );
+  resultHorseStack.replaceChildren();
+  resultHandCount.textContent = '0';
+  resultScore.textContent = '0.00 m';
+  resultCopy.textContent = 'Counting the herd, one hand at a time…';
+  replayButton.hidden = true;
+  resultPanel.classList.remove('is-total-revealed');
+  timeUpPanel.hidden = true;
   resultPanel.hidden = false;
-  viewer.classList.remove('is-playing', 'is-panicking', 'is-bumping');
+  viewer.classList.remove('is-playing', 'is-time-up', 'is-panicking', 'is-bumping');
   viewer.classList.add('is-finished');
   indicatorLight.intensity = 0;
+  statusCopy.textContent = 'Counting hands…';
+  gameCallout.textContent = 'One 🐴 per hand. Keep counting…';
+  hudDirty = true;
+  renderRequested = true;
+}
+
+function updateResultAnimation(now: number): void {
+  if (resultAnimationStart === 0) return;
+  const progress = clamp((now - resultAnimationStart) / resultAnimationDuration, 0, 1);
+  const easedProgress = 1 - Math.pow(1 - progress, 3);
+  const handsToShow = Math.min(resultHands, Math.floor(resultHands * easedProgress));
+  appendHorseHands(handsToShow);
+  resultHandCount.textContent = String(handsToShow);
+  resultScore.textContent = formatMeters(getStackHeightMeters(finalHeight) * easedProgress);
+
+  if (progress >= 1) completeResultAnimation();
+}
+
+function appendHorseHands(targetCount: number): void {
+  while (resultHandsShown < targetCount) {
+    const columnIndex = Math.floor(resultHandsShown / HANDS_PER_EMOJI_COLUMN);
+    let column = resultHorseStack.children.item(columnIndex);
+    if (!(column instanceof HTMLElement)) {
+      column = document.createElement('span');
+      column.className = 'horse-hand-column';
+      resultHorseStack.append(column);
+    }
+    const horse = document.createElement('span');
+    horse.className = 'horse-hand';
+    horse.textContent = '🐴';
+    column.append(horse);
+    resultHandsShown++;
+  }
+}
+
+function completeResultAnimation(): void {
+  resultAnimationStart = 0;
+  appendHorseHands(resultHands);
+  resultHandCount.textContent = String(resultHands);
+  resultScore.textContent = formatHeight(finalHeight);
+  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points · ${finalSurvivors} of ${horsesDropped} horses remained in the general vicinity.`;
+  replayButton.hidden = false;
+  resultPanel.classList.add('is-total-revealed');
   statusCopy.textContent = 'Officially measured';
   gameCallout.textContent =
     finalHeight >= 0.45
       ? 'A monument to poor judgement.'
       : 'Structurally questionable. Perfect.';
+  celebrateFinalHeight();
+}
 
+function celebrateFinalHeight(): void {
   const burstY = STACK_BASE_Y + Math.max(0.8, finalHeight);
   const colors = [0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff];
   for (let index = 0; index < colors.length; index++) {
@@ -636,7 +727,6 @@ function finishGame(): void {
       colors[index],
     );
   }
-  hudDirty = true;
   renderRequested = true;
 }
 
@@ -698,7 +788,7 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
     indicatorLight.intensity = 0;
     return;
   }
-  setNode3DAlpha(landingGhost, 0.42 + Math.sin(now * 0.009) * 0.05);
+  setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
   const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle);
   setHorseVisualTransform(landingGhost, previewX, previewY, current.angle);
   updateLandingRadiance(previewX, previewY, now);
@@ -707,9 +797,9 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
 function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   const radiance = landingRadiance;
   if (radiance === null) return;
-  const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.055;
+  const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
   radiance.enabled = true;
-  setNode3DAlpha(radiance, 0.82 + Math.sin(now * 0.008) * 0.12);
+  setNode3DAlpha(radiance, 0.48 + Math.sin(now * 0.008) * 0.055);
   radiance.position.x = STACK_X + 0.006;
   radiance.position.y = STACK_BASE_Y + physicsY;
   radiance.position.z = STACK_Z - x;
@@ -718,10 +808,10 @@ function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   radiance.scale.z = pulse;
   invalidateNodeLocalTransform(radiance);
 
-  indicatorLight.position.x = STACK_X + 0.16;
-  indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.12;
+  indicatorLight.position.x = STACK_X + 0.1;
+  indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.09;
   indicatorLight.position.z = STACK_Z - x;
-  indicatorLight.intensity = 3.2 + Math.sin(now * 0.008) * 0.45;
+  indicatorLight.intensity = 0.8 + Math.sin(now * 0.008) * 0.14;
 }
 
 function getLandingSurfaceY(x: number): number {
@@ -782,15 +872,20 @@ function updateHud(now: number, stackHeight = cachedStackHeight): void {
   setTextIfChanged(paceCopy, `${getScore(stackHeight).toLocaleString()} pts`);
 
   if (phase !== 'playing') {
-    setTextIfChanged(timerCopy, phase === 'settling' ? 'measuring' : '—');
+    setTextIfChanged(timerCopy, phase === 'settling' ? 'TIME UP' : '—');
+    setTextIfChanged(heroTimerCopy, '0');
     setStyleTransformIfChanged(timerFill, 'scaleX(0)');
     timerFill.classList.remove('is-urgent');
+    heroTimer.classList.remove('is-urgent');
   } else {
     const remainingMs = Math.max(0, gameEndsAt - now);
     const remaining = remainingMs / 1000;
     setTextIfChanged(timerCopy, `${remaining.toFixed(1)}s`);
+    setTextIfChanged(heroTimerCopy, String(Math.ceil(remaining)));
     setStyleTransformIfChanged(timerFill, `scaleX(${clamp(remainingMs / GAME_DURATION_MS, 0, 1)})`);
-    timerFill.classList.toggle('is-urgent', remaining <= 5);
+    timerFill.classList.toggle('is-urgent', remaining <= 10);
+    heroTimer.classList.toggle('is-urgent', remaining <= 10);
+    viewer.classList.toggle('is-panicking', remaining <= 10);
   }
 
   viewer.classList.toggle('is-bumping', now < impactFlashUntil && !reducedMotion.matches);
@@ -824,7 +919,7 @@ function updateIndicatorTeeter(now: number): void {
 }
 
 function getScore(height: number): number {
-  return Math.round(height * 2500);
+  return Math.round(getStackHeightMeters(height) * 1000);
 }
 
 function bindGameControls(): void {
@@ -962,6 +1057,9 @@ function enterFrame(now: number): void {
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
       renderRequested = true;
     }
+    if (phase === 'finished' && resultAnimationStart !== 0) {
+      updateResultAnimation(now);
+    }
 
     const dustIsMoving = dustEmitter.data.particleCount > 0;
     const celebrationIsMoving = celebrationEmitter.data.particleCount > 0;
@@ -1052,6 +1150,7 @@ function showSceneError(message: string, error: unknown): void {
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;
   startPanel.hidden = true;
+  timeUpPanel.hidden = true;
   resultPanel.hidden = true;
   dropButton.disabled = true;
   sceneStatus.classList.remove('is-ready');
@@ -1068,7 +1167,11 @@ function setStyleTransformIfChanged(element: HTMLElement, value: string): void {
 }
 
 function formatHeight(height: number): string {
-  return `${height.toFixed(2)} m`;
+  return formatMeters(getStackHeightMeters(height));
+}
+
+function formatMeters(meters: number): string {
+  return `${meters.toFixed(2)} m`;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -5,8 +5,8 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you 30 seconds and an unlimited supply of cow-scale horses.
-Before every drop, the real horse stays hidden and a radiant yellow horse
+Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
+Before every drop, the real horse stays hidden and a softly glowing gold horse
 previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
@@ -14,8 +14,11 @@ real horse at that exact position and angle. Flight physics activates there
 with zero linear or angular impulse, so the pile can still shift, tip, and
 tumble without an artificial drop destabilizing it.
 The cow-scale horses stay readable under a close camera that tracks the pile's
-top while gradually pulling back and changing angle with its growth. The result
-reports the contact-supported height in meters alongside the combined score.
+top while gradually pulling back and changing angle with its growth. Displayed
+height is calibrated so one upright physics horse represents a typical 1.55m
+riding horse. After the TIME UP beat, the result counts upward in meters and in
+hands (4 inches each), stacking one horse emoji per hand before revealing the
+final score.
 
 ## Run locally
 
@@ -39,7 +42,8 @@ npm run validate:game
 The gameplay validation runs 64-horse level, balanced, and teetered placement
 scenarios using the shipped timing and surface-placement rules, then checks for
 finite body state, contacts, a measurable supported pile, zero-impulse physics
-activation, and a real fall beyond the farm-edge collider.
+activation, the 1.55m horse-height conversion, and a real fall beyond the
+farm-edge collider.
 
 ## Model credits
 

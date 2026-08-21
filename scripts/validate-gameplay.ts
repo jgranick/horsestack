@@ -4,6 +4,8 @@ import {
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
   getNextHorseDelay,
+  getStackHeightHands,
+  getStackHeightMeters,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
@@ -11,11 +13,13 @@ import {
   PASTURE_TOP_Y,
   PHYSICS_STEP,
   stepHorseStack,
+  TYPICAL_HORSE_WITHERS_METERS,
 } from '../src/horseStackPhysics';
 
 interface ScenarioResult {
   contacts: number;
-  height: number;
+  hands: number;
+  heightMeters: number;
   inPasture: number;
   name: string;
 }
@@ -29,15 +33,16 @@ const scenarios = [
   runScenario('teetered placements', 0x54454554, 0.6, 0.1),
 ];
 validateStableActivation();
+validateHeightCalibration();
 validateFarmEdgeFalloff();
 
 console.log(
   `gameplay: ${scenarios
     .map(
-      ({ contacts, height, inPasture, name }) =>
-        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${height.toFixed(2)}m`,
+      ({ contacts, hands, heightMeters, inPasture, name }) =>
+        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; farm-edge falloff verified`,
+    .join('; ')}; horse-height calibration and farm-edge falloff verified`,
 );
 
 function runScenario(
@@ -74,22 +79,29 @@ function runScenario(
 
   stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
 
-  const height = getSupportedStackHeight(world, horses);
+  const stackTopY = getSupportedStackHeight(world, horses);
+  const heightMeters = getStackHeightMeters(stackTopY);
   const inPasture = horses.filter(
     (horse) => Math.abs(horse.x) <= PASTURE_HALF_WIDTH && horse.y > -1,
   ).length;
   if (inPasture < VALIDATION_HORSES / 2) {
     throw new Error(`${name}: expected at least half the herd in the farm, received ${inPasture}`);
   }
-  const minimumHeight = 0.12;
-  if (height < minimumHeight) {
+  const minimumHeightMeters = 1.2;
+  if (heightMeters < minimumHeightMeters) {
     throw new Error(
-      `${name}: expected a pile over ${minimumHeight}m, received ${height.toFixed(2)}m`,
+      `${name}: expected a pile over ${minimumHeightMeters}m, received ${heightMeters.toFixed(2)}m`,
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
 
-  return { contacts: world.contacts.length, height, inPasture, name };
+  return {
+    contacts: world.contacts.length,
+    hands: getStackHeightHands(stackTopY),
+    heightMeters,
+    inPasture,
+    name,
+  };
 }
 
 function validateStableActivation(): void {
@@ -105,6 +117,19 @@ function validateStableActivation(): void {
     throw new Error(
       'stable placement: a placed horse must activate without linear or angular impulse',
     );
+  }
+}
+
+function validateHeightCalibration(): void {
+  const oneHorseTopY = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 2;
+  const meters = getStackHeightMeters(oneHorseTopY);
+  if (Math.abs(meters - TYPICAL_HORSE_WITHERS_METERS) > 0.000_001) {
+    throw new Error(
+      `height calibration: one upright horse should read ${TYPICAL_HORSE_WITHERS_METERS}m, received ${meters}m`,
+    );
+  }
+  if (getStackHeightHands(oneHorseTopY) !== 15) {
+    throw new Error('height calibration: a 1.55m horse should round to 15 hands');
   }
 }
 

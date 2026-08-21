@@ -32,7 +32,7 @@
           <p class="eyebrow"><span>01</span> Experimental agriculture</p>
           <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            Unlimited horses. Thirty frantic seconds. Aim the glow, build upward, embrace the
+            Unlimited horses. Sixty frantic seconds. Aim the glow, build upward, embrace the
             consequences.
           </p>
 
@@ -75,15 +75,25 @@
             <div class="game-panel start-panel" id="start-panel" hidden>
               <p class="panel-kicker">Flight 2D physics presents</p>
               <h2>Ready to make<br />poor choices?</h2>
-              <p>You have 30 seconds and all the horses you can place. Build the tallest pile.</p>
+              <p>You have 60 seconds and all the horses you can place. Build the tallest pile.</p>
               <button type="button" id="start-button" disabled>Start stacking</button>
+            </div>
+
+            <div class="game-panel time-up-panel" id="time-up-panel" hidden role="status" aria-live="assertive">
+              <p class="panel-kicker">Hands off the herd</p>
+              <h2>TIME<br />UP!</h2>
+              <p>Hold everything. The pasture is counting.</p>
             </div>
 
             <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
               <p class="panel-kicker">Official-ish height</p>
+              <div class="horse-tally" aria-hidden="true">
+                <div class="horse-hand-stack" id="result-horse-stack"></div>
+              </div>
+              <p class="result-hand-line"><strong id="result-hand-count">0</strong> hands high</p>
               <h2><span id="result-score">0.00 m</span></h2>
               <p id="result-copy">The pasture is still assessing the situation.</p>
-              <button type="button" id="replay-button">Stack again</button>
+              <button type="button" id="replay-button" hidden>Stack again</button>
             </div>
 
             <div class="error-panel" id="error-panel" hidden>
@@ -92,6 +102,11 @@
             </div>
 
             <div class="game-callout" id="game-callout" aria-live="off">Awaiting horses…</div>
+
+            <div class="hero-timer" id="hero-timer" aria-hidden="true">
+              <span>Time left</span>
+              <strong id="hero-timer-copy">60</strong>
+            </div>
 
             <button class="restart-game" id="restart-game" type="button" hidden>
               <span aria-hidden="true">↺</span>
@@ -105,7 +120,7 @@
 
             <div class="viewer-label" aria-hidden="true">
               <span>Flight Physics 2D</span>
-              <span>30-second pile protocol</span>
+              <span>60-second pile protocol</span>
             </div>
           </div>
         </section>

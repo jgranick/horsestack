@@ -277,7 +277,7 @@ h1 em {
 }
 
 .interaction-note {
-  margin-top: 30px;
+  margin-top: 58px;
   display: flex;
   align-items: center;
   gap: 13px;
@@ -705,14 +705,15 @@ h1 em {
   height: clamp(152px, 24vh, 200px);
   margin: 2px auto 0;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   overflow: hidden;
   border-bottom: 1px solid rgba(255, 209, 102, 0.42);
 }
 
 .horse-hand-stack {
-  min-height: 100%;
+  /* Not 100%: the stack has to be its own height for .horse-tally to centre it. */
+  min-height: 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -987,7 +988,7 @@ h1 em {
   }
 
   .interaction-note {
-    margin-top: 24px;
+    margin-top: 42px;
   }
 
   .viewer {

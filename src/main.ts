@@ -20,7 +20,7 @@ import {
   cloneMeshGeometry,
   cloneMesh,
   compactMeshGeometryVertices,
-  configureDirectionalShadowCamera3D,
+  configureDirectionalShadowCamera3DTightFit,
   createAabb,
   createAmbientLight,
   createCamera3D,
@@ -133,6 +133,11 @@ const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
 // object reads as "about to drop" rather than as an object already in the pile.
 // Placement still uses the unlifted landing pose.
 const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
+// The lifted preview carries its halo ring with it, and at the tightest camera
+// distance the pair reached past the top of the frame. This much extra headroom on
+// the camera target keeps the whole marker visible; it costs a sliver of pasture at
+// the bottom, where there is margin to spare.
+const LANDING_MARKER_HEADROOM = 0.075;
 // Long enough to swallow the second half of a double-click on "Start stacking",
 // short enough that a player who reacts to the first preview never notices it.
 const START_INPUT_GUARD_MS = 400;
@@ -345,10 +350,19 @@ const shadowCamera = createCamera3D({
   near: 0.1,
   projection: createOrthographicProjection({ halfHeight: 15, halfWidth: 9 }),
 });
-configureDirectionalShadowCamera3D(
+// Flight's directional shadow map is a fixed 1024x1024 (DIRECTIONAL_SHADOW_MAP_SIZE),
+// so sharpness is entirely a question of how much world those texels cover. The farm's
+// own world bounds are only about 3.7 x 3.7 x 3.6, and the pile lives inside them, so
+// the shadow volume is that plus a margin — not the far larger box a whole-level scene
+// would need. Underside geometry below y=-0.7 is excluded: it casts nothing visible.
+// Tight-fit rather than the bounding-sphere fit, because it fits the light-space X and Y
+// extents independently and keeps noticeably more texel density. These are static bounds
+// fitted once, so there is no per-frame refit to shimmer.
+configureDirectionalShadowCamera3DTightFit(
   shadowCamera,
   sunDirection,
-  createAabb(-9, -3, -9, 9, 26, 9),
+  createAabb(-1.95, -0.7, -4.05, 1.95, 2.25, -0.35),
+  1.05,
 );
 
 let phase: GamePhase = 'loading';
@@ -1000,10 +1014,11 @@ function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): 
   }
   const landingY =
     landingSurfaceY + getStackObjectVerticalExtent(current.kind, current.angle);
-  // The object hovers a horse-height up; the halo and its light stay down on the
-  // landing pose, so the marker still says where the drop lands.
-  setStackObjectVisualTransform(landingGhost, previewX, landingY + LANDING_PREVIEW_LIFT, current.angle);
-  updateLandingRadiance(previewX, landingY, now);
+  // The halo and its light ride up with the object so the ring surrounds whatever is
+  // about to drop, rather than marking the landing pose it will fall to.
+  const previewY = landingY + LANDING_PREVIEW_LIFT;
+  setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);
+  updateLandingRadiance(previewX, previewY, now);
 }
 
 function updateLandingRadiance(x: number, physicsY: number, now: number): void {
@@ -1060,7 +1075,9 @@ function updateCamera(deltaTime: number, height: number): void {
   const herdProgress = clamp(objectsDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
   const desiredTargetY =
-    STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
+    STACK_BASE_Y +
+    Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2) +
+    LANDING_MARKER_HEADROOM;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;

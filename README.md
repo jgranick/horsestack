@@ -18,15 +18,19 @@ The bale is shown end-on with a fixed Z-axis quarter-turn, while the simplified
 irregular horse, and circular chicken.
 The pile itself sits close to the pasture's front edge.
 Before every drop, the real object stays hidden and a softly glowing gold object
-previews its landing pose, hovering a horse-height above it while the halo and its
-warm light stay down on the landing pose itself. The marker behaves like a damped
+previews its landing pose, hovering a horse-height above it with the gold halo and
+its warm light riding up to surround it. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
 real object at that exact position and angle. Flight physics activates there
 with zero linear or angular impulse, so the pile can still shift, tip, and
 tumble without an artificial drop destabilizing it.
 The mixed farm pieces stay readable under a close camera that tracks the pile's
-top while gradually pulling back and changing angle with its growth. Displayed
+top while gradually pulling back and changing angle with its growth, holding enough
+headroom above the pile for the raised marker.
+Flight's directional shadow map is a fixed 1024x1024, so its sharpness comes entirely
+from how little world it has to cover: the shadow camera is tight-fitted to the farm's
+own bounds rather than to a volume sized for a much larger level. Displayed
 height is calibrated so one upright physics horse represents a typical 1.55m
 riding horse. After the TIME UP beat, the result counts upward in meters and in
 hands (4 inches each), stacking one horse emoji per hand before revealing the

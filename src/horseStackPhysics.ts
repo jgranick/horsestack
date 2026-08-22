@@ -9,6 +9,7 @@ import type {
 import {
   addPhysics3DBody,
   addPhysics3DJoint,
+  applyPhysics3DLinearImpulseAtPoint,
   createPhysics3DBallAndSocketJoint,
   createPhysics3DCollider,
   createPhysics3DShapeCastResult,
@@ -40,6 +41,13 @@ export interface HorsePlacementResult {
   supportBody: RigidBody3D | null;
 }
 
+export interface HorseSupportContact {
+  supportBody: RigidBody3D | null;
+  x: number;
+  y: number;
+  z: number;
+}
+
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
 // The horse is viewed broadside, so X is its hidden cross-field thickness and
@@ -66,6 +74,11 @@ export const PASTURE_TOP_Y = -0.015;
 export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
+export const HORSE_HERD_SIZE = 30;
+export const HORSE_SETTLE_DEADLINE_SECONDS = 2;
+export const HORSE_SETTLE_QUIET_SECONDS = 0.4;
+export const HORSE_SETTLE_MAX_LINEAR_SPEED = 0.05;
+export const HORSE_SETTLE_MAX_ANGULAR_SPEED = 0.35;
 export const HORSE_PLACEMENT_ANGLES = [
   0,
   Math.PI / 4,
@@ -81,10 +94,9 @@ export const HORSE_PLACEMENT_YAWS = [0, Math.PI / 2, Math.PI, -Math.PI / 2] as c
 // candidate pairs in a dense pile.
 const PHYSICS_GRID_CELL_SIZE = 0.22;
 
-// One exact point-pin prevents a newly placed horse from sliding away while
-// leaving all three rotation axes free. Retiring old pins keeps the solver
-// bounded after their horses have settled into the weighted foundation.
-export const HORSE_MAX_ACTIVE_PINS = 10;
+// One exact point-pin preserves an earned placement while leaving all three
+// rotation axes free. The fixed herd size also bounds the solver graph.
+export const HORSE_MAX_ACTIVE_PINS = HORSE_HERD_SIZE;
 
 const HORSE_NORMAL_LINEAR_DAMPING = 0.12;
 const HORSE_NORMAL_ANGULAR_DAMPING = 0.18;
@@ -275,34 +287,116 @@ export function stepHorseStack(world: Physics3DWorld): void {
   stepPhysics3D(world, PHYSICS_STEP);
 }
 
-export function attachHorseToPile(
+export function attachHorseToSupport(
   world: Physics3DWorld,
   horse: RigidBody3D,
-  placement: Readonly<HorsePlacementResult>,
+  contact: Readonly<HorseSupportContact>,
 ): number {
-  const support = placement.supportBody;
-  if (support === null || support.type !== 'dynamic' || support.index < 0) return 0;
+  const support = contact.supportBody;
+  if (support === null || support.index < 0) return 0;
   const attached = addHorseContactPin(
     world,
     horse,
     support,
-    placement.contactX,
-    placement.contactY,
-    placement.contactZ,
+    contact.x,
+    contact.y,
+    contact.z,
   );
   retireOldHorsePins(world);
   return attached ? 1 : 0;
 }
 
-export function stabilizeHorseStack(world: Readonly<Physics3DWorld>): void {
+export function createHorseSupportContact(): HorseSupportContact {
+  return { supportBody: null, x: 0, y: 0, z: 0 };
+}
+
+export function findHorseSettlementSupport(
+  out: HorseSupportContact,
+  world: Readonly<Physics3DWorld>,
+  horse: Readonly<RigidBody3D>,
+  permanentHorses: ReadonlySet<RigidBody3D>,
+): boolean {
+  out.supportBody = null;
+  let deepest = Number.NEGATIVE_INFINITY;
+
+  for (const contact of world.contacts) {
+    if (!contact.enabled || !contact.touching || contact.sensor) continue;
+    const horseIsA = contact.bodyA === horse.index;
+    if (!horseIsA && contact.bodyB !== horse.index) continue;
+    const support = world.bodies[horseIsA ? contact.bodyB : contact.bodyA];
+    if (
+      support === undefined ||
+      (support.type !== 'static' && !permanentHorses.has(support))
+    ) {
+      continue;
+    }
+
+    const pointCount = Math.min(contact.pointCount, contact.points.length);
+    for (let index = 0; index < pointCount; index++) {
+      const point = contact.points[index];
+      if (point === undefined || point.depth < deepest) continue;
+      deepest = point.depth;
+      out.supportBody = support;
+      out.x = point.x;
+      out.y = point.y;
+      out.z = point.z;
+    }
+  }
+
+  return out.supportBody !== null;
+}
+
+export function isHorseQuietForSettlement(horse: Readonly<RigidBody3D>): boolean {
+  const linearSpeedSquared =
+    horse.velocityX * horse.velocityX +
+    horse.velocityY * horse.velocityY +
+    horse.velocityZ * horse.velocityZ;
+  const angularSpeedSquared =
+    horse.angularVelocityX * horse.angularVelocityX +
+    horse.angularVelocityY * horse.angularVelocityY +
+    horse.angularVelocityZ * horse.angularVelocityZ;
+  return (
+    linearSpeedSquared <= HORSE_SETTLE_MAX_LINEAR_SPEED * HORSE_SETTLE_MAX_LINEAR_SPEED &&
+    angularSpeedSquared <= HORSE_SETTLE_MAX_ANGULAR_SPEED * HORSE_SETTLE_MAX_ANGULAR_SPEED
+  );
+}
+
+export function ejectHorseBody(horse: RigidBody3D): void {
+  let directionX = horse.x;
+  let directionZ = horse.z;
+  let distance = Math.hypot(directionX, directionZ);
+  if (distance < 0.02) {
+    const angle = (horse.index * 2.399_963_229_728_653) % (Math.PI * 2);
+    directionX = Math.cos(angle);
+    directionZ = Math.sin(angle);
+    distance = 1;
+  }
+  directionX /= distance;
+  directionZ /= distance;
+  const horizontalImpulse = horse.mass * 0.82;
+  applyPhysics3DLinearImpulseAtPoint(
+    horse,
+    directionX * horizontalImpulse,
+    horse.mass * 0.24,
+    directionZ * horizontalImpulse,
+    horse.x,
+    horse.y + HORSE_HALF_HEIGHT,
+    horse.z,
+  );
+}
+
+export function stabilizeHorseStack(
+  world: Readonly<Physics3DWorld>,
+  horses: readonly RigidBody3D[] = world.bodies,
+): void {
   let stackTop = Number.NEGATIVE_INFINITY;
-  for (const body of world.bodies) {
+  for (const body of horses) {
     if (body.type === 'dynamic') stackTop = Math.max(stackTop, getHorseTopY(body));
   }
   if (!Number.isFinite(stackTop)) return;
 
   const horseHeight = HORSE_HALF_HEIGHT * 2;
-  for (const body of world.bodies) {
+  for (const body of horses) {
     if (body.type !== 'dynamic') continue;
     const levelsBelowTop = Math.max(0, (stackTop - getHorseTopY(body)) / horseHeight);
     const tier =
@@ -514,9 +608,9 @@ function addHorseContactPin(
 }
 
 function retireOldHorsePins(world: Physics3DWorld): void {
-  // Recent contact pins create the visible pivoting. Once they move down into
-  // the weighted foundation, contacts and damping hold that shape without
-  // making every new impact solve an ever-growing joint tree.
+  // A round cannot exceed this cap, so every earned pin normally survives for
+  // the result. Keeping the guard makes the low-level helper safe in longer
+  // benchmark scenarios without allowing an unbounded solver graph.
   while (world.joints.length > HORSE_MAX_ACTIVE_PINS) {
     const oldest = world.joints[0];
     if (oldest === undefined) return;

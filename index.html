@@ -32,14 +32,13 @@
           <p class="eyebrow"><span>01</span> Experimental agriculture</p>
           <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            Unlimited horses. Sixty frantic seconds. Aim the glow, build upward, embrace the
-            consequences.
+            Thirty permanently spent horses. Sixty frantic seconds. Settle them or lose them.
           </p>
 
           <div class="scoreboard" aria-label="Game status">
             <div class="score-cell">
-              <span class="score-label">Horses placed</span>
-              <strong id="horses-left">0</strong>
+              <span class="score-label">Herd left</span>
+              <strong id="horses-left">30</strong>
             </div>
             <div class="score-cell timer-cell">
               <span class="score-label">Time left</span>
@@ -75,14 +74,14 @@
             <div class="game-panel start-panel flight-ui-mirror" id="start-panel" hidden>
               <p class="panel-kicker">Flight 3D physics presents</p>
               <h2>Ready to make<br />poor choices?</h2>
-              <p>You have 60 seconds and all the horses you can place. Build the tallest pile.</p>
+              <p>You have 30 horses and 60 seconds. Keep each one still long enough to stick.</p>
               <button type="button" id="start-button" disabled>Start stacking</button>
             </div>
 
             <div class="game-panel time-up-panel flight-ui-mirror" id="time-up-panel" hidden role="status" aria-live="assertive">
               <p class="panel-kicker">Hands off the herd</p>
-              <h2>TIME<br />UP!</h2>
-              <p>Hold everything. The pasture is counting.</p>
+              <h2 id="time-up-title">TIME UP!</h2>
+              <p id="time-up-copy">Hold everything. The pasture is counting.</p>
             </div>
 
             <div class="game-panel result-panel flight-ui-mirror" id="result-panel" hidden aria-live="polite">

@@ -91,10 +91,14 @@ function runScenario(
 
   const stackTopY = getSupportedStackHeight(world, horses);
   const heightMeters = getStackHeightMeters(stackTopY);
-  const depthSpread = horses.reduce((spread, horse) => Math.max(spread, Math.abs(horse.x)), 0);
-  const inPasture = horses.filter(
+  const remainingHorses = horses.filter(
     (horse) => isHorseWithinPasture(horse) && horse.y > -1,
-  ).length;
+  );
+  const inPasture = remainingHorses.length;
+  const depthSpread = remainingHorses.reduce(
+    (spread, horse) => Math.max(spread, Math.abs(horse.x)),
+    0,
+  );
   if (inPasture < VALIDATION_HORSES / 2) {
     throw new Error(`${name}: expected at least half the herd in the farm, received ${inPasture}`);
   }
@@ -105,9 +109,6 @@ function runScenario(
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
-  if (depthSpread < 0.001) {
-    throw new Error(`${name}: expected compound contacts to create out-of-plane motion`);
-  }
 
   return {
     contacts: world.contacts.length,
@@ -142,6 +143,9 @@ function validateStableActivation(): void {
   }
   if (horse.bullet) {
     throw new Error('stable placement: a gently placed horse should not enable continuous collision');
+  }
+  if (horse.colliders.length !== 1 || horse.colliders[0]?.local.kind !== 'box') {
+    throw new Error('stable placement: each horse should use one inexpensive box collider');
   }
 }
 
@@ -187,7 +191,7 @@ function validateFarmEdgeFalloff(): void {
 
 function validateFarmDepthFalloff(): void {
   const world = createHorseStackWorld();
-  const horse = addHorseBody(world, 0, 0.2, 0, PASTURE_FRONT_DEPTH - HORSE_HALF_WIDTH);
+  const horse = addHorseBody(world, 0, 0.2, 0, PASTURE_FRONT_DEPTH - HORSE_HALF_DEPTH);
   horse.velocityX = 1.4;
   stepForDuration(world, [horse], 1);
   if (horse.y >= -0.1) {

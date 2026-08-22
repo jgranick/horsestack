@@ -32,20 +32,20 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
   },
   hay: {
     emoji: '🌾',
-    halfHeight: 0.0505,
-    halfWidth: 0.078,
+    halfHeight: 0.046,
+    halfWidth: 0.0505,
     label: 'Hay bale',
   },
   cow: {
     emoji: '🐄',
-    halfHeight: 0.074,
-    halfWidth: 0.097,
+    halfHeight: 0.097,
+    halfWidth: 0.074,
     label: 'Cow',
   },
   chickens: {
     emoji: '🐔',
     halfHeight: 0.021,
-    halfWidth: 0.022,
+    halfWidth: 0.021,
     label: 'Chicken',
   },
 };
@@ -111,13 +111,15 @@ export function addStackObjectBody(
   body.angularDamping = kind === 'hay' ? 0.12 : 0.06;
   body.bullet = false;
   body.colliders.push(
-    createPhysics2DCollider(
-      {
-        kind: 'polygon',
-        points: getColliderPoints(kind),
-      },
-      STACK_MATERIALS[kind],
-    ),
+    kind === 'chickens'
+      ? createPhysics2DCollider(
+          { kind: 'circle', radius: STACK_OBJECT_PROFILES.chickens.halfHeight, x: 0, y: 0 },
+          STACK_MATERIALS.chickens,
+        )
+      : createPhysics2DCollider(
+          { kind: 'polygon', points: getPolygonColliderPoints(kind) },
+          STACK_MATERIALS[kind],
+        ),
   );
   addPhysics2DBody(world, body);
   stackBodyKinds.set(body, kind);
@@ -146,6 +148,7 @@ export function getPaceLevel(objectsDropped: number): number {
 
 export function getStackObjectVerticalExtent(kind: StackObjectKind, angle: number): number {
   const profile = STACK_OBJECT_PROFILES[kind];
+  if (kind === 'chickens') return profile.halfHeight;
   return (
     Math.abs(Math.cos(angle)) * profile.halfHeight +
     Math.abs(Math.sin(angle)) * profile.halfWidth
@@ -205,7 +208,7 @@ function getStackBodyKind(body: Readonly<RigidBody2D>): StackObjectKind {
   return stackBodyKinds.get(body as RigidBody2D) ?? 'horse';
 }
 
-function getColliderPoints(kind: StackObjectKind): number[] {
+function getPolygonColliderPoints(kind: Exclude<StackObjectKind, 'chickens'>): number[] {
   const { halfHeight: h, halfWidth: w } = STACK_OBJECT_PROFILES[kind];
   switch (kind) {
     case 'horse':
@@ -229,15 +232,6 @@ function getColliderPoints(kind: StackObjectKind): number[] {
         w, -h * 0.25,
         w * 0.82, h * 0.88,
         -w * 0.75, h,
-      ];
-    case 'chickens':
-      return [
-        -w, -h * 0.55,
-        -w * 0.78, -h,
-        w * 0.75, -h,
-        w, -h * 0.4,
-        w * 0.86, h * 0.92,
-        -w * 0.86, h,
       ];
   }
 }

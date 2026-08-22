@@ -134,8 +134,10 @@ function validateStableActivation(): void {
     if (body.velocityX !== 0 || body.velocityY !== 0 || body.angularVelocity !== 0) {
       throw new Error(`${kind}: a placed object must activate without an impulse`);
     }
-    if (body.bullet || body.colliders.length !== 1 || body.colliders[0]?.local.kind !== 'polygon') {
-      throw new Error(`${kind}: expected one inexpensive discrete polygon collider`);
+    const colliderKind = body.colliders[0]?.local.kind;
+    const expectedColliderKind = kind === 'chickens' ? 'circle' : 'polygon';
+    if (body.bullet || body.colliders.length !== 1 || colliderKind !== expectedColliderKind) {
+      throw new Error(`${kind}: expected one inexpensive discrete ${expectedColliderKind} collider`);
     }
   }
 }
@@ -166,6 +168,16 @@ function validateObjectProfiles(): void {
   }
   if (uniqueSizes.size !== STACK_OBJECT_KINDS.length) {
     throw new Error('object profiles: every farm prop should have a distinct 2D proxy');
+  }
+  if (STACK_OBJECT_PROFILES.cow.halfHeight <= STACK_OBJECT_PROFILES.cow.halfWidth) {
+    throw new Error('cow profile: expected a tall body');
+  }
+  const hayAspect = STACK_OBJECT_PROFILES.hay.halfWidth / STACK_OBJECT_PROFILES.hay.halfHeight;
+  if (hayAspect < 0.9 || hayAspect > 1.15) {
+    throw new Error(`hay profile: expected a near-square body, received aspect ${hayAspect}`);
+  }
+  if (STACK_OBJECT_PROFILES.chickens.halfWidth !== STACK_OBJECT_PROFILES.chickens.halfHeight) {
+    throw new Error('chicken profile: expected a circular body');
   }
 }
 

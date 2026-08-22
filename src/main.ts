@@ -68,6 +68,7 @@ import {
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import {
+  FARM_PROP_SCENE_SCALE,
   FARM_PROP_SPECS,
   selectFarmPropTriangleIndices,
 } from './farmPropGeometry';
@@ -127,7 +128,6 @@ const STACK_X = 1.55;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279 * HORSE_SIZE_MULTIPLIER;
 const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
-const FARM_SCENE_SCALE = 0.018;
 const GAME_DURATION_MS = 60_000;
 const HANDS_PER_EMOJI_COLUMN = 12;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
@@ -424,7 +424,7 @@ async function start(): Promise<void> {
 
 function mountFarm(model: Scene3D): void {
   const wrapper = createNode3D(Node3DKind);
-  const scale = FARM_SCENE_SCALE;
+  const scale = FARM_PROP_SCENE_SCALE;
   wrapper.scale.x = scale;
   wrapper.scale.y = scale;
   wrapper.scale.z = scale;
@@ -477,9 +477,9 @@ function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
     if (spec === undefined) continue;
     const template = createNode3D(Node3DKind, { name: `${kind}-template` });
     const scaleRoot = createNode3D(Node3DKind);
-    scaleRoot.scale.x = FARM_SCENE_SCALE;
-    scaleRoot.scale.y = FARM_SCENE_SCALE;
-    scaleRoot.scale.z = FARM_SCENE_SCALE;
+    scaleRoot.scale.x = FARM_PROP_SCENE_SCALE;
+    scaleRoot.scale.y = FARM_PROP_SCENE_SCALE;
+    scaleRoot.scale.z = FARM_PROP_SCENE_SCALE;
     invalidateNodeLocalTransform(scaleRoot);
 
     const axisRoot = createNode3D(Node3DKind);
@@ -506,7 +506,11 @@ function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
       }
       addNodeChild(centeredSource, cloneFarmPropPart(source, part));
     }
-    addNodeChild(axisRoot, centeredSource);
+    const orientationRoot = createNode3D(Node3DKind);
+    setQuaternionFromEuler(orientationRoot.rotation, 0, 0, spec.rotationZ ?? 0);
+    invalidateNodeLocalTransform(orientationRoot);
+    addNodeChild(orientationRoot, centeredSource);
+    addNodeChild(axisRoot, orientationRoot);
     addNodeChild(scaleRoot, axisRoot);
     addNodeChild(template, scaleRoot);
     farmPropTemplates[kind] = template;

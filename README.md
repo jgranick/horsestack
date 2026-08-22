@@ -10,6 +10,9 @@ and individual chickens. The hay, cow, and chicken geometry is extracted directl
 low-poly farm glTF and recentered as reusable stack pieces. Because the source
 scene is grouped by material, extraction combines the correct material layers
 and separates one cow and one hay bale from shared meshes at triangle level.
+The bale is shown end-on with a fixed Z-axis quarter-turn, while the simplified
+2D proxies follow the visible silhouettes: tall cow, near-square bale,
+irregular horse, and circular chicken.
 The pile itself sits close to the pasture's front edge.
 Before every drop, the real object stays hidden and a softly glowing gold object
 previews its landing pose. The marker behaves like a damped

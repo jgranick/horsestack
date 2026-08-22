@@ -5,10 +5,12 @@ import { getNodeChildren } from '@flighthq/sdk/core';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { MeshKind } from '@flighthq/sdk/scene3d';
 import {
+  FARM_PROP_SCENE_SCALE,
   FARM_PROP_SPECS,
   selectFarmPropTriangleIndices,
 } from '../src/farmPropGeometry';
 import type { FarmPropKind } from '../src/farmPropGeometry';
+import { STACK_OBJECT_PROFILES } from '../src/horseStackPhysics';
 
 const models = [
   {
@@ -123,8 +125,22 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
       }
     }
 
+    const quarterTurnedAroundZ = Math.abs(Math.sin(spec.rotationZ ?? 0)) > 0.5;
+    const projectedWidth = (extents[2] ?? 0) * FARM_PROP_SCENE_SCALE;
+    const projectedHeight =
+      (extents[quarterTurnedAroundZ ? 0 : 1] ?? 0) * FARM_PROP_SCENE_SCALE;
+    const profile = STACK_OBJECT_PROFILES[kind];
+    if (
+      Math.abs(projectedWidth - profile.halfWidth * 2) > 0.003 ||
+      Math.abs(projectedHeight - profile.halfHeight * 2) > 0.003
+    ) {
+      throw new Error(
+        `farm prop ${kind} projects to ${projectedWidth.toFixed(3)} x ${projectedHeight.toFixed(3)}, but its 2D body is ${(profile.halfWidth * 2).toFixed(3)} x ${(profile.halfHeight * 2).toFixed(3)}`,
+      );
+    }
+
     console.log(
-      `farm ${kind}: ${triangleCount.toLocaleString('en-US')} triangles, materials ${materials.join(', ')}, source extents ${extents.map((extent) => extent.toFixed(2)).join(' × ')}`,
+      `farm ${kind}: ${triangleCount.toLocaleString('en-US')} triangles, materials ${materials.join(', ')}, source extents ${extents.map((extent) => extent.toFixed(2)).join(' × ')}, projected/body ${projectedWidth.toFixed(3)} × ${projectedHeight.toFixed(3)}`,
     );
   }
 }

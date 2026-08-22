@@ -1,6 +1,7 @@
 import type { MeshGeometry } from '@flighthq/sdk';
 
 export type FarmPropKind = 'hay' | 'cow' | 'chickens';
+export const FARM_PROP_SCENE_SCALE = 0.018;
 
 export interface FarmPropPoint {
   x: number;
@@ -24,6 +25,7 @@ export interface FarmPropSpec {
   centerY: number;
   centerZ: number;
   parts: readonly FarmPropPartSpec[];
+  rotationZ?: number;
 }
 
 const HAY_BALE_CENTERS: readonly FarmPropPoint[] = [
@@ -58,6 +60,7 @@ export const FARM_PROP_SPECS: Readonly<Record<FarmPropKind, FarmPropSpec>> = {
       { filter: FIRST_HAY_BALE_FILTER, materialName: 'HayBale2', nodeName: 'Object_22' },
       { filter: FIRST_HAY_BALE_FILTER, materialName: 'HayBale', nodeName: 'Object_25' },
     ],
+    rotationZ: Math.PI / 2,
   },
   cow: {
     centerX: -29.04,

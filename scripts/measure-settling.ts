@@ -21,7 +21,7 @@ import {
   getNextObjectDelay,
   getRandomStackObjectKind,
   getStackBodyHalfWidth,
-  getStackBodyVerticalExtent,
+  getStackBodySupportExtent,
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
   PASTURE_TOP_Y,
@@ -158,7 +158,7 @@ function placementSurfaceY(
     ) {
       continue;
     }
-    surfaceY = Math.max(surfaceY, object.y + getStackBodyVerticalExtent(object));
+    surfaceY = Math.max(surfaceY, object.y + getStackBodySupportExtent(object));
   }
   return surfaceY;
 }

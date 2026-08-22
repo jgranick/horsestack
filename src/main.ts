@@ -81,7 +81,7 @@ import {
   getPaceLevel,
   getRandomStackObjectKind,
   getStackBodyHalfWidth,
-  getStackBodyVerticalExtent,
+  getStackBodySupportExtent,
   getStackHeightHands,
   getStackHeightMeters,
   getStackObjectVerticalExtent,
@@ -1129,7 +1129,7 @@ function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
     ) {
       continue;
     }
-    const objectTop = body.y + getStackBodyVerticalExtent(body);
+    const objectTop = body.y + getStackBodySupportExtent(body);
     surfaceY = Math.max(surfaceY, objectTop);
   }
   return surfaceY;

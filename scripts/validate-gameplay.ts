@@ -6,9 +6,10 @@ import {
   getNextObjectDelay,
   getRandomStackObjectKind,
   getStackBodyHalfWidth,
-  getStackBodyVerticalExtent,
+  getStackBodySupportExtent,
   getStackHeightHands,
   getStackHeightMeters,
+  getStackObjectSupportExtent,
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
@@ -43,6 +44,7 @@ const scenarios = [
   runScenario('teetered mixed stack', 0x54454554, 0.6, 0.1),
 ];
 validateStableActivation();
+validateSupportHeights();
 validateCentredMass();
 validateRandomObjectSelection();
 validateObjectProfiles();
@@ -140,6 +142,34 @@ function validateCentredMass(): void {
   }
 }
 
+// The head must not be a landing surface, and the drop math must still clear the whole
+// silhouette — the two have to stay on opposite sides of this line or pieces get placed
+// inside the horse and shoved out again.
+function validateSupportHeights(): void {
+  for (const kind of STACK_OBJECT_KINDS) {
+    const profile = STACK_OBJECT_PROFILES[kind];
+    if (profile.supportHalfHeight > profile.halfHeight) {
+      throw new Error(`${kind}: support height must not exceed the body half-height`);
+    }
+    for (const angle of [0, 0.25, 0.6]) {
+      if (getStackObjectSupportExtent(kind, angle) > getStackObjectVerticalExtent(kind, angle)) {
+        throw new Error(`${kind}: support extent exceeded the full extent at angle ${angle}`);
+      }
+    }
+  }
+  const horse = STACK_OBJECT_PROFILES.horse;
+  if (!(horse.supportHalfHeight < horse.halfHeight * 0.6)) {
+    throw new Error(
+      `horse: expected the rideable back well below the top of the head, received ${horse.supportHalfHeight} of ${horse.halfHeight}`,
+    );
+  }
+  for (const kind of ['hay', 'cow', 'chickens'] as const) {
+    if (STACK_OBJECT_PROFILES[kind].supportHalfHeight !== STACK_OBJECT_PROFILES[kind].halfHeight) {
+      throw new Error(`${kind}: expected the whole shape to be a landing surface`);
+    }
+  }
+}
+
 function validateStableActivation(): void {
   for (const kind of STACK_OBJECT_KINDS) {
     const world = createHorseStackWorld();
@@ -154,10 +184,19 @@ function validateStableActivation(): void {
     if (body.velocityX !== 0 || body.velocityY !== 0 || body.angularVelocity !== 0) {
       throw new Error(`${kind}: a placed object must activate without an impulse`);
     }
-    const colliderKind = body.colliders[0]?.local.kind;
+    // The horse alone is a compound: a barrel-and-legs box plus a head-and-neck box, so
+    // its head stays solid without acting as a shelf. Everything else stays single-shape.
     const expectedColliderKind = kind === 'chickens' ? 'circle' : 'polygon';
-    if (body.bullet || body.colliders.length !== 1 || colliderKind !== expectedColliderKind) {
-      throw new Error(`${kind}: expected one inexpensive discrete ${expectedColliderKind} collider`);
+    const expectedColliderCount = kind === 'horse' ? 2 : 1;
+    if (body.bullet || body.colliders.length !== expectedColliderCount) {
+      throw new Error(
+        `${kind}: expected ${expectedColliderCount} discrete collider(s), received ${body.colliders.length}`,
+      );
+    }
+    for (const collider of body.colliders) {
+      if (collider.local.kind !== expectedColliderKind) {
+        throw new Error(`${kind}: expected ${expectedColliderKind} colliders`);
+      }
     }
   }
 }
@@ -249,7 +288,7 @@ function getPlacementSurfaceY(
     ) {
       continue;
     }
-    surfaceY = Math.max(surfaceY, object.y + getStackBodyVerticalExtent(object));
+    surfaceY = Math.max(surfaceY, object.y + getStackBodySupportExtent(object));
   }
   return surfaceY;
 }

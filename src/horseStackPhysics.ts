@@ -15,11 +15,20 @@ export interface StackObjectProfile {
   halfHeight: number;
   halfWidth: number;
   label: string;
+  // How far above the body's centre something can actually be set down. For most props
+  // that is simply the top of the shape, but a horse's head and neck are not a surface:
+  // they occupy the top quarter of its height at 7-43% of its width, so treating the
+  // whole silhouette as a platform left pieces balanced a quarter of a horse too high.
+  supportHalfHeight: number;
 }
 
 export const HORSE_SIZE_MULTIPLIER = 1.2;
 export const HORSE_HALF_WIDTH = 0.09 * HORSE_SIZE_MULTIPLIER;
 export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
+// Measured off the horse glTF projected into collider space: the back of the barrel sits
+// at about 0.447 of the half-height, and only head and neck are above it.
+export const HORSE_BACK_RATIO = 0.447;
+export const HORSE_SUPPORT_HALF_HEIGHT = HORSE_HALF_HEIGHT * HORSE_BACK_RATIO;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 // This world is not metres: an upright horse is HORSE_HALF_HEIGHT * 2 units tall and
 // stands for 1.55 m, which puts one world unit at about 8.44 m.
@@ -38,24 +47,28 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
     halfHeight: HORSE_HALF_HEIGHT,
     halfWidth: HORSE_HALF_WIDTH,
     label: 'Horse',
+    supportHalfHeight: HORSE_SUPPORT_HALF_HEIGHT,
   },
   hay: {
     emoji: '🌾',
     halfHeight: 0.046,
     halfWidth: 0.0505,
     label: 'Hay bale',
+    supportHalfHeight: 0.046,
   },
   cow: {
     emoji: '🐄',
     halfHeight: 0.097,
     halfWidth: 0.074,
     label: 'Cow',
+    supportHalfHeight: 0.097,
   },
   chickens: {
     emoji: '🐔',
     halfHeight: 0.021,
     halfWidth: 0.021,
     label: 'Chicken',
+    supportHalfHeight: 0.021,
   },
 };
 
@@ -132,17 +145,22 @@ export function addStackObjectBody(
   body.linearDamping = kind === 'chickens' ? 0.04 : 0.08;
   body.angularDamping = kind === 'hay' ? 0.12 : 0.06;
   body.bullet = false;
-  body.colliders.push(
-    kind === 'chickens'
-      ? createPhysics2DCollider(
-          { kind: 'circle', radius: STACK_OBJECT_PROFILES.chickens.halfHeight, x: 0, y: 0 },
-          STACK_MATERIALS.chickens,
-        )
-      : createPhysics2DCollider(
-          { kind: 'polygon', points: getCentredPolygonColliderPoints(kind) },
-          STACK_MATERIALS[kind],
-        ),
-  );
+  if (kind === 'chickens') {
+    body.colliders.push(
+      createPhysics2DCollider(
+        { kind: 'circle', radius: STACK_OBJECT_PROFILES.chickens.halfHeight, x: 0, y: 0 },
+        STACK_MATERIALS.chickens,
+      ),
+    );
+  } else {
+    // One shape for every prop but the horse, which is a compound; see
+    // getHorseColliderPolygons.
+    for (const points of getCentredColliderPolygons(kind)) {
+      body.colliders.push(
+        createPhysics2DCollider({ kind: 'polygon', points }, STACK_MATERIALS[kind]),
+      );
+    }
+  }
   addPhysics2DBody(world, body);
   stackBodyKinds.set(body, kind);
   return body;
@@ -183,6 +201,23 @@ export function getStackObjectVerticalExtent(kind: StackObjectKind, angle: numbe
 
 export function getStackBodyVerticalExtent(body: Readonly<RigidBody2D>): number {
   return getStackObjectVerticalExtent(getStackBodyKind(body), body.angle);
+}
+
+// How high above a body's centre the next piece may rest. Same rotation blend as the full
+// extent, so it degrades to the half-width as a piece tips onto its side; only the upright
+// term differs. Placement of the piece being dropped still uses the FULL extent, so a new
+// object can never be spawned intersecting what it lands on.
+export function getStackObjectSupportExtent(kind: StackObjectKind, angle: number): number {
+  const profile = STACK_OBJECT_PROFILES[kind];
+  if (kind === 'chickens') return profile.supportHalfHeight;
+  return (
+    Math.abs(Math.cos(angle)) * profile.supportHalfHeight +
+    Math.abs(Math.sin(angle)) * profile.halfWidth
+  );
+}
+
+export function getStackBodySupportExtent(body: Readonly<RigidBody2D>): number {
+  return getStackObjectSupportExtent(getStackBodyKind(body), body.angle);
 }
 
 export function getStackBodyHalfWidth(body: Readonly<RigidBody2D>): number {
@@ -234,34 +269,68 @@ function getStackBodyKind(body: Readonly<RigidBody2D>): StackObjectKind {
   return stackBodyKinds.get(body as RigidBody2D) ?? 'horse';
 }
 
-// Flight solves each body's centre of mass from its collider, so a polygon authored
-// off-centre leaves centerX/centerY non-zero — the horse sat 0.0039 units off, about 4%
-// of its half-height, and the cow much the same, while the symmetric hay box and the
-// chicken circle were exactly centred. Offset centres of mass settle measurably worse in
-// a free-standing pile: A/B over 24 seeded 30-object piles, otherwise identical, cut the
-// worst stack-height jump from 0.080 to 0.044 and residual creep from 0.0037 to 0.0028
-// units/body/s. Translating the points changes no extent, so the silhouette the asset
-// validation checks is untouched.
-function getCentredPolygonColliderPoints(kind: Exclude<StackObjectKind, 'chickens'>): number[] {
-  const points = getPolygonColliderPoints(kind);
+// Flight solves each body's centre of mass from its colliders, so shapes authored
+// off-centre leave centerX/centerY non-zero. Offset centres of mass settle measurably
+// worse in a free-standing pile: A/B over 24 seeded 30-object piles, otherwise identical,
+// cut the worst stack-top jump from 0.080 to 0.044 and creep from 0.0037 to 0.0028
+// units/body/s. For a compound the whole GROUP has to be centred, area-weighted, not each
+// shape on its own — density is uniform, so area weighting is mass weighting. Translating
+// changes no extent, so the silhouette stays put.
+function getCentredColliderPolygons(kind: Exclude<StackObjectKind, 'chickens'>): number[][] {
+  const polygons = kind === 'horse' ? getHorseColliderPolygons() : [getPolygonColliderPoints(kind)];
+  let totalArea = 0;
+  let centroidX = 0;
+  let centroidY = 0;
+  for (const points of polygons) {
+    const [area, x, y] = getPolygonAreaCentroid(points);
+    totalArea += area;
+    centroidX += area * x;
+    centroidY += area * y;
+  }
+  if (totalArea === 0) return polygons;
+  centroidX /= totalArea;
+  centroidY /= totalArea;
+  return polygons.map((points) =>
+    points.map((value, index) => value - (index % 2 === 0 ? centroidX : centroidY)),
+  );
+}
+
+function getPolygonAreaCentroid(points: readonly number[]): [number, number, number] {
   let twiceArea = 0;
   let centroidX = 0;
   let centroidY = 0;
-  for (let i = 0; i < points.length; i += 2) {
-    const x0 = points[i] ?? 0;
-    const y0 = points[i + 1] ?? 0;
-    const x1 = points[(i + 2) % points.length] ?? 0;
-    const y1 = points[(i + 3) % points.length] ?? 0;
+  for (let index = 0; index < points.length; index += 2) {
+    const x0 = points[index] ?? 0;
+    const y0 = points[index + 1] ?? 0;
+    const x1 = points[(index + 2) % points.length] ?? 0;
+    const y1 = points[(index + 3) % points.length] ?? 0;
     const cross = x0 * y1 - x1 * y0;
     twiceArea += cross;
     centroidX += (x0 + x1) * cross;
     centroidY += (y0 + y1) * cross;
   }
-  if (twiceArea === 0) return points;
+  if (twiceArea === 0) return [0, 0, 0];
   const scale = 1 / (3 * twiceArea);
-  centroidX *= scale;
-  centroidY *= scale;
-  return points.map((value, index) => value - (index % 2 === 0 ? centroidX : centroidY));
+  return [twiceArea / 2, centroidX * scale, centroidY * scale];
+}
+
+// The horse is the one prop whose silhouette is not one blob. Measuring the model in
+// collider space: barrel and legs fill the lower 0.447 of the height across most of the
+// length, and head and neck rise above that over only the front third. Two shapes keep the
+// head solid without making it a shelf, and leave a real notch in front of the chest for
+// other pieces to nestle into.
+function getHorseColliderPolygons(): number[][] {
+  const w = HORSE_HALF_WIDTH;
+  const h = HORSE_HALF_HEIGHT;
+  const backY = HORSE_SUPPORT_HALF_HEIGHT;
+  return [
+    getBoxPoints(-0.667 * w, -h, 0.926 * w, backY),
+    getBoxPoints(-0.944 * w, backY, -0.278 * w, h),
+  ];
+}
+
+function getBoxPoints(minX: number, minY: number, maxX: number, maxY: number): number[] {
+  return [minX, minY, maxX, minY, maxX, maxY, minX, maxY];
 }
 
 function getPolygonColliderPoints(kind: Exclude<StackObjectKind, 'chickens'>): number[] {

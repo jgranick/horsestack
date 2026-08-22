@@ -197,6 +197,7 @@ const resultCopy = requireElement<HTMLParagraphElement>('result-copy');
 const replayButton = requireElement<HTMLButtonElement>('replay-button');
 const restartButton = requireElement<HTMLButtonElement>('restart-game');
 const dropButton = requireElement<HTMLButtonElement>('drop-horse');
+const fullscreenToggle = requireElement<HTMLButtonElement>('fullscreen-toggle');
 const horsesLeftCopy = requireElement<HTMLSpanElement>('horses-left');
 const timerCopy = requireElement<HTMLSpanElement>('drop-timer');
 const timerFill = requireElement<HTMLSpanElement>('timer-fill');
@@ -1243,6 +1244,7 @@ function bindGameControls(): void {
   dropButton.addEventListener('click', (event: MouseEvent) =>
     placeActiveStackObject(performance.now(), event.timeStamp),
   );
+  bindFullscreenToggle();
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);
@@ -1253,6 +1255,38 @@ function isInteractiveEventTarget(target: EventTarget | null): boolean {
     target instanceof Element &&
     target.closest('a, button, input, select, textarea, summary, [role="button"]') !== null
   );
+}
+
+// document.fullscreenEnabled is false inside an iframe without allowfullscreen, and the
+// method is missing entirely on iOS Safari for non-video elements, so the control is
+// hidden rather than left to fail when the user presses it.
+function bindFullscreenToggle(): void {
+  if (typeof viewer.requestFullscreen !== 'function' || document.fullscreenEnabled !== true) {
+    fullscreenToggle.hidden = true;
+    return;
+  }
+  fullscreenToggle.addEventListener('click', () => {
+    const request =
+      document.fullscreenElement === viewer ? document.exitFullscreen() : viewer.requestFullscreen();
+    request.catch((error: unknown) => {
+      console.info('Fullscreen request was refused:', error);
+    });
+  });
+  document.addEventListener('fullscreenchange', () => {
+    syncFullscreenToggle();
+    // The viewer's box changes before a resize event necessarily arrives, and
+    // resizeCanvas also refreshes inputBounds, which pointer aiming maps against.
+    resizeCanvas();
+    renderRequested = true;
+  });
+  syncFullscreenToggle();
+}
+
+function syncFullscreenToggle(): void {
+  const active = document.fullscreenElement === viewer;
+  viewer.classList.toggle('is-fullscreen', active);
+  fullscreenToggle.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+  fullscreenToggle.title = active ? 'Exit fullscreen' : 'Fullscreen';
 }
 
 function placeActiveStackObject(now: number, inputAt = now): void {

@@ -779,6 +779,66 @@ h1 em {
   display: none;
 }
 
+.fullscreen-toggle {
+  width: 38px;
+  height: 38px;
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 5;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(31, 45, 29, 0.48);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+/* Hidden outright where the API is unavailable, rather than offering a dead control. */
+.fullscreen-toggle[hidden] {
+  display: none;
+}
+
+.fullscreen-toggle:hover,
+.fullscreen-toggle:focus-visible {
+  outline: none;
+  background: rgba(31, 45, 29, 0.82);
+}
+
+.fullscreen-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fullscreen-icon.is-exit,
+.viewer.is-fullscreen .fullscreen-icon.is-enter {
+  display: none;
+}
+
+.viewer.is-fullscreen .fullscreen-icon.is-exit {
+  display: block;
+}
+
+/* The viewer is normally a fixed-height card in the page grid. Fullscreen hands it the
+   whole screen, so the card treatment has to come off or it letterboxes itself. */
+.viewer:fullscreen {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
 .viewer-label {
   position: absolute;
   bottom: 24px;

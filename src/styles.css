@@ -149,7 +149,7 @@ a {
 }
 
 .experience {
-  min-height: 720px;
+  min-height: 0;
   padding: clamp(38px, 5.8vh, 68px) 0 clamp(30px, 4.4vh, 50px);
   display: grid;
   grid-template-columns: minmax(310px, 0.72fr) minmax(560px, 1.28fr);
@@ -330,8 +330,10 @@ h1 em {
 
 .viewer {
   width: 100%;
-  height: clamp(570px, 71vh, 790px);
-  min-height: 520px;
+  /* Sized off what the viewport actually has left: 250px covers the header, the
+     experience padding, and the footer. Taller than the old 71vh on a big screen,
+     and it gives way instead of pushing the game below the fold on a short one. */
+  height: clamp(400px, calc(100vh - 258px), 790px);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -915,9 +917,15 @@ h1 em {
   }
 
   .experience {
-    padding-top: 48px;
+    padding-top: 28px;
     grid-template-columns: 1fr;
     gap: 46px;
+  }
+
+  /* One column means source order decides what you see first, and that has to be
+     the game rather than the copy about the game. */
+  .viewer-wrap {
+    order: -1;
   }
 
   .intro {
@@ -934,7 +942,7 @@ h1 em {
   }
 
   .viewer {
-    height: min(78vw, 760px);
+    height: max(340px, min(78vw, calc(100vh - 156px), 760px));
   }
 
   .site-footer {

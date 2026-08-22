@@ -38,7 +38,12 @@ final score; a column wraps after nine so a full column always fits its frame.
 
 Game chrome stays out of the way. The numeric scoreboard is hidden, the in-viewer
 copy is not selectable, the gesture that starts a run cannot also spend its first
-object, and the "Place object" prompt retires once the player has placed one.
+object, and the "Place object" prompt retires once the player has placed one. The
+viewer is sized against the viewport height and comes first in the stacked layout, so
+the game is on screen when the page opens rather than below the pitch. While a run is
+live the whole page is the play surface: aiming and placing follow the pointer
+anywhere, so a fast click that lands beside the viewer still counts. Buttons and links
+keep their own behaviour.
 
 ## Run locally
 
@@ -48,8 +53,8 @@ npm run dev
 ```
 
 Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
-Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and place
-the object.
+Click or tap anywhere on the page, or press <kbd>Space</kbd>, <kbd>Enter</kbd>, or
+<kbd>↓</kbd>, to reveal and place the object.
 
 ## Checks
 

@@ -1155,13 +1155,19 @@ function getScore(height: number): number {
 }
 
 function bindGameControls(): void {
-  canvas.addEventListener('pointermove', (event: PointerEvent) => {
+  // Window-level, not canvas-level: aiming and placing follow the pointer anywhere on
+  // the page while a run is live. setAimFromClientX clamps against the canvas bounds, so
+  // a click out in the margin simply aims at that edge.
+  window.addEventListener('pointermove', (event: PointerEvent) => {
     if (phase !== 'playing' || activeObject === null) return;
     setAimFromClientX(event.clientX, performance.now());
   });
 
-  canvas.addEventListener('pointerdown', (event: PointerEvent) => {
+  window.addEventListener('pointerdown', (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0 || phase !== 'playing') return;
+    // Controls and links keep their own meaning: Start over must restart, the place
+    // prompt has its own handler, and a credit link must still open.
+    if (isInteractiveEventTarget(event.target)) return;
     canvas.focus({ preventScroll: true });
     const now = performance.now();
     setAimFromClientX(event.clientX, now);
@@ -1191,6 +1197,13 @@ function bindGameControls(): void {
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);
+}
+
+function isInteractiveEventTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('a, button, input, select, textarea, summary, [role="button"]') !== null
+  );
 }
 
 function placeActiveStackObject(now: number, inputAt = now): void {

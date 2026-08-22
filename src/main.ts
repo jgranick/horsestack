@@ -134,7 +134,12 @@ const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
 // The preview floats a full horse-height above its landing surface so the queued
 // object reads as "about to drop" rather than as an object already in the pile.
 // Placement still uses the unlifted landing pose.
-const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
+// Was a full horse-height. Once the camera fills the frame with the tower, a marker that
+// high sat off the top edge in all but 4 samples in 45 — and with the header and the
+// in-viewer callout both hidden, the marker is the only remaining cue to what is queued.
+// At this lift it is back inside the frame in about 7 samples in 10, still clearly
+// hovering above the landing pose rather than resting on it.
+const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 1.2;
 // The camera used to hold a constant lift above the pile so the raised marker always
 // cleared the top of the frame. Measured over a played run, that spent 56% of the screen
 // on empty sky and pushed the base of the pile off the bottom edge in 32 of 41 samples.
@@ -144,8 +149,14 @@ const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
 // of -0.13, and the ground never leaving the frame at all. The marker's centre grazes the
 // top edge somewhat more often (8 samples in 43 against 3), which is the deliberate trade
 // — the pile is the subject, the marker is a cue.
-const CAMERA_PILE_FOCUS = 0.2;
-const CAMERA_BASE_DISTANCE = 1.05;
+// Share of the frame height the tower should occupy, and how far above the tower's middle
+// to sit. Measured over played runs against the previous top-tracking camera: the tower
+// goes from filling 54% of the frame to about 70%, the pasture stays in frame throughout,
+// and the pile top is inside the frame in roughly nine samples in ten.
+const CAMERA_PILE_FILL = 0.8;
+const CAMERA_TOP_BIAS = 0.16;
+const CAMERA_MIN_DISTANCE = 1.05;
+const CAMERA_MAX_DISTANCE = 3.25;
 // The camera frames the measured stack top, but that measurement is a max over the
 // qualifying bodies: when a piece settles, the top can change by centimetres in a single
 // step while nothing visibly moves much. Feeding that straight to the camera is what made
@@ -1162,17 +1173,20 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   const rise = clamp(height / 1.1, 0, 1);
   const herdProgress = clamp(objectsDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
-  // Half the frame height in world units at the current distance, so the framing below
-  // can be expressed as a share of what is actually on screen rather than as a fixed
-  // world offset that means something different at every zoom level.
-  const visibleHalfHeight =
-    camera.projection.kind === 'perspective'
-      ? cameraController.distance * Math.tan(camera.projection.fovY / 2)
-      : 0;
+  // Frame the whole tower, not its top. Tracking the top left the pile hanging off the
+  // bottom of a frame whose upper half held nothing, and it got worse the more the pile
+  // tumbled: a shorter tower simply sat lower. So the camera fits the span from the
+  // pasture to the pile top into CAMERA_PILE_FILL of the frame height and centres on its
+  // middle, nudged up by CAMERA_TOP_BIAS to leave the drop some room. Distance falls out
+  // of the fit rather than being a curve of its own, so a collapse zooms back in.
+  const tanHalfFov =
+    camera.projection.kind === 'perspective' ? Math.tan(camera.projection.fovY / 2) : 1;
+  const visibleHalfHeight = cameraController.distance * tanHalfFov;
+  const pileBottomY = STACK_BASE_Y + PASTURE_TOP_Y;
+  const pileTopY = STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
+  const pileSpan = Math.max(pileTopY - pileBottomY, 0.0001);
   const desiredTargetY =
-    STACK_BASE_Y +
-    Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2) -
-    CAMERA_PILE_FOCUS * visibleHalfHeight;
+    (pileBottomY + pileTopY) / 2 + CAMERA_TOP_BIAS * visibleHalfHeight;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
@@ -1186,9 +1200,10 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   // at this rate against 4 of 27 at the old 0.14, and the pile top stays around a fifth
   // of the way above centre either way. At rest the tilt is unchanged.
   cameraController.goalPolar = 0.06 + rise * 0.6;
-  cameraController.goalDistance = Math.min(
-    3.25,
-    CAMERA_BASE_DISTANCE + height * 0.85 + herdProgress * 0.28,
+  cameraController.goalDistance = clamp(
+    pileSpan / (2 * CAMERA_PILE_FILL) / tanHalfFov,
+    CAMERA_MIN_DISTANCE,
+    CAMERA_MAX_DISTANCE,
   );
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }

@@ -13,7 +13,9 @@ import {
 
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
-export const HORSE_HALF_DEPTH = 0.035;
+// Deliberately wider than the rendered model. The camera reads the horse from
+// the side, while this hidden depth gives each one a forgiving support base.
+export const HORSE_HALF_DEPTH = 0.06;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 export const METERS_PER_HAND = 0.1016;
 
@@ -35,13 +37,13 @@ const PHYSICS_GRID_CELL_SIZE = 0.22;
 
 const HORSE_MATERIAL: Physics3DMaterial = {
   density: 1,
-  friction: 0.56,
-  restitution: 0.13,
+  friction: 0.68,
+  restitution: 0.04,
 };
 const PASTURE_MATERIAL: Physics3DMaterial = {
   density: 0,
-  friction: 0.38,
-  restitution: 0.035,
+  friction: 0.55,
+  restitution: 0.02,
 };
 
 let collisionShapesRegistered = false;
@@ -53,10 +55,12 @@ export function createHorseStackWorld(): Physics3DWorld {
     createUniformGridSpatialBackend3D(PHYSICS_GRID_CELL_SIZE),
   );
   world.gravityY = -PHYSICS_GRAVITY;
-  world.config.sequentialImpulse.velocityIterations = 12;
-  world.config.sequentialImpulse.positionIterations = 6;
+  world.config.sequentialImpulse.velocityIterations = 8;
+  world.config.sequentialImpulse.positionIterations = 4;
   world.config.sequentialImpulse.penetrationSlop = 0.0015;
-  world.config.timeToSleep = 0.65;
+  world.config.sleepLinearThreshold = 0.018;
+  world.config.sleepAngularThreshold = 0.04;
+  world.config.timeToSleep = 0.45;
 
   // A finite three-dimensional box follows the floating pasture silhouette.
   // Horses may now roll toward/away from camera as well as off either side.
@@ -110,26 +114,27 @@ export function addHorseBody(
     0,
     Math.cos(halfAngle),
   );
-  body.linearDamping = 0.08;
-  body.angularDamping = 0.06;
+  body.linearDamping = 0.12;
+  body.angularDamping = 0.18;
   // Horses appear directly at the previewed landing pose with no launch
   // velocity. The body is genuinely 3D, but still uses discrete collision for
   // this gentle placement path.
   body.bullet = false;
 
-  // The visual horse is rigid, so one compound body is a better fit than an
-  // articulated rig. Separate torso, head, and leg contacts let an impact low
-  // on one side tip the whole horse naturally without joints or self-collision.
+  // One broad, flat-bottomed collider is intentional. The earlier torso/head/
+  // leg compound multiplied every horse-pair narrow phase and balanced the
+  // animal on four tiny rounded contacts. This proxy makes one pair one test,
+  // gives the pile a stable base, and still rotates freely on all three axes.
   body.colliders.push(
     createPhysics3DCollider(
       {
         kind: 'box',
         x: 0,
-        y: 0.015,
-        z: 0.008,
-        halfX: 0.027,
-        halfY: 0.035,
-        halfZ: 0.06,
+        y: 0,
+        z: 0,
+        halfX: HORSE_HALF_DEPTH,
+        halfY: HORSE_HALF_HEIGHT,
+        halfZ: HORSE_HALF_WIDTH,
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
@@ -137,26 +142,6 @@ export function addHorseBody(
       },
       HORSE_MATERIAL,
     ),
-    createPhysics3DCollider(
-      {
-        kind: 'box',
-        x: 0.004,
-        y: 0.054,
-        z: -0.067,
-        halfX: 0.021,
-        halfY: 0.022,
-        halfZ: 0.023,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        rotationW: 1,
-      },
-      HORSE_MATERIAL,
-    ),
-    createPhysics3DCollider(createLegShape(-0.016, -0.032), HORSE_MATERIAL),
-    createPhysics3DCollider(createLegShape(0.019, -0.03), HORSE_MATERIAL),
-    createPhysics3DCollider(createLegShape(-0.02, 0.044), HORSE_MATERIAL),
-    createPhysics3DCollider(createLegShape(0.016, 0.046), HORSE_MATERIAL),
   );
 
   addPhysics3DBody(world, body);
@@ -241,19 +226,6 @@ function registerCollisionShapes(): void {
   registerBuiltInCollisionSupports3D();
   registerBuiltInCollisionFaceQueries3D();
   collisionShapesRegistered = true;
-}
-
-function createLegShape(x: number, z: number) {
-  return {
-    kind: 'capsule' as const,
-    x0: x,
-    y0: -0.065,
-    z0: z,
-    x1: x,
-    y1: -0.018,
-    z1: z,
-    radius: 0.011,
-  };
 }
 
 function getColliderTopY(shape: RigidBody3D['colliders'][number]['world']): number {

@@ -1,6 +1,6 @@
 import type {
   CollisionBuiltInShape3D,
-  Physics3DDistanceJoint,
+  Physics3DBallAndSocketJoint,
   Physics3DMaterial,
   Physics3DMassData,
   Physics3DWorld,
@@ -9,15 +9,14 @@ import type {
 import {
   addPhysics3DBody,
   addPhysics3DJoint,
-  applyPhysics3DTorque,
+  createPhysics3DBallAndSocketJoint,
   createPhysics3DCollider,
-  createPhysics3DDistanceJoint,
   createPhysics3DShapeCastResult,
   createPhysics3DWorld,
   createRigidBody3D,
   createUniformGridSpatialBackend3D,
-  physics3DDistanceJointSolver,
-  Physics3DDistanceJointKind,
+  physics3DBallAndSocketJointSolver,
+  Physics3DBallAndSocketJointKind,
   queryPhysics3DShapeCast,
   registerBuiltInCollisionFaceQueries3D,
   registerBuiltInCollisionSupports3D,
@@ -82,16 +81,10 @@ export const HORSE_PLACEMENT_YAWS = [0, Math.PI / 2, Math.PI, -Math.PI / 2] as c
 // candidate pairs in a dense pile.
 const PHYSICS_GRID_CELL_SIZE = 0.22;
 
-// Arcade glue is intentionally generous: nearly every placement can grab a
-// neighbour and most horses try to grab a second one. The live cap still keeps
-// the constraint graph bounded while the newest layer behaves like a katamari.
-export const HORSE_LASSO_SECONDARY_CHANCE = 0.7;
-export const HORSE_LASSO_CATCH_RADIUS = HORSE_HALF_HEIGHT * 5.2;
-export const HORSE_LASSO_BREAK_FORCE = 0.16;
-export const HORSE_MAX_ACTIVE_LASSOS = 12;
-const HORSE_LASSO_FREQUENCY_HZ = 9.5;
-const HORSE_LASSO_DAMPING_RATIO = 0.84;
-const HORSE_CATCH_TORQUE = 0.000_16;
+// One exact point-pin prevents a newly placed horse from sliding away while
+// leaving all three rotation axes free. Retiring old pins keeps the solver
+// bounded after their horses have settled into the weighted foundation.
+export const HORSE_MAX_ACTIVE_PINS = 10;
 
 const HORSE_NORMAL_LINEAR_DAMPING = 0.12;
 const HORSE_NORMAL_ANGULAR_DAMPING = 0.18;
@@ -170,12 +163,12 @@ export function createHorseStackWorld(): Physics3DWorld {
   world.config.sleepLinearThreshold = 0.018;
   world.config.sleepAngularThreshold = 0.04;
   world.config.timeToSleep = 0.45;
-  // Register only the one-row joint used by the game rather than Flight's
-  // complete joint bank. This keeps both the bundle and per-step dispatch lean.
+  // Register only the point-pin used by the game rather than Flight's complete
+  // joint bank. This keeps both bundle and per-step dispatch lean.
   registerPhysics3DJointSolver(
     world,
-    Physics3DDistanceJointKind,
-    physics3DDistanceJointSolver,
+    Physics3DBallAndSocketJointKind,
+    physics3DBallAndSocketJointSolver,
   );
 
   // A finite three-dimensional box follows the floating pasture silhouette.
@@ -276,12 +269,6 @@ export function addHorseBody(
 }
 
 export function stepHorseStack(world: Physics3DWorld): void {
-  // Broken lassos stop solving immediately. Remove them one step later so a
-  // long frantic round does not retain an ever-growing list of inert joints.
-  for (let index = world.joints.length - 1; index >= 0; index--) {
-    const joint = world.joints[index];
-    if (joint?.broken) removePhysics3DJoint(world, joint);
-  }
   stepPhysics3D(world, PHYSICS_STEP);
 }
 
@@ -289,49 +276,19 @@ export function attachHorseToPile(
   world: Physics3DWorld,
   horse: RigidBody3D,
   placement: Readonly<HorsePlacementResult>,
-  random = Math.random,
 ): number {
-  let support = placement.supportBody;
-  let anchorX = placement.contactX;
-  let anchorY = placement.contactY;
-  let anchorZ = placement.contactZ;
-
-  if (support === null || support.type !== 'dynamic' || support.index < 0) {
-    support = findNearestHorse(world, horse, null);
-    if (support !== null) {
-      anchorX = (horse.x + support.x) * 0.5;
-      anchorY = (horse.y + support.y) * 0.5;
-      anchorZ = (horse.z + support.z) * 0.5;
-    }
-  }
-
-  let attached = 0;
-  if (support !== null && addHorseLasso(world, horse, support, anchorX, anchorY, anchorZ)) {
-    attached++;
-  }
-
-  if (random() < HORSE_LASSO_SECONDARY_CHANCE) {
-    const secondary = findNearestHorse(world, horse, support);
-    if (secondary !== null) {
-      const secondaryX = (horse.x + secondary.x) * 0.5;
-      const secondaryY = (horse.y + secondary.y) * 0.5;
-      const secondaryZ = (horse.z + secondary.z) * 0.5;
-      if (addHorseLasso(world, horse, secondary, secondaryX, secondaryY, secondaryZ)) {
-        attached++;
-      }
-    }
-  }
-
-  if (attached > 0) {
-    applyPhysics3DTorque(
-      horse,
-      (random() * 2 - 1) * HORSE_CATCH_TORQUE,
-      (random() * 2 - 1) * HORSE_CATCH_TORQUE * 0.65,
-      (random() * 2 - 1) * HORSE_CATCH_TORQUE,
-    );
-  }
-  retireOldHorseLassos(world);
-  return attached;
+  const support = placement.supportBody;
+  if (support === null || support.type !== 'dynamic' || support.index < 0) return 0;
+  const attached = addHorseContactPin(
+    world,
+    horse,
+    support,
+    placement.contactX,
+    placement.contactY,
+    placement.contactZ,
+  );
+  retireOldHorsePins(world);
+  return attached ? 1 : 0;
 }
 
 export function stabilizeHorseStack(world: Readonly<Physics3DWorld>): void {
@@ -520,7 +477,7 @@ function setHorsePlacementOrientation(angle: number, yaw: number): void {
   setQuaternionFromEuler(placementOrientation, angle, yaw, 0, 'YXZ');
 }
 
-function addHorseLasso(
+function addHorseContactPin(
   world: Physics3DWorld,
   horse: RigidBody3D,
   support: RigidBody3D,
@@ -538,7 +495,7 @@ function addHorseLasso(
 
   const horseAnchor = worldPointToBodyLocal(horse, anchorX, anchorY, anchorZ);
   const supportAnchor = worldPointToBodyLocal(support, anchorX, anchorY, anchorZ);
-  const joint: Physics3DDistanceJoint = createPhysics3DDistanceJoint({
+  const joint: Physics3DBallAndSocketJoint = createPhysics3DBallAndSocketJoint({
     bodyA: horse.index,
     bodyB: support.index,
     localAnchorAX: horseAnchor.x,
@@ -548,54 +505,20 @@ function addHorseLasso(
     localAnchorBY: supportAnchor.y,
     localAnchorBZ: supportAnchor.z,
     collideConnected: true,
-    breakForce: HORSE_LASSO_BREAK_FORCE,
-    length: 0,
-    enableSpring: true,
-    frequencyHz: HORSE_LASSO_FREQUENCY_HZ,
-    dampingRatio: HORSE_LASSO_DAMPING_RATIO,
   });
   addPhysics3DJoint(world, joint);
   return true;
 }
 
-function retireOldHorseLassos(world: Physics3DWorld): void {
-  // Recent attachments create the visible wobble. Once they move down into
-  // the weighted foundation, contacts and damping can hold that shape without
+function retireOldHorsePins(world: Physics3DWorld): void {
+  // Recent contact pins create the visible pivoting. Once they move down into
+  // the weighted foundation, contacts and damping hold that shape without
   // making every new impact solve an ever-growing joint tree.
-  while (world.joints.length > HORSE_MAX_ACTIVE_LASSOS) {
+  while (world.joints.length > HORSE_MAX_ACTIVE_PINS) {
     const oldest = world.joints[0];
     if (oldest === undefined) return;
     removePhysics3DJoint(world, oldest);
   }
-}
-
-function findNearestHorse(
-  world: Readonly<Physics3DWorld>,
-  horse: Readonly<RigidBody3D>,
-  excluded: Readonly<RigidBody3D> | null,
-): RigidBody3D | null {
-  const catchDistanceSquared = HORSE_LASSO_CATCH_RADIUS * HORSE_LASSO_CATCH_RADIUS;
-  let nearest: RigidBody3D | null = null;
-  let nearestDistanceSquared = catchDistanceSquared;
-  for (const candidate of world.bodies) {
-    if (
-      candidate.type !== 'dynamic' ||
-      candidate === horse ||
-      candidate === excluded ||
-      candidate.index < 0 ||
-      candidate.y < PASTURE_TOP_Y - HORSE_HALF_HEIGHT
-    ) {
-      continue;
-    }
-    const dx = candidate.x - horse.x;
-    const dy = candidate.y - horse.y;
-    const dz = candidate.z - horse.z;
-    const distanceSquared = dx * dx + dy * dy + dz * dz;
-    if (distanceSquared >= nearestDistanceSquared) continue;
-    nearestDistanceSquared = distanceSquared;
-    nearest = candidate;
-  }
-  return nearest;
 }
 
 function applyHorseStabilityTier(body: RigidBody3D, tier: number): void {

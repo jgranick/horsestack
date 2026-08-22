@@ -155,13 +155,13 @@ const INDICATOR_MAX_SPIN = 5.5;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
-  distance: 0.95,
-  maxDistance: 3.4,
-  minDistance: 0.78,
+  distance: 0.82,
+  maxDistance: 1.35,
+  minDistance: 0.68,
   minPolar: 0.14,
-  polar: 0.42,
-  smoothTime: 0.2,
-  target: createVector3(STACK_X, 0.055, STACK_Z),
+  polar: 0.34,
+  smoothTime: 0.16,
+  target: createVector3(STACK_X, 0.05, STACK_Z),
 } as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
@@ -676,7 +676,7 @@ function commitHorsePlacement(now: number): void {
   body.angularVelocityX = 0;
   body.angularVelocityY = 0;
   body.angularVelocityZ = 0;
-  const lassoCount = attachHorseToPile(
+  const pinCount = attachHorseToPile(
     physicsWorld,
     body,
     activePlacement,
@@ -702,15 +702,13 @@ function commitHorsePlacement(now: number): void {
 
   const tilt = Math.abs(current.angle);
   gameCallout.textContent =
-    lassoCount > 1
-      ? 'DOUBLE HORSE LASSO!'
-      : lassoCount > 0
-        ? 'Horse magnet engaged!'
-        : tilt > 0.42
-          ? 'Precariously placed!'
-          : tilt > 0.16
-            ? 'A little crooked.'
-            : 'Placed gently.';
+    pinCount > 0
+      ? 'STUCK. Somehow.'
+      : tilt > 0.42
+        ? 'Precariously placed!'
+        : tilt > 0.16
+          ? 'A little crooked.'
+          : 'Placed gently.';
   nextHorseAt = now + getNextHorseDelay(horsesDropped);
   hudDirty = true;
   renderRequested = true;
@@ -993,26 +991,29 @@ function setHorseVisualFromBody(node: Node3D, body: Readonly<RigidBody3D>): void
 }
 
 function updateCamera(deltaTime: number, height: number): void {
-  const rise = clamp(height / 1.1, 0, 1);
-  const herdProgress = clamp(horsesDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
-  const stackTop = Math.max(restingHorseTop, height);
-  // Frame the useful pasture-to-placement interval instead of centering the
-  // empty air above the newest horse. The focus rises from 44% to 54% of the
-  // stack so the ground remains visible even when the pile gets tall.
-  const groundFocus = 0.44 + rise * 0.1;
+  const placementTop =
+    activeHorse === null
+      ? Math.max(restingHorseTop, height)
+      : activePlacement.centerY + HORSE_HALF_HEIGHT;
+  const rise = clamp(placementTop / 1.1, 0, 1);
+  // Follow the actual choice the player is making and keep roughly two horse
+  // heights beneath it in frame. Deliberately do not zoom out for the entire
+  // historical pile: the current horse remains large and readable.
   const desiredTargetY =
     STACK_BASE_Y +
-    PASTURE_TOP_Y +
-    (stackTop - PASTURE_TOP_Y) * groundFocus;
+    Math.max(
+      PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 0.35,
+      placementTop - HORSE_HALF_HEIGHT * 1.25,
+    );
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
-  const follow = 1 - Math.exp(-deltaTime * 2.4);
+  const follow = 1 - Math.exp(-deltaTime * 3.8);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
-  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.08 + herdProgress * 0.02;
-  cameraController.goalPolar = 0.42 + rise * 0.08;
-  cameraController.goalDistance = Math.min(3.25, 0.95 + height * 0.88 + herdProgress * 0.28);
+  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.07;
+  cameraController.goalPolar = 0.34 + rise * 0.05;
+  cameraController.goalDistance = Math.min(1.08, 0.82 + rise * 0.2);
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
@@ -1146,10 +1147,9 @@ function setAimFromClientPoint(clientX: number, clientY: number, now: number): v
     return;
   }
 
-  // Aim on a horizontal slice through the camera's current lower-stack focus.
-  // This keeps screen center pinned to the useful placement field while making
-  // vertical pointer motion move toward or away from the camera.
-  placementPlane.d = -cameraController.target.y;
+  // Aim through the currently previewed placement height, independently of
+  // the camera's compositional offset beneath it.
+  placementPlane.d = -(STACK_BASE_Y + activePlacement.centerY);
   if (!intersectCamera3DRayWithPlane(placementHit, placementRay, placementPlane)) return;
 
   const horizontalLimit = getAimHalfWidth();

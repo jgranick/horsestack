@@ -456,7 +456,7 @@ function mountFarm(model: Scene3D): void {
   wrapper.scale.y = scale;
   wrapper.scale.z = scale;
   wrapper.position.x = 0.5;
-  wrapper.position.y = -0.02;
+  wrapper.position.y = -0.043;
   wrapper.position.z = -2.2;
   invalidateNodeLocalTransform(wrapper);
   addNodeChild(wrapper, model.root);

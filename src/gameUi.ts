@@ -158,6 +158,9 @@ export function createFlightGameUi(
   addNodeChild(playingRoot, dropRoot);
   const dropButton = createSolidShape(dropRoot);
   const dropButtonLabel = createLabel(dropRoot, 'PLACE HORSE', buttonFormat(COLORS.white));
+  setNodeEnabled(scoreLabel, false);
+  setNodeEnabled(scoreValue, false);
+  setNodeEnabled(dropRoot, false);
   const restartButton = createSolidShape(playingRoot);
   const restartButtonLabel = createLabel(playingRoot, '↺  START OVER', buttonFormat(COLORS.white));
   const viewerBrand = createLabel(playingRoot, 'FLIGHT PHYSICS 3D', kickerFormat(COLORS.cream));
@@ -345,13 +348,12 @@ export function createFlightGameUi(
     timerFill.pivotX = 0;
     timerFill.pivotY = 0;
 
-    const statsWidth = compact ? Math.min(width - margin * 2, 330) : 376;
+    const statsWidth = compact ? Math.min(width - margin * 2, 230) : 252;
     const statsY = height - (compact ? 166 : 174);
     redrawRectangle(statsCard, margin, statsY, statsWidth, 66, COLORS.green, 0.68);
-    const statWidth = statsWidth / 3;
+    const statWidth = statsWidth / 2;
     layoutStat(horsesLabel, horsesValue, margin, statsY, statWidth);
     layoutStat(heightLabel, heightValue, margin + statWidth, statsY, statWidth);
-    layoutStat(scoreLabel, scoreValue, margin + statWidth * 2, statsY, statWidth);
 
     const dropWidth = 168;
     redrawRectangle(dropButton, 0, 0, dropWidth, 46, COLORS.orange, 1);

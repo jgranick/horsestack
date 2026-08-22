@@ -9,8 +9,10 @@ Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
 Before every placement, the real horse stays hidden and a softly glowing gold horse
 previews its pose anywhere across the field in 3D. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
-teeters it. On placement, the marker is immediately replaced by a fully visible
-real horse at that exact position and angle. Flight physics activates there
+teeters it. Each new marker chooses from several orientations—including upside
+down—and that preview remains the pose you place. On placement, the marker is
+immediately replaced by a fully visible real horse at that exact position and
+angle. Flight physics activates there
 with zero linear or angular impulse, so the pile can still shift, tip, roll in
 depth, and tumble without an artificial drop destabilizing it.
 The cow-scale horses stay readable under a close camera that tracks the pile's
@@ -39,9 +41,9 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs 64-horse level, balanced, and teetered placement
-scenarios using the shipped timing and surface-placement rules, then checks for
-finite 3D body state, contacts, a measurable supported pile, zero-impulse
+The gameplay validation runs 64-horse level, balanced, and random-orientation
+placement scenarios using the shipped timing and surface-placement rules, then
+checks for finite 3D body state, contacts, a measurable supported pile, zero-impulse
 physics activation, the wide conservative single-box horse proxy, the 1.55m
 horse-height conversion, and real falls beyond both the lateral and depth edges
 of the farm collider.

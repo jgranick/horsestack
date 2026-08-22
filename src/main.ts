@@ -71,6 +71,7 @@ import {
   FINAL_SETTLE_SECONDS,
   getNextHorseDelay,
   getPaceLevel,
+  getRandomHorsePlacementAngle,
   getHorseTopY,
   getHorseVerticalExtent,
   getStackHeightHands,
@@ -101,6 +102,7 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 
 interface ActiveHorse {
   angle: number;
+  baseAngle: number;
   depth: number;
   lateral: number;
 }
@@ -615,8 +617,10 @@ function spawnHorse(now: number): void {
   indicatorAngularVelocity = 0;
   indicatorUpdatedAt = now;
   lastAimAt = now;
+  const baseAngle = getRandomHorsePlacementAngle();
   activeHorse = {
-    angle: 0,
+    angle: baseAngle,
+    baseAngle,
     depth: aimDepth,
     lateral: aimLateral,
   };
@@ -640,7 +644,7 @@ function updateActiveHorse(now: number): void {
   const horizontalLimit = getAimHalfWidth();
   current.lateral = clamp(aimLateral, -horizontalLimit, horizontalLimit);
   current.depth = clamp(aimDepth, -PLACEMENT_HALF_DEPTH, PLACEMENT_HALF_DEPTH);
-  current.angle = indicatorAngle;
+  current.angle = current.baseAngle + indicatorAngle;
   updateLandingGhost(current, now);
 }
 

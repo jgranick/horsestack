@@ -6,6 +6,7 @@ import {
   getHorseTopY,
   getHorseVerticalExtent,
   getNextHorseDelay,
+  getRandomHorsePlacementAngle,
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
@@ -13,6 +14,7 @@ import {
   HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  HORSE_PLACEMENT_ANGLES,
   HORSE_VISUAL_HALF_DEPTH,
   isHorseWithinPasture,
   PASTURE_HALF_WIDTH,
@@ -37,11 +39,12 @@ const TARGET_HALF_DEPTH = 0.16;
 const VALIDATION_HORSES = 64;
 
 const scenarios = [
-  runScenario('level placements', 0x4c455645, 0.04, 0.34),
-  runScenario('balanced placements', 0x42414c41, 0.28, 0.2),
-  runScenario('teetered placements', 0x54454554, 0.6, 0.1),
+  runScenario('level placements', 0x4c455645, 0.04, 0.34, false),
+  runScenario('balanced placements', 0x42414c41, 0.28, 0.2, false),
+  runScenario('random orientations', 0x52414e44, 0, 0.1, true),
 ];
 validateStableActivation();
+validatePlacementOrientations();
 validateHeightCalibration();
 validateFarmEdgeFalloff();
 validateFarmDepthFalloff();
@@ -60,6 +63,7 @@ function runScenario(
   seed: number,
   maxTilt: number,
   inputCadence: number,
+  randomizeOrientation: boolean,
 ): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody3D[] = [];
@@ -70,7 +74,9 @@ function runScenario(
     const horseSeed = random() * Math.PI * 2;
     const lateral = Math.sin(horseSeed) * horizontalLimit;
     const depth = (random() * 2 - 1) * TARGET_HALF_DEPTH;
-    const angle = (random() * 2 - 1) * maxTilt;
+    const angle = randomizeOrientation
+      ? getRandomHorsePlacementAngle(random)
+      : (random() * 2 - 1) * maxTilt;
     const landingSurfaceY = getPlacementSurfaceY(horses, lateral, depth);
     const horse = addHorseBody(
       world,
@@ -123,6 +129,25 @@ function runScenario(
     inPasture,
     name,
   };
+}
+
+function validatePlacementOrientations(): void {
+  if (
+    HORSE_PLACEMENT_ANGLES.length < 4 ||
+    !HORSE_PLACEMENT_ANGLES.includes(0) ||
+    !HORSE_PLACEMENT_ANGLES.includes(Math.PI)
+  ) {
+    throw new Error('placement orientation: expected multiple poses including upright and upside down');
+  }
+  for (let index = 0; index < HORSE_PLACEMENT_ANGLES.length; index++) {
+    const expected = HORSE_PLACEMENT_ANGLES[index];
+    const actual = getRandomHorsePlacementAngle(
+      () => (index + 0.5) / HORSE_PLACEMENT_ANGLES.length,
+    );
+    if (actual !== expected) {
+      throw new Error(`placement orientation: expected option ${index} to remain selectable`);
+    }
+  }
 }
 
 function validateStableActivation(): void {

@@ -705,7 +705,7 @@ h1 em {
 .horse-tally {
   width: min(100%, 430px);
   height: clamp(152px, 24vh, 200px);
-  margin: 2px auto 0;
+  margin: 0 auto 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -769,6 +769,10 @@ h1 em {
 
 .result-panel.is-total-revealed {
   animation: result-gold-flash 900ms ease-out both;
+}
+
+.game-panel h2 {
+  line-height: 0.6em;
 }
 
 .game-panel button[hidden] {

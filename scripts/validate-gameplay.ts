@@ -43,6 +43,7 @@ const scenarios = [
   runScenario('teetered mixed stack', 0x54454554, 0.6, 0.1),
 ];
 validateStableActivation();
+validateCentredMass();
 validateRandomObjectSelection();
 validateObjectProfiles();
 validateHeightCalibration();
@@ -119,6 +120,24 @@ function runScenario(
     kinds,
     name,
   };
+}
+
+// Guards the settling fix: Flight solves centre of mass from the collider, and an
+// off-centre polygon leaves centerX/centerY non-zero, which measurably slows a
+// free-standing pile from settling and shows up as camera shudder. Every shape must
+// solve to a centred body so no future collider edit reintroduces it silently.
+function validateCentredMass(): void {
+  const world = createHorseStackWorld();
+  for (const kind of STACK_OBJECT_KINDS) {
+    const body = addStackObjectBody(world, kind, 0, PASTURE_TOP_Y + 1, 0);
+    const offset = Math.hypot(body.centerX, body.centerY);
+    const tolerance = STACK_OBJECT_PROFILES[kind].halfHeight * 0.005;
+    if (!(offset <= tolerance)) {
+      throw new Error(
+        `${kind}: collider centre of mass is ${offset.toFixed(6)} off the body origin, over the ${tolerance.toFixed(6)} tolerance`,
+      );
+    }
+  }
 }
 
 function validateStableActivation(): void {

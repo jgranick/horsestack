@@ -82,16 +82,16 @@ export const HORSE_PLACEMENT_YAWS = [0, Math.PI / 2, Math.PI, -Math.PI / 2] as c
 // candidate pairs in a dense pile.
 const PHYSICS_GRID_CELL_SIZE = 0.22;
 
-// Each new horse gets at most one reliable tether and, rarely, one bonus
-// tether. A sparse tree keeps the pile floppy and cheap; connecting every
-// nearby pair would make a rigid constraint mesh and wake far more solver rows.
-export const HORSE_LASSO_SECONDARY_CHANCE = 0.15;
-export const HORSE_LASSO_CATCH_RADIUS = HORSE_HALF_HEIGHT * 3.1;
-export const HORSE_LASSO_BREAK_FORCE = 0.043;
-export const HORSE_MAX_ACTIVE_LASSOS = 8;
-const HORSE_LASSO_FREQUENCY_HZ = 4.2;
-const HORSE_LASSO_DAMPING_RATIO = 0.68;
-const HORSE_CATCH_TORQUE = 0.000_12;
+// Arcade glue is intentionally generous: nearly every placement can grab a
+// neighbour and most horses try to grab a second one. The live cap still keeps
+// the constraint graph bounded while the newest layer behaves like a katamari.
+export const HORSE_LASSO_SECONDARY_CHANCE = 0.7;
+export const HORSE_LASSO_CATCH_RADIUS = HORSE_HALF_HEIGHT * 5.2;
+export const HORSE_LASSO_BREAK_FORCE = 0.16;
+export const HORSE_MAX_ACTIVE_LASSOS = 12;
+const HORSE_LASSO_FREQUENCY_HZ = 9.5;
+const HORSE_LASSO_DAMPING_RATIO = 0.84;
+const HORSE_CATCH_TORQUE = 0.000_16;
 
 const HORSE_NORMAL_LINEAR_DAMPING = 0.12;
 const HORSE_NORMAL_ANGULAR_DAMPING = 0.18;
@@ -108,8 +108,8 @@ const HORSE_BASE_LEVEL_DEPTH = 4.5;
 
 const HORSE_MATERIAL: Physics3DMaterial = {
   density: 1,
-  friction: 0.68,
-  restitution: 0.04,
+  friction: 0.9,
+  restitution: 0.02,
 };
 const PASTURE_MATERIAL: Physics3DMaterial = {
   density: 0,

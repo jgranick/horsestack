@@ -156,9 +156,14 @@ a {
   min-height: 0;
   padding: clamp(38px, 5.8vh, 68px) 0 clamp(30px, 4.4vh, 50px);
   display: grid;
-  grid-template-columns: minmax(300px, 0.58fr) minmax(560px, 1.42fr);
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   gap: clamp(42px, 6vw, 102px);
   align-items: center;
+}
+
+.intro[hidden] {
+  display: none;
 }
 
 .intro {
@@ -329,6 +334,7 @@ h1 em {
 
 .viewer-wrap {
   width: 100%;
+  max-width: min(100%, 1180px);
   min-width: 0;
 }
 
@@ -557,6 +563,10 @@ h1 em {
 .error-panel[hidden],
 .game-panel[hidden],
 .restart-game[hidden] {
+  display: none;
+}
+
+.viewer.is-playing .game-callout {
   display: none;
 }
 
@@ -986,7 +996,7 @@ h1 em {
 
   .experience {
     padding-top: 28px;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 46px;
   }
 

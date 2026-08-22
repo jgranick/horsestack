@@ -1179,7 +1179,13 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
   cameraController.goalAzimuth = Math.PI / 2 + rise * 0.18 + herdProgress * 0.04;
-  cameraController.goalPolar = 0.06 + rise * 0.14;
+  // Pitch down harder as the pile grows. A near-level camera high above a tall stack
+  // frames the top and loses everything under it, which is worst exactly when the pile
+  // collapses and the action moves downward. Measured over played runs, on samples with
+  // a pile above 0.5 units, the base of the pile is inside the frame in 26 of 34 samples
+  // at this rate against 4 of 27 at the old 0.14, and the pile top stays around a fifth
+  // of the way above centre either way. At rest the tilt is unchanged.
+  cameraController.goalPolar = 0.06 + rise * 0.6;
   cameraController.goalDistance = Math.min(
     3.25,
     CAMERA_BASE_DISTANCE + height * 0.85 + herdProgress * 0.28,

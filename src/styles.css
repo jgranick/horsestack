@@ -56,6 +56,10 @@ a {
   grid-template-rows: auto 1fr auto;
 }
 
+.site-header[hidden] {
+  display: none;
+}
+
 .site-header {
   min-height: 88px;
   display: flex;
@@ -152,7 +156,7 @@ a {
   min-height: 0;
   padding: clamp(38px, 5.8vh, 68px) 0 clamp(30px, 4.4vh, 50px);
   display: grid;
-  grid-template-columns: minmax(310px, 0.72fr) minmax(560px, 1.28fr);
+  grid-template-columns: minmax(300px, 0.58fr) minmax(560px, 1.42fr);
   gap: clamp(42px, 6vw, 102px);
   align-items: center;
 }
@@ -333,7 +337,7 @@ h1 em {
   /* Sized off what the viewport actually has left: 250px covers the header, the
      experience padding, and the footer. Taller than the old 71vh on a big screen,
      and it gives way instead of pushing the game below the fold on a short one. */
-  height: clamp(400px, calc(100vh - 258px), 790px);
+  height: clamp(400px, calc(100vh - 170px), 900px);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -1006,7 +1010,7 @@ h1 em {
   }
 
   .viewer {
-    height: max(340px, min(78vw, calc(100vh - 156px), 760px));
+    height: max(340px, min(86vw, calc(100vh - 76px), 860px));
   }
 
   .site-footer {
@@ -1064,8 +1068,9 @@ h1 em {
   }
 
   .viewer {
-    height: 72vh;
-    min-height: 500px;
+    /* The narrow layout had its own fixed 72vh and so ignored the reclaimed header
+       space; this spends it while still leaving the pitch visible below the fold. */
+    height: max(500px, min(82vh, calc(100vh - 72px)));
     border-radius: 25px 25px 25px 6px;
   }
 

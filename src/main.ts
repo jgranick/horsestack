@@ -210,7 +210,7 @@ const scene = createNode3D(Node3DKind);
 const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
 addNodeChild(scene, stackLayer);
 const landingGhostMaterial = createStandardPbrMaterial({
-  alphaMode: 'blend',
+  alphaMode: 'opaque',
   baseColor: 0xe2b83fff,
   doubleSided: true,
   emissive: 0x8a5a0bff,
@@ -673,7 +673,10 @@ function startGame(): void {
   lastImpactAt = 0;
   removeNodeChildren(stackLayer);
   landingGhost = createNode3D(Node3DKind, { name: 'landing-preview' });
-  landingGhost.alpha = 0.36;
+  // A solid silhouette keeps the small chicken readable and prevents the
+  // horse's back-facing surfaces from showing through the preview. The halo,
+  // beam, emissive material, and point light retain the golden placement cue.
+  landingGhost.alpha = 1;
   landingGhost.name = 'landing-preview';
   addNodeChild(stackLayer, landingGhost);
   landingRadiance = createLandingRadiance();
@@ -998,7 +1001,6 @@ function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): 
     indicatorLight.intensity = 0;
     return;
   }
-  setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
   const previewY =
     landingSurfaceY + getStackObjectVerticalExtent(current.kind, current.angle);
   setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);

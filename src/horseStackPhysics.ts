@@ -59,7 +59,9 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
 // The farm ground spans roughly 3.5 world units across the straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
-export const PASTURE_TOP_Y = -0.015;
+// STACK_BASE_Y maps physics space into the rendered scene. Its 0.015 offset
+// puts this surface at world Y -0.02, level with the mounted farm terrain.
+export const PASTURE_TOP_Y = -0.035;
 export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;

@@ -6,13 +6,16 @@ physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
 Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
-Before every placement, the real horse stays hidden and a softly glowing gold horse
-previews its pose anywhere across the field in 3D. The marker behaves like a damped
+Before every placement, the real horse stays hidden and a translucent gold horse
+previews its pose anywhere across the field in 3D. An exact Flight physics shape
+cast positions that horse where its collider will first touch the live pile. A
+faint footprint shows its center and facing direction, while a small ring marks
+the exact contact point and surface angle. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
-teeters it. Each new marker chooses from several orientations—including upside
-down—and that preview remains the pose you place. On placement, the marker is
-immediately replaced by a fully visible real horse at that exact position and
-angle. Flight physics activates there
+teeters it. Each new marker chooses from several roll and yaw orientations—including
+upside down and facing toward or away from the camera—and that preview remains the
+pose you place. On placement, the marker is immediately replaced by a fully visible
+real horse at that exact position and orientation. Flight physics activates there
 with zero linear or angular impulse, so the pile can still shift, tip, roll in
 depth, and tumble without an artificial drop destabilizing it.
 The cow-scale horses stay readable under a close camera that tracks the pile's
@@ -43,10 +46,11 @@ npm run validate:game
 
 The gameplay validation runs 64-horse level, balanced, and random-orientation
 placement scenarios using the shipped timing and surface-placement rules, then
-checks for finite 3D body state, contacts, a measurable supported pile, zero-impulse
-physics activation, the wide conservative single-box horse proxy, the 1.55m
-horse-height conversion, and real falls beyond both the lateral and depth edges
-of the farm collider.
+checks for finite 3D body state, contacts, a measurable supported pile, exact
+shape-cast placement, front/back-facing yaw options, zero-impulse physics
+activation, the wide conservative single-box horse proxy, the 1.55m horse-height
+conversion, and real falls beyond both the lateral and depth edges of the farm
+collider.
 
 ## Model credits
 

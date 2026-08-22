@@ -1,12 +1,14 @@
 import type { RigidBody3D } from '@flighthq/sdk';
 import {
   addHorseBody,
+  createHorsePlacementResult,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
   getHorseTopY,
   getHorseVerticalExtent,
   getNextHorseDelay,
   getRandomHorsePlacementAngle,
+  getRandomHorsePlacementYaw,
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
@@ -15,12 +17,14 @@ import {
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
   HORSE_PLACEMENT_ANGLES,
+  HORSE_PLACEMENT_YAWS,
   HORSE_VISUAL_HALF_DEPTH,
   isHorseWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_FRONT_DEPTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
+  resolveHorsePlacement,
   stepHorseStack,
   TYPICAL_HORSE_WITHERS_METERS,
 } from '../src/horseStackPhysics';
@@ -45,6 +49,7 @@ const scenarios = [
 ];
 validateStableActivation();
 validatePlacementOrientations();
+validateExactPlacementPreview();
 validateHeightCalibration();
 validateFarmEdgeFalloff();
 validateFarmDepthFalloff();
@@ -55,7 +60,7 @@ console.log(
       ({ contacts, depthSpread, hands, heightMeters, inPasture, name }) =>
         `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; horse-height calibration and farm-edge falloff verified`,
+    .join('; ')}; exact placement, yaw poses, horse-height calibration, and farm-edge falloff verified`,
 );
 
 function runScenario(
@@ -69,6 +74,7 @@ function runScenario(
   const horses: RigidBody3D[] = [];
   const random = mulberry32(seed);
   const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
+  const placement = createHorsePlacementResult();
 
   for (let index = 0; index < VALIDATION_HORSES; index++) {
     const horseSeed = random() * Math.PI * 2;
@@ -77,13 +83,18 @@ function runScenario(
     const angle = randomizeOrientation
       ? getRandomHorsePlacementAngle(random)
       : (random() * 2 - 1) * maxTilt;
-    const landingSurfaceY = getPlacementSurfaceY(horses, lateral, depth);
+    const yaw = getRandomHorsePlacementYaw(random);
+    let startY = PASTURE_TOP_Y + 0.5;
+    for (const horse of horses) startY = Math.max(startY, getHorseTopY(horse) + 0.24);
+    resolveHorsePlacement(placement, world, lateral, depth, angle, yaw, startY);
+    if (!placement.hit) throw new Error(`${name}: placement preview missed the pasture`);
     const horse = addHorseBody(
       world,
       lateral,
-      landingSurfaceY + getHorseVerticalExtent(angle),
+      placement.centerY,
       angle,
       depth,
+      yaw,
     );
     horse.velocityX = 0;
     horse.velocityY = 0;
@@ -148,6 +159,47 @@ function validatePlacementOrientations(): void {
       throw new Error(`placement orientation: expected option ${index} to remain selectable`);
     }
   }
+  if (
+    !HORSE_PLACEMENT_YAWS.includes(Math.PI / 2) ||
+    !HORSE_PLACEMENT_YAWS.includes(-Math.PI / 2)
+  ) {
+    throw new Error('placement orientation: expected front- and back-facing yaw poses');
+  }
+  for (let index = 0; index < HORSE_PLACEMENT_YAWS.length; index++) {
+    const expected = HORSE_PLACEMENT_YAWS[index];
+    const actual = getRandomHorsePlacementYaw(
+      () => (index + 0.5) / HORSE_PLACEMENT_YAWS.length,
+    );
+    if (actual !== expected) {
+      throw new Error(`placement orientation: expected yaw option ${index} to remain selectable`);
+    }
+  }
+  const yawedHorse = addHorseBody(createHorseStackWorld(), 0, 0.3, 0, 0, Math.PI / 2);
+  if (Math.abs(Math.abs(yawedHorse.orientationY) - Math.SQRT1_2) > 0.000_01) {
+    throw new Error('placement orientation: expected yaw to reach the rigid body transform');
+  }
+}
+
+function validateExactPlacementPreview(): void {
+  const world = createHorseStackWorld();
+  const placement = createHorsePlacementResult();
+  resolveHorsePlacement(placement, world, 0, 0, 0, Math.PI / 2, 0.5);
+  const expectedCenterY = PASTURE_TOP_Y + HORSE_HALF_HEIGHT;
+  if (
+    !placement.hit ||
+    Math.abs(placement.centerY - expectedCenterY) > 0.000_01 ||
+    Math.abs(placement.contactY - PASTURE_TOP_Y) > 0.000_01 ||
+    placement.normalY < 0.99
+  ) {
+    throw new Error(
+      `placement preview: expected exact pasture contact at ${expectedCenterY}, received ${placement.centerY}`,
+    );
+  }
+  addHorseBody(world, 0, placement.centerY, 0, 0, Math.PI / 2);
+  resolveHorsePlacement(placement, world, 0, 0, 0, Math.PI / 2, 0.5);
+  if (!placement.hit || placement.centerY <= expectedCenterY + HORSE_HALF_HEIGHT) {
+    throw new Error('placement preview: expected the exact cast to find a horse already in the pile');
+  }
 }
 
 function validateStableActivation(): void {
@@ -200,28 +252,6 @@ function validateHeightCalibration(): void {
   if (getStackHeightHands(oneHorseTopY) !== 15) {
     throw new Error('height calibration: a 1.55m horse should round to 15 hands');
   }
-}
-
-function getPlacementSurfaceY(
-  horses: readonly RigidBody3D[],
-  lateral: number,
-  depth: number,
-): number {
-  let surfaceY = PASTURE_TOP_Y;
-  const lengthReach = HORSE_COLLIDER_HALF_LENGTH * 1.9;
-  const depthReach = HORSE_HALF_DEPTH * 1.9;
-  for (const horse of horses) {
-    if (
-      horse.y < PASTURE_TOP_Y ||
-      Math.abs(horse.z + lateral) > lengthReach ||
-      Math.abs(horse.x - depth) > depthReach ||
-      Math.abs(horse.velocityY) > 1.2
-    ) {
-      continue;
-    }
-    surfaceY = Math.max(surfaceY, getHorseTopY(horse));
-  }
-  return surfaceY;
 }
 
 function validateFarmEdgeFalloff(): void {

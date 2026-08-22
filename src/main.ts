@@ -24,7 +24,6 @@ import {
   createAabb,
   createAmbientLight,
   createCamera3D,
-  createCylinderMeshGeometry,
   createDirectionalLight,
   createGlCanvasElement,
   createGlRenderEffectPipeline,
@@ -130,8 +129,15 @@ const STACK_X = 1.55;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279 * HORSE_SIZE_MULTIPLIER;
 const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
+// The preview floats a full horse-height above its landing surface so the queued
+// object reads as "about to drop" rather than as an object already in the pile.
+// Placement still uses the unlifted landing pose.
+const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
+// Long enough to swallow the second half of a double-click on "Start stacking",
+// short enough that a player who reacts to the first preview never notices it.
+const START_INPUT_GUARD_MS = 400;
 const GAME_DURATION_MS = 60_000;
-const HANDS_PER_EMOJI_COLUMN = 12;
+const HANDS_PER_EMOJI_COLUMN = 9;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 const RESULT_TICK_INTERVAL_MS = 32;
@@ -217,15 +223,6 @@ const landingGhostMaterial = createStandardPbrMaterial({
   emissiveStrength: 0.7,
   metallic: 0.18,
   roughness: 0.38,
-});
-const landingBeamMaterial = createStandardPbrMaterial({
-  alphaMode: 'blend',
-  baseColor: 0xf1d88aff,
-  doubleSided: true,
-  emissive: 0xc58a18ff,
-  emissiveStrength: 0.65,
-  metallic: 0,
-  roughness: 0.62,
 });
 const landingHaloMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
@@ -355,6 +352,11 @@ configureDirectionalShadowCamera3D(
 );
 
 let phase: GamePhase = 'loading';
+// Placement input is refused until this moment, measured on the INPUT clock
+// (Event.timeStamp) rather than the render clock: startGame() has to build a physics
+// world and clone a model, and on a slow first frame that work alone can outlast the
+// guard. Comparing input to input keeps the window honest whatever the frame costs.
+let placementArmedAt = 0;
 let horseTemplate: Scene3D | null = null;
 const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
 let landingGhost: Node3D | null = null;
@@ -571,15 +573,6 @@ function findNodeByName(root: Readonly<Node3D>, name: string): Node3D | null {
 
 function createLandingRadiance(): Node3D {
   const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
-  const beam = createMesh(
-    createCylinderMeshGeometry(0.16, 0.022, 0.58, 18, false),
-    [landingBeamMaterial],
-  );
-  beam.alpha = 0.045;
-  beam.position.y = 0.29;
-  invalidateNodeLocalTransform(beam);
-  addNodeChild(root, beam);
-
   const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
   halo.alpha = 0.24;
   halo.position.x = 0.012;
@@ -644,7 +637,7 @@ async function loadGltfScene(basePath: string): Promise<Scene3D> {
   return imported;
 }
 
-function startGame(): void {
+function startGame(startedFrom?: Event): void {
   if (horseTemplate === null || phase === 'loading') return;
 
   const now = performance.now();
@@ -688,6 +681,7 @@ function startGame(): void {
   celebrationState = createParticleEmitterState();
 
   phase = 'playing';
+  placementArmedAt = (startedFrom?.timeStamp ?? now) + START_INPUT_GUARD_MS;
   startPanel.hidden = true;
   timeUpPanel.hidden = true;
   resultPanel.hidden = true;
@@ -699,6 +693,7 @@ function startGame(): void {
   replayButton.hidden = true;
   restartButton.hidden = false;
   dropButton.disabled = true;
+  dropButton.hidden = false;
   viewer.classList.add('is-playing');
   viewer.classList.remove('is-finished', 'is-time-up', 'is-bumping', 'is-panicking');
   sceneStatus.classList.add('is-ready');
@@ -772,6 +767,8 @@ function commitObjectPlacement(now: number): void {
   stackedObjects.push({ body, kind: current.kind, lost: false, node });
   activeObject = null;
   dropButton.disabled = true;
+  // The prompt has served its purpose once the player has placed something.
+  dropButton.hidden = true;
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
@@ -1001,10 +998,12 @@ function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): 
     indicatorLight.intensity = 0;
     return;
   }
-  const previewY =
+  const landingY =
     landingSurfaceY + getStackObjectVerticalExtent(current.kind, current.angle);
-  setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);
-  updateLandingRadiance(previewX, previewY, now);
+  // The object hovers a horse-height up; the halo and its light stay down on the
+  // landing pose, so the marker still says where the drop lands.
+  setStackObjectVisualTransform(landingGhost, previewX, landingY + LANDING_PREVIEW_LIFT, current.angle);
+  updateLandingRadiance(previewX, landingY, now);
 }
 
 function updateLandingRadiance(x: number, physicsY: number, now: number): void {
@@ -1140,7 +1139,7 @@ function bindGameControls(): void {
     canvas.focus({ preventScroll: true });
     const now = performance.now();
     setAimFromClientX(event.clientX, now);
-    placeActiveStackObject(now);
+    placeActiveStackObject(now, event.timeStamp);
   });
 
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -1153,21 +1152,24 @@ function bindGameControls(): void {
       const horizontalLimit = getAimHalfWidth();
       setAimOffset(aimOffset + 0.08, horizontalLimit, now);
     } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
-      placeActiveStackObject(now);
+      placeActiveStackObject(now, event.timeStamp);
     } else {
       return;
     }
     event.preventDefault();
   });
 
-  dropButton.addEventListener('click', () => placeActiveStackObject(performance.now()));
+  dropButton.addEventListener('click', (event: MouseEvent) =>
+    placeActiveStackObject(performance.now(), event.timeStamp),
+  );
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);
 }
 
-function placeActiveStackObject(now: number): void {
+function placeActiveStackObject(now: number, inputAt = now): void {
   if (activeObject === null) return;
+  if (inputAt < placementArmedAt) return;
   if (now >= gameEndsAt) {
     beginSettling(now);
     return;

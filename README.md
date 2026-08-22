@@ -18,7 +18,8 @@ The bale is shown end-on with a fixed Z-axis quarter-turn, while the simplified
 irregular horse, and circular chicken.
 The pile itself sits close to the pasture's front edge.
 Before every drop, the real object stays hidden and a softly glowing gold object
-previews its landing pose. The marker behaves like a damped
+previews its landing pose, hovering a horse-height above it while the halo and its
+warm light stay down on the landing pose itself. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
 real object at that exact position and angle. Flight physics activates there
@@ -29,7 +30,11 @@ top while gradually pulling back and changing angle with its growth. Displayed
 height is calibrated so one upright physics horse represents a typical 1.55m
 riding horse. After the TIME UP beat, the result counts upward in meters and in
 hands (4 inches each), stacking one horse emoji per hand before revealing the
-final score.
+final score; a column wraps after nine so a full column always fits its frame.
+
+Game chrome stays out of the way. The numeric scoreboard is hidden, the in-viewer
+copy is not selectable, the gesture that starts a run cannot also spend its first
+object, and the "Place object" prompt retires once the player has placed one.
 
 ## Run locally
 

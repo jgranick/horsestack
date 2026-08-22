@@ -1606,6 +1606,7 @@ function startGameAudio(now: number): void {
     now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
   if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
   restartAudioTrack(soundtrack, 'Background music');
+  soundtrack.currentTime = 2;
 }
 
 function stopAllAudio(): void {

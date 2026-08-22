@@ -12,6 +12,7 @@ import {
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
+  HORSE_SIZE_MULTIPLIER,
   isStackBodyWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
@@ -152,6 +153,9 @@ function validateRandomObjectSelection(): void {
 }
 
 function validateObjectProfiles(): void {
+  if (Math.abs(HORSE_SIZE_MULTIPLIER - 1.2) > Number.EPSILON) {
+    throw new Error(`horse profile: expected 20% visual/physics scale increase`);
+  }
   const uniqueSizes = new Set<string>();
   for (const kind of STACK_OBJECT_KINDS) {
     const profile = STACK_OBJECT_PROFILES[kind];

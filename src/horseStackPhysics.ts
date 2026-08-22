@@ -17,8 +17,9 @@ export interface StackObjectProfile {
   label: string;
 }
 
-export const HORSE_HALF_WIDTH = 0.09;
-export const HORSE_HALF_HEIGHT = 0.0765;
+export const HORSE_SIZE_MULTIPLIER = 1.2;
+export const HORSE_HALF_WIDTH = 0.09 * HORSE_SIZE_MULTIPLIER;
+export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 export const METERS_PER_HAND = 0.1016;
 export const STACK_OBJECT_KINDS = ['horse', 'hay', 'cow', 'chickens'] as const;
@@ -45,7 +46,7 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
     emoji: '🐔',
     halfHeight: 0.03,
     halfWidth: 0.113,
-    label: 'Chickens',
+    label: 'Three chickens',
   },
 };
 

@@ -86,6 +86,7 @@ import {
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
+  HORSE_SIZE_MULTIPLIER,
   isStackBodyWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
@@ -120,12 +121,12 @@ interface StackedObject {
 
 const STACK_BASE_Y = 0.015;
 // At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
-// Pull the 2D play plane into the front third of the island. The farm's front
-// edge is near x=1.8, leaving room for silhouettes to tumble toward the camera.
-const STACK_X = 1.28;
+// Pull the 2D play plane close to the island's front edge at roughly x=1.8,
+// while retaining a small strip of visible pasture beneath the pieces.
+const STACK_X = 1.55;
 const STACK_Z = -2.15;
-const HORSE_SCALE = 0.00279;
-const HORSE_VISUAL_CENTER_Y = 0.07875;
+const HORSE_SCALE = 0.00279 * HORSE_SIZE_MULTIPLIER;
+const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
 const FARM_SCENE_SCALE = 0.018;
 const GAME_DURATION_MS = 60_000;
 const HANDS_PER_EMOJI_COLUMN = 12;

@@ -6,11 +6,11 @@ physics drives the 3D farm props, while Flight's 3D particle renderer handles
 impact dust and the final celebration.
 
 Each run gives you 60 seconds and a random supply of horses, hay bales, cows,
-and chickens. The hay, cow, and chicken geometry is extracted directly from the
+and three-chicken clusters. The hay, cow, and chicken geometry is extracted directly from the
 low-poly farm glTF and recentered as reusable stack pieces. Because the source
 scene is grouped by material, extraction combines the correct material layers
 and separates one cow and one hay bale from shared meshes at triangle level.
-The pile itself sits farther forward in the pasture than the original horse-only version.
+The pile itself sits close to the pasture's front edge.
 Before every drop, the real object stays hidden and a softly glowing gold object
 previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement

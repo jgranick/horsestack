@@ -5,11 +5,14 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives the 3D farm props, while Flight's 3D particle renderer handles
 impact dust and the final celebration.
 
-Each run gives you 60 seconds and a random supply of horses, hay bales, cows,
-and individual chickens. The hay, cow, and chicken geometry is extracted directly from the
+Each run gives you 60 seconds and a weighted random supply: 50% hay bales, 30%
+horses, 15% chickens, and 5% cows. Chicken draws randomly choose one of two
+individual source-authored hens, with the same hen carried from preview into
+the pile. The hay, cow, and chicken geometry is extracted directly from the
 low-poly farm glTF and recentered as reusable stack pieces. Because the source
 scene is grouped by material, extraction combines the correct material layers
-and separates one cow and one hay bale from shared meshes at triangle level.
+and separates individual cows, hens, and hay bales from shared meshes at
+triangle level.
 The bale is shown end-on with a fixed Z-axis quarter-turn, while the simplified
 2D proxies follow the visible silhouettes: tall cow, near-square bale,
 irregular horse, and circular chicken.
@@ -48,8 +51,9 @@ npm run validate:game
 ```
 
 The gameplay validation runs 64-object level, balanced, and teetered placement
-scenarios using the shipped timing and surface-placement rules, then checks for
-all four randomized prop types, finite body state, contacts, distinct 2D
+scenarios using the shipped timing and surface-placement rules, then checks the
+weighted prop distribution and both hen variants, all four randomized prop
+types, finite body state, contacts, distinct 2D
 colliders, a measurable supported pile, zero-impulse physics activation, the
 1.55m horse-height conversion, and a real fall beyond the farm-edge collider.
 

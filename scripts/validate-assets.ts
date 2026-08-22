@@ -6,10 +6,10 @@ import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { MeshKind } from '@flighthq/sdk/scene3d';
 import {
   FARM_PROP_SCENE_SCALE,
-  FARM_PROP_SPECS,
+  FARM_PROP_VARIANTS,
+  getRandomFarmPropVariantIndex,
   selectFarmPropTriangleIndices,
 } from '../src/farmPropGeometry';
-import type { FarmPropKind } from '../src/farmPropGeometry';
 import { STACK_OBJECT_PROFILES } from '../src/horseStackPhysics';
 
 const models = [
@@ -64,84 +64,84 @@ for (const model of models) {
 }
 
 function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
-  const expectedExtents: Readonly<Record<FarmPropKind, readonly [number, number, number]>> = {
-    hay: [5.2, 8.7, 5.6],
-    cow: [8.8, 10.8, 8.3],
-    chickens: [1.5, 2.4, 2.4],
-  };
-  const expectedTriangleCounts: Readonly<Record<FarmPropKind, number>> = {
-    hay: 124,
-    cow: 3_780,
-    chickens: 1_312,
-  };
+  if (FARM_PROP_VARIANTS.chickens.length < 2) {
+    throw new Error('farm chickens: expected multiple source-authored variants');
+  }
+  if (
+    getRandomFarmPropVariantIndex('chickens', () => 0) !== 0 ||
+    getRandomFarmPropVariantIndex('chickens', () => 0.75) !== 1
+  ) {
+    throw new Error('farm chickens: random variant selection did not cover both hens');
+  }
 
   for (const kind of ['hay', 'cow', 'chickens'] as const) {
-    const spec = FARM_PROP_SPECS[kind];
-    const bounds = {
-      max: [-Infinity, -Infinity, -Infinity],
-      min: [Infinity, Infinity, Infinity],
-    };
-    let triangleCount = 0;
-    const materials: string[] = [];
+    for (const spec of FARM_PROP_VARIANTS[kind]) {
+      const bounds = {
+        max: [-Infinity, -Infinity, -Infinity],
+        min: [Infinity, Infinity, Infinity],
+      };
+      let triangleCount = 0;
+      const materials: string[] = [];
 
-    for (const part of spec.parts) {
-      const node = nodesByName.get(part.nodeName);
-      if (node === undefined || node.kind !== MeshKind) {
-        throw new Error(`farm prop ${kind} is missing mesh ${part.nodeName}`);
+      for (const part of spec.parts) {
+        const node = nodesByName.get(part.nodeName);
+        if (node === undefined || node.kind !== MeshKind) {
+          throw new Error(`farm prop ${spec.label} is missing mesh ${part.nodeName}`);
+        }
+        const mesh = node as Mesh;
+        const materialName = mesh.materials[0]?.name;
+        if (materialName !== part.materialName) {
+          throw new Error(
+            `farm prop ${spec.label} mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
+          );
+        }
+        materials.push(materialName);
+
+        const indices = part.filter
+          ? selectFarmPropTriangleIndices(mesh.geometry, part.filter)
+          : Array.from(mesh.geometry.indices ?? []);
+        if (indices.length === 0 || indices.length % 3 !== 0) {
+          throw new Error(`farm prop ${spec.label} mesh ${part.nodeName} has no selected triangles`);
+        }
+        triangleCount += indices.length / 3;
+        includeGeometryBounds(bounds, mesh, indices);
       }
-      const mesh = node as Mesh;
-      const materialName = mesh.materials[0]?.name;
-      if (materialName !== part.materialName) {
+
+      if (triangleCount !== spec.expectedTriangleCount) {
         throw new Error(
-          `farm prop ${kind} mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
+          `farm prop ${spec.label} selected ${triangleCount} triangles, expected ${spec.expectedTriangleCount}`,
         );
       }
-      materials.push(materialName);
 
-      const indices = part.filter
-        ? selectFarmPropTriangleIndices(mesh.geometry, part.filter)
-        : Array.from(mesh.geometry.indices ?? []);
-      if (indices.length === 0 || indices.length % 3 !== 0) {
-        throw new Error(`farm prop ${kind} mesh ${part.nodeName} has no selected triangles`);
+      const extents = bounds.max.map((maximum, axis) => maximum - (bounds.min[axis] ?? maximum));
+      for (let axis = 0; axis < 3; axis += 1) {
+        const expected = spec.expectedSourceExtents[axis] ?? 0;
+        const error = Math.abs((extents[axis] ?? 0) - expected);
+        if (error > 0.25) {
+          throw new Error(
+            `farm prop ${spec.label} extent ${axis} is ${(extents[axis] ?? 0).toFixed(2)}, expected about ${expected.toFixed(2)}`,
+          );
+        }
       }
-      triangleCount += indices.length / 3;
-      includeGeometryBounds(bounds, mesh, indices);
-    }
 
-    if (triangleCount !== expectedTriangleCounts[kind]) {
-      throw new Error(
-        `farm prop ${kind} selected ${triangleCount} triangles, expected ${expectedTriangleCounts[kind]}`,
-      );
-    }
-
-    const extents = bounds.max.map((maximum, axis) => maximum - (bounds.min[axis] ?? maximum));
-    const expected = expectedExtents[kind];
-    for (let axis = 0; axis < 3; axis += 1) {
-      const error = Math.abs((extents[axis] ?? 0) - (expected[axis] ?? 0));
-      if (error > 0.25) {
+      const scale = FARM_PROP_SCENE_SCALE * (spec.scaleMultiplier ?? 1);
+      const quarterTurnedAroundZ = Math.abs(Math.sin(spec.rotationZ ?? 0)) > 0.5;
+      const projectedWidth = (extents[2] ?? 0) * scale;
+      const projectedHeight = (extents[quarterTurnedAroundZ ? 0 : 1] ?? 0) * scale;
+      const profile = STACK_OBJECT_PROFILES[kind];
+      if (
+        Math.abs(projectedWidth - profile.halfWidth * 2) > 0.003 ||
+        Math.abs(projectedHeight - profile.halfHeight * 2) > 0.003
+      ) {
         throw new Error(
-          `farm prop ${kind} extent ${axis} is ${(extents[axis] ?? 0).toFixed(2)}, expected about ${(expected[axis] ?? 0).toFixed(2)}`,
+          `farm prop ${spec.label} projects to ${projectedWidth.toFixed(3)} x ${projectedHeight.toFixed(3)}, but its 2D body is ${(profile.halfWidth * 2).toFixed(3)} x ${(profile.halfHeight * 2).toFixed(3)}`,
         );
       }
-    }
 
-    const quarterTurnedAroundZ = Math.abs(Math.sin(spec.rotationZ ?? 0)) > 0.5;
-    const projectedWidth = (extents[2] ?? 0) * FARM_PROP_SCENE_SCALE;
-    const projectedHeight =
-      (extents[quarterTurnedAroundZ ? 0 : 1] ?? 0) * FARM_PROP_SCENE_SCALE;
-    const profile = STACK_OBJECT_PROFILES[kind];
-    if (
-      Math.abs(projectedWidth - profile.halfWidth * 2) > 0.003 ||
-      Math.abs(projectedHeight - profile.halfHeight * 2) > 0.003
-    ) {
-      throw new Error(
-        `farm prop ${kind} projects to ${projectedWidth.toFixed(3)} x ${projectedHeight.toFixed(3)}, but its 2D body is ${(profile.halfWidth * 2).toFixed(3)} x ${(profile.halfHeight * 2).toFixed(3)}`,
+      console.log(
+        `farm ${spec.label}: ${triangleCount.toLocaleString('en-US')} triangles, materials ${materials.join(', ')}, source extents ${extents.map((extent) => extent.toFixed(2)).join(' × ')}, projected/body ${projectedWidth.toFixed(3)} × ${projectedHeight.toFixed(3)}`,
       );
     }
-
-    console.log(
-      `farm ${kind}: ${triangleCount.toLocaleString('en-US')} triangles, materials ${materials.join(', ')}, source extents ${extents.map((extent) => extent.toFixed(2)).join(' × ')}, projected/body ${projectedWidth.toFixed(3)} × ${projectedHeight.toFixed(3)}`,
-    );
   }
 }
 

@@ -24,8 +24,12 @@ export interface FarmPropSpec {
   centerX: number;
   centerY: number;
   centerZ: number;
+  expectedSourceExtents: readonly [number, number, number];
+  expectedTriangleCount: number;
+  label: string;
   parts: readonly FarmPropPartSpec[];
   rotationZ?: number;
+  scaleMultiplier?: number;
 }
 
 const HAY_BALE_CENTERS: readonly FarmPropPoint[] = [
@@ -42,49 +46,88 @@ const FIRST_HAY_BALE_FILTER: FarmPropTriangleFilter = {
   selectedIndex: 0,
 };
 const FRONT_COW_FILTER: FarmPropTriangleFilter = { kind: 'max-x', value: -20 };
-const SINGLE_CHICKEN_FILTER: FarmPropTriangleFilter = {
+const WHITE_CHICKEN_FILTER: FarmPropTriangleFilter = {
   kind: 'aabb',
   max: { x: -6.5, y: 16.2, z: 1.4 },
   min: { x: -8.3, y: 13.5, z: -1.2 },
+};
+const BROWN_CHICKEN_FILTER: FarmPropTriangleFilter = {
+  kind: 'aabb',
+  max: { x: -6.3, y: 26.5, z: 2.1 },
+  min: { x: -8.5, y: 23, z: -1.6 },
 };
 
 // Sketchfab flattened the farm by material. These are the complete material
 // layers for each prop; filters split one bale, cow, or chicken from meshes
 // containing more than one instance.
-export const FARM_PROP_SPECS: Readonly<Record<FarmPropKind, FarmPropSpec>> = {
-  hay: {
+export const FARM_PROP_VARIANTS: Readonly<Record<FarmPropKind, readonly FarmPropSpec[]>> = {
+  hay: [{
     centerX: -25.6,
     centerY: 43.645,
     centerZ: 1.18,
+    expectedSourceExtents: [5.08, 8.68, 5.6],
+    expectedTriangleCount: 124,
+    label: 'Hay bale',
     parts: [
       { filter: FIRST_HAY_BALE_FILTER, materialName: 'HayBale2', nodeName: 'Object_22' },
       { filter: FIRST_HAY_BALE_FILTER, materialName: 'HayBale', nodeName: 'Object_25' },
     ],
     rotationZ: Math.PI / 2,
-  },
-  cow: {
+  }],
+  cow: [{
     centerX: -29.04,
     centerY: -51.48,
     centerZ: 4.29,
+    expectedSourceExtents: [8.76, 10.75, 8.19],
+    expectedTriangleCount: 3_780,
+    label: 'Cow',
     parts: [
       { filter: FRONT_COW_FILTER, materialName: 'Cow1.001', nodeName: 'Object_30' },
       { filter: FRONT_COW_FILTER, materialName: 'Cow3', nodeName: 'Object_34' },
       { filter: FRONT_COW_FILTER, materialName: 'Cow1', nodeName: 'Object_41' },
       { filter: FRONT_COW_FILTER, materialName: 'Cow2', nodeName: 'Object_42' },
     ],
-  },
-  chickens: {
-    centerX: -7.395,
-    centerY: 14.865,
-    centerZ: 0.115,
-    parts: [
-      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen4', nodeName: 'Object_29' },
-      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen3', nodeName: 'Object_33' },
-      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
-      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen_2', nodeName: 'Object_40' },
-    ],
-  },
+  }],
+  chickens: [
+    {
+      centerX: -7.395,
+      centerY: 14.865,
+      centerZ: 0.115,
+      expectedSourceExtents: [1.49, 2.41, 2.32],
+      expectedTriangleCount: 1_312,
+      label: 'White hen',
+      parts: [
+        { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen4', nodeName: 'Object_29' },
+        { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen3', nodeName: 'Object_33' },
+        { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
+        { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen_2', nodeName: 'Object_40' },
+      ],
+    },
+    {
+      centerX: -7.42,
+      centerY: 24.77,
+      centerZ: 0.245,
+      expectedSourceExtents: [1.6, 3.25, 3.01],
+      expectedTriangleCount: 1_320,
+      label: 'Brown hen',
+      parts: [
+        { filter: BROWN_CHICKEN_FILTER, materialName: 'material', nodeName: 'Object_27' },
+        { filter: BROWN_CHICKEN_FILTER, materialName: 'Hen4', nodeName: 'Object_29' },
+        { filter: BROWN_CHICKEN_FILTER, materialName: 'Hen3', nodeName: 'Object_33' },
+        { filter: BROWN_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
+      ],
+      scaleMultiplier: 0.73,
+    },
+  ],
 };
+
+export function getRandomFarmPropVariantIndex(
+  kind: FarmPropKind,
+  random = Math.random,
+): number {
+  const variantCount = FARM_PROP_VARIANTS[kind].length;
+  return Math.min(variantCount - 1, Math.floor(Math.max(0, random()) * variantCount));
+}
 
 export function selectFarmPropTriangleIndices(
   source: Readonly<MeshGeometry>,

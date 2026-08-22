@@ -23,6 +23,12 @@ export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 export const METERS_PER_HAND = 0.1016;
 export const STACK_OBJECT_KINDS = ['horse', 'hay', 'cow', 'chickens'] as const;
+export const STACK_OBJECT_WEIGHTS: Readonly<Record<StackObjectKind, number>> = {
+  horse: 0.3,
+  hay: 0.5,
+  cow: 0.05,
+  chickens: 0.15,
+};
 export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObjectProfile>> = {
   horse: {
     emoji: '🐎',
@@ -131,11 +137,15 @@ export function stepHorseStack(world: Physics2DWorld): void {
 }
 
 export function getRandomStackObjectKind(random = Math.random): StackObjectKind {
-  const index = Math.min(
-    STACK_OBJECT_KINDS.length - 1,
-    Math.floor(random() * STACK_OBJECT_KINDS.length),
-  );
-  return STACK_OBJECT_KINDS[index] ?? 'horse';
+  let totalWeight = 0;
+  for (const kind of STACK_OBJECT_KINDS) totalWeight += STACK_OBJECT_WEIGHTS[kind];
+  let draw = Math.min(1 - Number.EPSILON, Math.max(0, random())) * totalWeight;
+  for (const kind of STACK_OBJECT_KINDS) {
+    const weight = STACK_OBJECT_WEIGHTS[kind];
+    if (draw < weight) return kind;
+    draw -= weight;
+  }
+  return 'hay';
 }
 
 export function getNextObjectDelay(objectsDropped: number): number {

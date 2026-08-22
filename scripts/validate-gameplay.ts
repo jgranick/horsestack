@@ -19,6 +19,7 @@ import {
   PHYSICS_STEP,
   STACK_OBJECT_KINDS,
   STACK_OBJECT_PROFILES,
+  STACK_OBJECT_WEIGHTS,
   stepHorseStack,
   TYPICAL_HORSE_WITHERS_METERS,
 } from '../src/horseStackPhysics';
@@ -53,7 +54,7 @@ console.log(
       ({ contacts, hands, heightMeters, inPasture, kinds, name }) =>
         `${name} ${inPasture}/${VALIDATION_OBJECTS} in farm, ${kinds.size} prop types, ${contacts} contacts, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; randomized horse/hay/cow/chicken selection, distinct 2D proxies, horse-height calibration, and farm-edge falloff verified`,
+    .join('; ')}; weighted 50/30/15/5 hay/horse/chicken/cow selection, distinct 2D proxies, horse-height calibration, and farm-edge falloff verified`,
 );
 
 function runScenario(
@@ -143,11 +144,31 @@ function validateStableActivation(): void {
 }
 
 function validateRandomObjectSelection(): void {
-  for (let index = 0; index < STACK_OBJECT_KINDS.length; index++) {
-    const expected = STACK_OBJECT_KINDS[index];
-    const actual = getRandomStackObjectKind(
-      () => (index + 0.5) / STACK_OBJECT_KINDS.length,
-    );
+  const weightTotal = STACK_OBJECT_KINDS.reduce(
+    (total, kind) => total + STACK_OBJECT_WEIGHTS[kind],
+    0,
+  );
+  if (Math.abs(weightTotal - 1) > Number.EPSILON) {
+    throw new Error(`random selection: weights must total 1, received ${weightTotal}`);
+  }
+  if (
+    !(
+      STACK_OBJECT_WEIGHTS.hay > STACK_OBJECT_WEIGHTS.horse &&
+      STACK_OBJECT_WEIGHTS.horse > STACK_OBJECT_WEIGHTS.chickens &&
+      STACK_OBJECT_WEIGHTS.chickens > STACK_OBJECT_WEIGHTS.cow
+    )
+  ) {
+    throw new Error('random selection: expected hay > horse > chickens > cow weighting');
+  }
+
+  const selections: readonly [number, StackObjectKind][] = [
+    [0.15, 'horse'],
+    [0.55, 'hay'],
+    [0.825, 'cow'],
+    [0.925, 'chickens'],
+  ];
+  for (const [randomValue, expected] of selections) {
+    const actual = getRandomStackObjectKind(() => randomValue);
     if (actual !== expected) {
       throw new Error(`random selection: expected ${expected}, received ${actual}`);
     }

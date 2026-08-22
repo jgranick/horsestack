@@ -69,7 +69,8 @@ import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import {
   FARM_PROP_SCENE_SCALE,
-  FARM_PROP_SPECS,
+  FARM_PROP_VARIANTS,
+  getRandomFarmPropVariantIndex,
   selectFarmPropTriangleIndices,
 } from './farmPropGeometry';
 import type { FarmPropPartSpec, FarmPropTriangleFilter } from './farmPropGeometry';
@@ -110,6 +111,7 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 interface ActiveStackObject {
   angle: number;
   kind: StackObjectKind;
+  variantIndex: number;
   x: number;
 }
 
@@ -354,7 +356,7 @@ configureDirectionalShadowCamera3D(
 
 let phase: GamePhase = 'loading';
 let horseTemplate: Scene3D | null = null;
-const farmPropTemplates: Partial<Record<StackObjectKind, Node3D>> = {};
+const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
 let landingGhost: Node3D | null = null;
 let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
@@ -438,13 +440,15 @@ function mountFarm(model: Scene3D): void {
 
 function createStackObjectVisual(
   kind: StackObjectKind,
+  variantIndex = 0,
   materialOverride: ReturnType<typeof createStandardPbrMaterial> | null = null,
   alpha = 1,
 ): Node3D {
   const pivot = createNode3D(Node3DKind);
   pivot.alpha = alpha;
   if (kind !== 'horse') {
-    const template = farmPropTemplates[kind];
+    const templates = farmPropTemplates[kind];
+    const template = templates?.[variantIndex] ?? templates?.[0];
     if (template === undefined) throw new Error(`${STACK_OBJECT_PROFILES[kind].label} is not loaded`);
     addNodeChild(pivot, cloneNode3DHierarchy(template, materialOverride));
     return pivot;
@@ -463,57 +467,62 @@ function createStackObjectVisual(
   return pivot;
 }
 
-function setLandingGhostKind(kind: StackObjectKind): void {
+function setLandingGhostKind(kind: StackObjectKind, variantIndex: number): void {
   const ghost = landingGhost;
   if (ghost === null) return;
   removeNodeChildren(ghost);
-  addNodeChild(ghost, createStackObjectVisual(kind, landingGhostMaterial));
+  addNodeChild(ghost, createStackObjectVisual(kind, variantIndex, landingGhostMaterial));
   ghost.name = `${kind}-landing-preview`;
 }
 
 function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
   for (const kind of ['hay', 'cow', 'chickens'] as const) {
-    const spec = FARM_PROP_SPECS[kind];
-    if (spec === undefined) continue;
-    const template = createNode3D(Node3DKind, { name: `${kind}-template` });
-    const scaleRoot = createNode3D(Node3DKind);
-    scaleRoot.scale.x = FARM_PROP_SCENE_SCALE;
-    scaleRoot.scale.y = FARM_PROP_SCENE_SCALE;
-    scaleRoot.scale.z = FARM_PROP_SCENE_SCALE;
-    invalidateNodeLocalTransform(scaleRoot);
+    const templates: Node3D[] = [];
+    for (let variantIndex = 0; variantIndex < FARM_PROP_VARIANTS[kind].length; variantIndex += 1) {
+      const spec = FARM_PROP_VARIANTS[kind][variantIndex];
+      if (spec === undefined) continue;
+      const template = createNode3D(Node3DKind, { name: `${kind}-${variantIndex}-template` });
+      const scaleRoot = createNode3D(Node3DKind);
+      const scale = FARM_PROP_SCENE_SCALE * (spec.scaleMultiplier ?? 1);
+      scaleRoot.scale.x = scale;
+      scaleRoot.scale.y = scale;
+      scaleRoot.scale.z = scale;
+      invalidateNodeLocalTransform(scaleRoot);
 
-    const axisRoot = createNode3D(Node3DKind);
-    setNodeTransform3D(axisRoot, farm.root);
-    if (isNodeLocalMatrix4Detached(farm.root)) {
-      setNodeLocalMatrix4(axisRoot, getNodeLocalMatrix4(farm.root));
-    }
+      const axisRoot = createNode3D(Node3DKind);
+      setNodeTransform3D(axisRoot, farm.root);
+      if (isNodeLocalMatrix4Detached(farm.root)) {
+        setNodeLocalMatrix4(axisRoot, getNodeLocalMatrix4(farm.root));
+      }
 
-    const centeredSource = createNode3D(Node3DKind);
-    centeredSource.position.x = -spec.centerX;
-    centeredSource.position.y = -spec.centerY;
-    centeredSource.position.z = -spec.centerZ;
-    invalidateNodeLocalTransform(centeredSource);
-    for (const part of spec.parts) {
-      const source = findNodeByName(farm.root, part.nodeName);
-      if (source === null || !isMesh(source)) {
-        throw new Error(`Farm prop mesh ${part.nodeName} was not imported`);
+      const centeredSource = createNode3D(Node3DKind);
+      centeredSource.position.x = -spec.centerX;
+      centeredSource.position.y = -spec.centerY;
+      centeredSource.position.z = -spec.centerZ;
+      invalidateNodeLocalTransform(centeredSource);
+      for (const part of spec.parts) {
+        const source = findNodeByName(farm.root, part.nodeName);
+        if (source === null || !isMesh(source)) {
+          throw new Error(`Farm prop mesh ${part.nodeName} was not imported`);
+        }
+        const materialName = source.materials[0]?.name;
+        if (materialName !== part.materialName) {
+          throw new Error(
+            `Farm prop mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
+          );
+        }
+        addNodeChild(centeredSource, cloneFarmPropPart(source, part));
       }
-      const materialName = source.materials[0]?.name;
-      if (materialName !== part.materialName) {
-        throw new Error(
-          `Farm prop mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
-        );
-      }
-      addNodeChild(centeredSource, cloneFarmPropPart(source, part));
+      const orientationRoot = createNode3D(Node3DKind);
+      setQuaternionFromEuler(orientationRoot.rotation, 0, 0, spec.rotationZ ?? 0);
+      invalidateNodeLocalTransform(orientationRoot);
+      addNodeChild(orientationRoot, centeredSource);
+      addNodeChild(axisRoot, orientationRoot);
+      addNodeChild(scaleRoot, axisRoot);
+      addNodeChild(template, scaleRoot);
+      templates.push(template);
     }
-    const orientationRoot = createNode3D(Node3DKind);
-    setQuaternionFromEuler(orientationRoot.rotation, 0, 0, spec.rotationZ ?? 0);
-    invalidateNodeLocalTransform(orientationRoot);
-    addNodeChild(orientationRoot, centeredSource);
-    addNodeChild(axisRoot, orientationRoot);
-    addNodeChild(scaleRoot, axisRoot);
-    addNodeChild(template, scaleRoot);
-    farmPropTemplates[kind] = template;
+    farmPropTemplates[kind] = templates;
   }
 }
 
@@ -704,21 +713,25 @@ function spawnObject(now: number): void {
   indicatorAngularVelocity = 0;
   indicatorUpdatedAt = now;
   lastAimAt = now;
+  const kind = getRandomStackObjectKind();
+  const variantIndex = kind === 'horse' ? 0 : getRandomFarmPropVariantIndex(kind);
   activeObject = {
     angle: 0,
-    kind: getRandomStackObjectKind(),
+    kind,
+    variantIndex,
     x: 0,
   };
-  setLandingGhostKind(activeObject.kind);
+  setLandingGhostKind(kind, variantIndex);
   if (landingGhost !== null) landingGhost.enabled = true;
   if (landingRadiance !== null) landingRadiance.enabled = true;
   dropButton.disabled = false;
-  const profile = STACK_OBJECT_PROFILES[activeObject.kind];
-  statusCopy.textContent = `${profile.emoji} ${profile.label} queued`;
+  const profile = STACK_OBJECT_PROFILES[kind];
+  const label = getStackObjectVisualLabel(kind, variantIndex);
+  statusCopy.textContent = `${profile.emoji} ${label} queued`;
   gameCallout.textContent =
     getPaceLevel(objectsDropped) >= 4
-      ? `Keep the glowing ${profile.label.toLowerCase()} upright.`
-      : `${profile.emoji} Next: ${profile.label}. Move, balance, place.`;
+      ? `Keep the glowing ${label.toLowerCase()} upright.`
+      : `${profile.emoji} Next: ${label}. Move, balance, place.`;
   updateActiveStackObject(now);
 }
 
@@ -750,7 +763,7 @@ function commitObjectPlacement(now: number): void {
   body.velocityX = 0;
   body.velocityY = 0;
   body.angularVelocity = 0;
-  const node = createStackObjectVisual(current.kind);
+  const node = createStackObjectVisual(current.kind, current.variantIndex);
   setStackObjectVisualTransform(node, current.x, landingY, current.angle);
   addNodeChild(stackLayer, node);
   stackedObjects.push({ body, kind: current.kind, lost: false, node });
@@ -772,6 +785,11 @@ function commitObjectPlacement(now: number): void {
   nextObjectAt = now + getNextObjectDelay(objectsDropped);
   hudDirty = true;
   renderRequested = true;
+}
+
+function getStackObjectVisualLabel(kind: StackObjectKind, variantIndex: number): string {
+  if (kind === 'horse') return STACK_OBJECT_PROFILES.horse.label;
+  return FARM_PROP_VARIANTS[kind][variantIndex]?.label ?? STACK_OBJECT_PROFILES[kind].label;
 }
 
 function updateGame(now: number): void {

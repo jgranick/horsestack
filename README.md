@@ -31,21 +31,15 @@ types, finite body state, contacts, distinct 2D
 colliders, a measurable supported pile, zero-impulse physics activation, the
 1.55m horse-height conversion, and a real fall beyond the farm-edge collider.
 
-## Deploying
+## License
 
-`.github/workflows/deploy-pages.yml` builds and publishes to GitHub Pages on every
-push to `main`, and can be run by hand from the Actions tab. It runs `npm run build`
-(which typechecks first) plus both validations, so a broken build or a bad asset never
-reaches the site, then uploads `dist` and deploys it.
+Copyright (c) 2026 Joshua Granick
 
-Two things have to be set on the repository once, from the GitHub side:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-- **Settings -> Pages -> Build and deployment -> Source** must be **GitHub Actions**.
-- The `github-pages` environment is created by the first run; nothing to prepare.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-No `base` configuration is needed for a project page at `/<repo>/`: `vite.config.ts`
-sets `base: './'` and the glTF models are resolved against `import.meta.url`, so the
-bundle is location-independent.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## Model credits
 

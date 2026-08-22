@@ -2,18 +2,21 @@
 
 A chaotic low-poly stacking game built in TypeScript with
 [`@flighthq/sdk`](https://github.com/flighthq/flight). Flight's 2D rigid-body
-physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
-renderer handles impact dust and the final celebration.
+physics drives the 3D farm props, while Flight's 3D particle renderer handles
+impact dust and the final celebration.
 
-Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
-Before every drop, the real horse stays hidden and a softly glowing gold horse
+Each run gives you 60 seconds and a random supply of horses, hay bales, cows,
+and chickens. The hay, cow, and chicken geometry is extracted directly from the
+low-poly farm scene and recentered as reusable stack pieces; the pile itself sits
+farther forward in the pasture than the original horse-only version.
+Before every drop, the real object stays hidden and a softly glowing gold object
 previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
-real horse at that exact position and angle. Flight physics activates there
+real object at that exact position and angle. Flight physics activates there
 with zero linear or angular impulse, so the pile can still shift, tip, and
 tumble without an artificial drop destabilizing it.
-The cow-scale horses stay readable under a close camera that tracks the pile's
+The mixed farm pieces stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. Displayed
 height is calibrated so one upright physics horse represents a typical 1.55m
 riding horse. After the TIME UP beat, the result counts upward in meters and in
@@ -29,7 +32,7 @@ npm run dev
 
 Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
 Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and place
-the horse.
+the object.
 
 ## Checks
 
@@ -39,11 +42,11 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs 64-horse level, balanced, and teetered placement
+The gameplay validation runs 64-object level, balanced, and teetered placement
 scenarios using the shipped timing and surface-placement rules, then checks for
-finite body state, contacts, a measurable supported pile, zero-impulse physics
-activation, the 1.55m horse-height conversion, and a real fall beyond the
-farm-edge collider.
+all four randomized prop types, finite body state, contacts, distinct 2D
+colliders, a measurable supported pile, zero-impulse physics activation, the
+1.55m horse-height conversion, and a real fall beyond the farm-edge collider.
 
 ## Model credits
 

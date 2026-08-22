@@ -62,21 +62,27 @@ import {
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import {
-  addHorseBody,
+  addStackObjectBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
-  getNextHorseDelay,
+  getNextObjectDelay,
   getPaceLevel,
+  getRandomStackObjectKind,
+  getStackBodyHalfWidth,
+  getStackBodyVerticalExtent,
   getStackHeightHands,
   getStackHeightMeters,
+  getStackObjectVerticalExtent,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
-  HORSE_HALF_WIDTH,
+  isStackBodyWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
+  STACK_OBJECT_PROFILES,
   stepHorseStack,
 } from './horseStackPhysics';
+import type { StackObjectKind } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
 import horseThudUrl from '../free-sound-1674747349.mp3?url';
 import resultTickUrl from '../free-sound-1674778893.mp3?url';
@@ -88,25 +94,55 @@ import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 
-interface ActiveHorse {
+interface ActiveStackObject {
   angle: number;
+  kind: StackObjectKind;
   x: number;
 }
 
-interface StackedHorse {
+interface StackedObject {
   body: RigidBody2D;
+  kind: StackObjectKind;
   lost: boolean;
   node: Node3D;
 }
 
+interface FarmPropSpec {
+  centerX: number;
+  centerY: number;
+  centerZ: number;
+  nodeNames: readonly string[];
+}
+
 const STACK_BASE_Y = 0.015;
 // At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
-// The barn's near wall is around x = 0.03; the pile sits just ahead of it and
-// centered across the farm's z = -4…-0.4 footprint.
-const STACK_X = 0.9;
+// Pull the 2D play plane into the front third of the island. The farm's front
+// edge is near x=1.8, leaving room for silhouettes to tumble toward the camera.
+const STACK_X = 1.28;
 const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
+const FARM_SCENE_SCALE = 0.018;
+const FARM_PROP_SPECS: Readonly<Partial<Record<StackObjectKind, FarmPropSpec>>> = {
+  hay: {
+    centerX: -23.4569,
+    centerY: 37.7013,
+    centerZ: 3.6675,
+    nodeNames: ['Object_20', 'Object_23'],
+  },
+  cow: {
+    centerX: -29.0454,
+    centerY: -51.3303,
+    centerZ: 4.2889,
+    nodeNames: ['Object_32'],
+  },
+  chickens: {
+    centerX: -8.3155,
+    centerY: 19.9557,
+    centerZ: 0.4335,
+    nodeNames: ['Object_27', 'Object_31', 'Object_36', 'Object_38'],
+  },
+};
 const GAME_DURATION_MS = 60_000;
 const HANDS_PER_EMOJI_COLUMN = 12;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
@@ -184,8 +220,8 @@ retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
 
 const scene = createNode3D(Node3DKind);
-const horseLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
-addNodeChild(scene, horseLayer);
+const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
+addNodeChild(scene, stackLayer);
 const landingGhostMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
   baseColor: 0xe2b83fff,
@@ -333,18 +369,19 @@ configureDirectionalShadowCamera3D(
 
 let phase: GamePhase = 'loading';
 let horseTemplate: Scene3D | null = null;
+const farmPropTemplates: Partial<Record<StackObjectKind, Node3D>> = {};
 let landingGhost: Node3D | null = null;
 let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
-let activeHorse: ActiveHorse | null = null;
-let stackedHorses: StackedHorse[] = [];
-let horsesDropped = 0;
+let activeObject: ActiveStackObject | null = null;
+let stackedObjects: StackedObject[] = [];
+let objectsDropped = 0;
 let aimOffset = 0;
 let indicatorAngle = 0;
 let indicatorAngularVelocity = 0;
 let indicatorUpdatedAt = performance.now();
 let lastAimAt = performance.now();
-let nextHorseAt = 0;
+let nextObjectAt = 0;
 let gameEndsAt = 0;
 let finishAt = 0;
 let finalHeight = 0;
@@ -375,7 +412,7 @@ resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
 async function start(): Promise<void> {
-  setLoadingState('Herding the horses…');
+  setLoadingState('Rounding up the farm…');
 
   try {
     const [farm, horse] = await Promise.all([
@@ -383,6 +420,7 @@ async function start(): Promise<void> {
       loadGltfScene(`${modelRoot}/horse`),
     ]);
 
+    extractFarmPropTemplates(farm);
     mountFarm(farm);
     horseTemplate = horse;
     phase = 'ready';
@@ -401,7 +439,7 @@ async function start(): Promise<void> {
 
 function mountFarm(model: Scene3D): void {
   const wrapper = createNode3D(Node3DKind);
-  const scale = 0.018;
+  const scale = FARM_SCENE_SCALE;
   wrapper.scale.x = scale;
   wrapper.scale.y = scale;
   wrapper.scale.z = scale;
@@ -413,14 +451,21 @@ function mountFarm(model: Scene3D): void {
   addNodeChild(scene, wrapper);
 }
 
-function createHorseVisual(
+function createStackObjectVisual(
+  kind: StackObjectKind,
   materialOverride: ReturnType<typeof createStandardPbrMaterial> | null = null,
   alpha = 1,
 ): Node3D {
-  if (horseTemplate === null) throw new Error('Horse model is not loaded');
-
   const pivot = createNode3D(Node3DKind);
   pivot.alpha = alpha;
+  if (kind !== 'horse') {
+    const template = farmPropTemplates[kind];
+    if (template === undefined) throw new Error(`${STACK_OBJECT_PROFILES[kind].label} is not loaded`);
+    addNodeChild(pivot, cloneNode3DHierarchy(template, materialOverride));
+    return pivot;
+  }
+
+  if (horseTemplate === null) throw new Error('Horse model is not loaded');
   const modelTransform = createNode3D(Node3DKind);
   modelTransform.scale.x = HORSE_SCALE;
   modelTransform.scale.y = HORSE_SCALE;
@@ -431,6 +476,57 @@ function createHorseVisual(
   addNodeChild(modelTransform, cloneNode3DHierarchy(horseTemplate.root, materialOverride));
   addNodeChild(pivot, modelTransform);
   return pivot;
+}
+
+function setLandingGhostKind(kind: StackObjectKind): void {
+  const ghost = landingGhost;
+  if (ghost === null) return;
+  removeNodeChildren(ghost);
+  addNodeChild(ghost, createStackObjectVisual(kind, landingGhostMaterial));
+  ghost.name = `${kind}-landing-preview`;
+}
+
+function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
+  for (const kind of ['hay', 'cow', 'chickens'] as const) {
+    const spec = FARM_PROP_SPECS[kind];
+    if (spec === undefined) continue;
+    const template = createNode3D(Node3DKind, { name: `${kind}-template` });
+    const scaleRoot = createNode3D(Node3DKind);
+    scaleRoot.scale.x = FARM_SCENE_SCALE;
+    scaleRoot.scale.y = FARM_SCENE_SCALE;
+    scaleRoot.scale.z = FARM_SCENE_SCALE;
+    invalidateNodeLocalTransform(scaleRoot);
+
+    const axisRoot = createNode3D(Node3DKind);
+    setNodeTransform3D(axisRoot, farm.root);
+    if (isNodeLocalMatrix4Detached(farm.root)) {
+      setNodeLocalMatrix4(axisRoot, getNodeLocalMatrix4(farm.root));
+    }
+
+    const centeredSource = createNode3D(Node3DKind);
+    centeredSource.position.x = -spec.centerX;
+    centeredSource.position.y = -spec.centerY;
+    centeredSource.position.z = -spec.centerZ;
+    invalidateNodeLocalTransform(centeredSource);
+    for (const nodeName of spec.nodeNames) {
+      const source = findNodeByName(farm.root, nodeName);
+      if (source === null) throw new Error(`Farm prop mesh ${nodeName} was not imported`);
+      addNodeChild(centeredSource, cloneNode3DHierarchy(source));
+    }
+    addNodeChild(axisRoot, centeredSource);
+    addNodeChild(scaleRoot, axisRoot);
+    addNodeChild(template, scaleRoot);
+    farmPropTemplates[kind] = template;
+  }
+}
+
+function findNodeByName(root: Readonly<Node3D>, name: string): Node3D | null {
+  if (root.name === name) return root as Node3D;
+  for (const child of getNodeChildren(root)) {
+    const match = findNodeByName(child, name);
+    if (match !== null) return match;
+  }
+  return null;
 }
 
 function createLandingRadiance(): Node3D {
@@ -515,15 +611,15 @@ function startGame(): void {
   startGameAudio(now);
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
-  activeHorse = null;
-  stackedHorses = [];
-  horsesDropped = 0;
+  activeObject = null;
+  stackedObjects = [];
+  objectsDropped = 0;
   aimOffset = 0;
   indicatorAngle = 0;
   indicatorAngularVelocity = 0;
   indicatorUpdatedAt = now;
   lastAimAt = now;
-  nextHorseAt = 0;
+  nextObjectAt = 0;
   gameEndsAt = now + GAME_DURATION_MS;
   finishAt = 0;
   finalHeight = 0;
@@ -535,12 +631,13 @@ function startGame(): void {
   resultHandsShown = 0;
   impactFlashUntil = 0;
   lastImpactAt = 0;
-  removeNodeChildren(horseLayer);
-  landingGhost = createHorseVisual(landingGhostMaterial, 0.36);
+  removeNodeChildren(stackLayer);
+  landingGhost = createNode3D(Node3DKind, { name: 'landing-preview' });
+  landingGhost.alpha = 0.36;
   landingGhost.name = 'landing-preview';
-  addNodeChild(horseLayer, landingGhost);
+  addNodeChild(stackLayer, landingGhost);
   landingRadiance = createLandingRadiance();
-  addNodeChild(horseLayer, landingRadiance);
+  addNodeChild(stackLayer, landingRadiance);
   indicatorLight.intensity = 0;
   clearParticleEmitter3D(dustEmitter);
   clearParticleEmitter3D(celebrationEmitter);
@@ -565,32 +662,37 @@ function startGame(): void {
   statusCopy.textContent = '60 seconds. Go!';
   gameCallout.textContent = 'Move fast to make it teeter…';
   hudDirty = true;
-  spawnHorse(now);
+  spawnObject(now);
   renderRequested = true;
 }
 
-function spawnHorse(now: number): void {
+function spawnObject(now: number): void {
   if (phase !== 'playing' || now >= gameEndsAt) return;
 
   indicatorAngle = 0;
   indicatorAngularVelocity = 0;
   indicatorUpdatedAt = now;
   lastAimAt = now;
-  activeHorse = {
+  activeObject = {
     angle: 0,
+    kind: getRandomStackObjectKind(),
     x: 0,
   };
+  setLandingGhostKind(activeObject.kind);
   if (landingGhost !== null) landingGhost.enabled = true;
   if (landingRadiance !== null) landingRadiance.enabled = true;
   dropButton.disabled = false;
-  statusCopy.textContent = `Horse ${String(horsesDropped + 1).padStart(2, '0')} queued`;
+  const profile = STACK_OBJECT_PROFILES[activeObject.kind];
+  statusCopy.textContent = `${profile.emoji} ${profile.label} queued`;
   gameCallout.textContent =
-    getPaceLevel(horsesDropped) >= 4 ? 'Keep the glowing horse upright.' : 'Move, balance, place.';
-  updateActiveHorse(now);
+    getPaceLevel(objectsDropped) >= 4
+      ? `Keep the glowing ${profile.label.toLowerCase()} upright.`
+      : `${profile.emoji} Next: ${profile.label}. Move, balance, place.`;
+  updateActiveStackObject(now);
 }
 
-function updateActiveHorse(now: number): void {
-  const current = activeHorse;
+function updateActiveStackObject(now: number): void {
+  const current = activeObject;
   if (current === null) return;
 
   updateIndicatorTeeter(now);
@@ -600,27 +702,34 @@ function updateActiveHorse(now: number): void {
   updateLandingGhost(current, now);
 }
 
-function commitHorsePlacement(now: number): void {
-  const current = activeHorse;
+function commitObjectPlacement(now: number): void {
+  const current = activeObject;
   if (current === null || phase !== 'playing') return;
 
   const landingY =
-    getLandingSurfaceY(current.x) + getHorseVerticalExtent(current.angle);
-  const body = addHorseBody(physicsWorld, current.x, landingY, current.angle);
+    getLandingSurfaceY(current.x, current.kind) +
+    getStackObjectVerticalExtent(current.kind, current.angle);
+  const body = addStackObjectBody(
+    physicsWorld,
+    current.kind,
+    current.x,
+    landingY,
+    current.angle,
+  );
   body.velocityX = 0;
   body.velocityY = 0;
   body.angularVelocity = 0;
-  const node = createHorseVisual();
-  setHorseVisualTransform(node, current.x, landingY, current.angle);
-  addNodeChild(horseLayer, node);
-  stackedHorses.push({ body, lost: false, node });
-  activeHorse = null;
+  const node = createStackObjectVisual(current.kind);
+  setStackObjectVisualTransform(node, current.x, landingY, current.angle);
+  addNodeChild(stackLayer, node);
+  stackedObjects.push({ body, kind: current.kind, lost: false, node });
+  activeObject = null;
   dropButton.disabled = true;
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
-  horsesDropped++;
-  restartAudioTrack(horseThud, 'Horse thud');
+  objectsDropped++;
+  restartAudioTrack(horseThud, 'Stack thud');
 
   const tilt = Math.abs(current.angle);
   gameCallout.textContent =
@@ -628,8 +737,8 @@ function commitHorsePlacement(now: number): void {
       ? 'Precariously placed!'
       : tilt > 0.16
         ? 'A little crooked.'
-        : 'Placed gently.';
-  nextHorseAt = now + getNextHorseDelay(horsesDropped);
+        : `${STACK_OBJECT_PROFILES[current.kind].emoji} Placed gently.`;
+  nextObjectAt = now + getNextObjectDelay(objectsDropped);
   hudDirty = true;
   renderRequested = true;
 }
@@ -640,10 +749,10 @@ function updateGame(now: number): void {
       beginSettling(now);
       return;
     }
-    if (activeHorse !== null) {
-      updateActiveHorse(now);
-    } else if (now >= nextHorseAt) {
-      spawnHorse(now);
+    if (activeObject !== null) {
+      updateActiveStackObject(now);
+    } else if (now >= nextObjectAt) {
+      spawnObject(now);
     }
   } else if (phase === 'settling' && now >= finishAt) {
     finishGame(now);
@@ -654,7 +763,7 @@ function beginSettling(now: number): void {
   phase = 'settling';
   stopAudioTrack(soundtrack);
   restartAudioTrack(countFanfare, 'Count fanfare');
-  activeHorse = null;
+  activeObject = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
   dropButton.disabled = true;
   if (landingGhost !== null) landingGhost.enabled = false;
@@ -664,7 +773,7 @@ function beginSettling(now: number): void {
   viewer.classList.remove('is-playing', 'is-panicking');
   viewer.classList.add('is-time-up');
   statusCopy.textContent = 'Time up!';
-  gameCallout.textContent = 'Hands off the herd!';
+  gameCallout.textContent = 'Hands off the pile!';
   hudDirty = true;
   renderRequested = true;
 }
@@ -673,9 +782,9 @@ function finishGame(now: number): void {
   phase = 'finished';
   finalHeight = getCurrentStackHeight();
   cachedStackHeight = finalHeight;
-  finalSurvivors = stackedHorses.filter(
+  finalSurvivors = stackedObjects.filter(
     ({ body, lost }) =>
-      !lost && body.y > -1 && Math.abs(body.x) <= PASTURE_HALF_WIDTH + HORSE_HALF_WIDTH,
+      !lost && body.y > -1 && isStackBodyWithinPasture(body),
   ).length;
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
@@ -692,7 +801,7 @@ function finishGame(now: number): void {
   resultHorseStack.replaceChildren();
   resultHandCount.textContent = '0';
   resultScore.textContent = '0.00 m';
-  resultCopy.textContent = 'Counting the herd, one hand at a time…';
+  resultCopy.textContent = 'Counting the pile, one hand at a time…';
   replayButton.hidden = true;
   resultPanel.classList.remove('is-total-revealed');
   timeUpPanel.hidden = true;
@@ -744,7 +853,7 @@ function completeResultAnimation(): void {
   appendHorseHands(resultHands);
   resultHandCount.textContent = String(resultHands);
   resultScore.textContent = formatHeight(finalHeight);
-  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points · ${finalSurvivors} of ${horsesDropped} horses remained in the general vicinity.`;
+  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points · ${finalSurvivors} of ${objectsDropped} farm things remained in the general vicinity.`;
   replayButton.hidden = false;
   resultPanel.classList.add('is-total-revealed');
   statusCopy.textContent = 'Officially measured';
@@ -806,33 +915,33 @@ function handlePhysicsContacts(now: number): void {
   maybePlayCollisionWhinny(now);
 }
 
-function synchronizeHorseVisuals(): void {
+function synchronizeStackVisuals(): void {
   let retainedCount = 0;
-  for (const horse of stackedHorses) {
-    if (horse.lost) continue;
-    const body = horse.body;
+  for (const object of stackedObjects) {
+    if (object.lost) continue;
+    const body = object.body;
 
     // Leave enough void beyond the collider for the whole tumble to remain visible.
     if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
-      horse.lost = true;
-      horse.node.enabled = false;
+      object.lost = true;
+      object.node.enabled = false;
       removePhysics2DBody(physicsWorld, body);
       continue;
     }
 
-    setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
-    stackedHorses[retainedCount++] = horse;
+    setStackObjectVisualTransform(object.node, body.x, body.y, body.angle);
+    stackedObjects[retainedCount++] = object;
   }
-  // Fallen horses have already left the physics world and score calculation;
+  // Fallen objects have already left the physics world and score calculation;
   // keep them out of every subsequent placement, height, and visual scan too.
-  stackedHorses.length = retainedCount;
+  stackedObjects.length = retainedCount;
 }
 
-function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
+function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): void {
   if (landingGhost === null) return;
 
   const previewX = current.x;
-  const landingSurfaceY = getLandingSurfaceY(previewX);
+  const landingSurfaceY = getLandingSurfaceY(previewX, current.kind);
 
   landingGhost.enabled = Math.abs(previewX) <= PASTURE_HALF_WIDTH;
   if (!landingGhost.enabled) {
@@ -841,8 +950,9 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
     return;
   }
   setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
-  const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle);
-  setHorseVisualTransform(landingGhost, previewX, previewY, current.angle);
+  const previewY =
+    landingSurfaceY + getStackObjectVerticalExtent(current.kind, current.angle);
+  setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);
   updateLandingRadiance(previewX, previewY, now);
 }
 
@@ -866,34 +976,28 @@ function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   indicatorLight.intensity = 0.8 + Math.sin(now * 0.008) * 0.14;
 }
 
-function getLandingSurfaceY(x: number): number {
+function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
   let surfaceY = PASTURE_TOP_Y;
-  const horizontalReach = HORSE_HALF_WIDTH * 1.85;
+  const activeHalfWidth = STACK_OBJECT_PROFILES[kind].halfWidth;
 
-  for (const horse of stackedHorses) {
-    const body = horse.body;
+  for (const object of stackedObjects) {
+    const body = object.body;
+    const horizontalReach = activeHalfWidth + getStackBodyHalfWidth(body);
     if (
-      horse.lost ||
+      object.lost ||
       body.y < PASTURE_TOP_Y ||
-      Math.abs(body.x - x) > horizontalReach ||
+      Math.abs(body.x - x) > horizontalReach * 0.92 ||
       Math.abs(body.velocityY) > 1.2
     ) {
       continue;
     }
-    const horseTop = body.y + getHorseVerticalExtent(body.angle);
-    surfaceY = Math.max(surfaceY, horseTop);
+    const objectTop = body.y + getStackBodyVerticalExtent(body);
+    surfaceY = Math.max(surfaceY, objectTop);
   }
   return surfaceY;
 }
 
-function getHorseVerticalExtent(angle: number): number {
-  return (
-    Math.abs(Math.cos(angle)) * HORSE_HALF_HEIGHT +
-    Math.abs(Math.sin(angle)) * HORSE_HALF_WIDTH
-  );
-}
-
-function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angle: number): void {
+function setStackObjectVisualTransform(node: Node3D, x: number, physicsY: number, angle: number): void {
   node.position.x = STACK_X;
   node.position.y = STACK_BASE_Y + physicsY;
   node.position.z = STACK_Z - x;
@@ -903,7 +1007,7 @@ function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angl
 
 function updateCamera(deltaTime: number, height: number): void {
   const rise = clamp(height / 1.1, 0, 1);
-  const herdProgress = clamp(horsesDropped / 50, 0, 1);
+  const herdProgress = clamp(objectsDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
   const desiredTargetY =
     STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
@@ -919,7 +1023,7 @@ function updateCamera(deltaTime: number, height: number): void {
 }
 
 function updateHud(now: number, stackHeight = cachedStackHeight): void {
-  setTextIfChanged(horsesLeftCopy, String(horsesDropped));
+  setTextIfChanged(horsesLeftCopy, String(objectsDropped));
   setTextIfChanged(heightCopy, formatHeight(stackHeight));
   setTextIfChanged(paceCopy, `${getScore(stackHeight).toLocaleString()} pts`);
 
@@ -946,8 +1050,8 @@ function updateHud(now: number, stackHeight = cachedStackHeight): void {
 
 function getCurrentStackHeight(): number {
   measurementBodies.length = 0;
-  for (const horse of stackedHorses) {
-    if (!horse.lost) measurementBodies.push(horse.body);
+  for (const object of stackedObjects) {
+    if (!object.lost) measurementBodies.push(object.body);
   }
   return getSupportedStackHeight(physicsWorld, measurementBodies);
 }
@@ -976,7 +1080,7 @@ function getScore(height: number): number {
 
 function bindGameControls(): void {
   canvas.addEventListener('pointermove', (event: PointerEvent) => {
-    if (phase !== 'playing' || activeHorse === null) return;
+    if (phase !== 'playing' || activeObject === null) return;
     setAimFromClientX(event.clientX, performance.now());
   });
 
@@ -985,7 +1089,7 @@ function bindGameControls(): void {
     canvas.focus({ preventScroll: true });
     const now = performance.now();
     setAimFromClientX(event.clientX, now);
-    placeActiveHorse(now);
+    placeActiveStackObject(now);
   });
 
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -998,33 +1102,33 @@ function bindGameControls(): void {
       const horizontalLimit = getAimHalfWidth();
       setAimOffset(aimOffset + 0.08, horizontalLimit, now);
     } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
-      placeActiveHorse(now);
+      placeActiveStackObject(now);
     } else {
       return;
     }
     event.preventDefault();
   });
 
-  dropButton.addEventListener('click', () => placeActiveHorse(performance.now()));
+  dropButton.addEventListener('click', () => placeActiveStackObject(performance.now()));
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);
 }
 
-function placeActiveHorse(now: number): void {
-  if (activeHorse === null) return;
+function placeActiveStackObject(now: number): void {
+  if (activeObject === null) return;
   if (now >= gameEndsAt) {
     beginSettling(now);
     return;
   }
   // Touch devices do not necessarily send a pointermove before pointerdown, so refresh
-  // the hidden horse's projected landing pose at the exact moment it is placed.
-  updateActiveHorse(now);
-  commitHorsePlacement(now);
+  // the hidden object's projected landing pose at the exact moment it is placed.
+  updateActiveStackObject(now);
+  commitObjectPlacement(now);
 }
 
 function setAimFromClientX(clientX: number, now: number): void {
-  const current = activeHorse;
+  const current = activeObject;
   if (current === null) return;
   const normalized = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1) * 2 - 1;
   const horizontalLimit = getAimHalfWidth();
@@ -1050,7 +1154,11 @@ function getAimHalfWidth(): number {
     cameraController.distance *
     Math.tan(camera.projection.fovY / 2) *
     camera.projection.aspect;
-  return Math.min(PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH * 1.2, visibleHalfWidth * 0.88);
+  const activeHalfWidth =
+    activeObject === null
+      ? STACK_OBJECT_PROFILES.horse.halfWidth
+      : STACK_OBJECT_PROFILES[activeObject.kind].halfWidth;
+  return Math.min(PASTURE_HALF_WIDTH - activeHalfWidth * 1.2, visibleHalfWidth * 0.88);
 }
 
 function resizeCanvas(): void {
@@ -1105,7 +1213,7 @@ function enterFrame(now: number): void {
     if (gameIsMoving) {
       updateGame(now);
       stepGamePhysics(now, deltaTime);
-      synchronizeHorseVisuals();
+      synchronizeStackVisuals();
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
       renderRequested = true;
     }
@@ -1146,7 +1254,7 @@ function initializeRenderer() {
   const nextCanvas = createGlCanvasElement(1, 1, initialPixelRatio);
   nextCanvas.setAttribute(
     'aria-label',
-    'Horse Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place.',
+    'Farm Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place the next random farm object.',
   );
   nextCanvas.tabIndex = 0;
   viewer.prepend(nextCanvas);

@@ -8,11 +8,48 @@ import {
   stepPhysics2D,
 } from '@flighthq/sdk';
 
+export type StackObjectKind = 'horse' | 'hay' | 'cow' | 'chickens';
+
+export interface StackObjectProfile {
+  emoji: string;
+  halfHeight: number;
+  halfWidth: number;
+  label: string;
+}
+
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 export const METERS_PER_HAND = 0.1016;
-// The farm ground spans roughly 3.5 world units across the new straight-on view.
+export const STACK_OBJECT_KINDS = ['horse', 'hay', 'cow', 'chickens'] as const;
+export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObjectProfile>> = {
+  horse: {
+    emoji: '🐎',
+    halfHeight: HORSE_HALF_HEIGHT,
+    halfWidth: HORSE_HALF_WIDTH,
+    label: 'Horse',
+  },
+  hay: {
+    emoji: '🌾',
+    halfHeight: 0.095,
+    halfWidth: 0.185,
+    label: 'Hay bales',
+  },
+  cow: {
+    emoji: '🐄',
+    halfHeight: 0.074,
+    halfWidth: 0.094,
+    label: 'Cow',
+  },
+  chickens: {
+    emoji: '🐔',
+    halfHeight: 0.027,
+    halfWidth: 0.113,
+    label: 'Chickens',
+  },
+};
+
+// The farm ground spans roughly 3.5 world units across the straight-on view.
 // Keeping the collider inside that silhouette leaves real fall-off edges.
 export const PASTURE_HALF_WIDTH = 1.75;
 export const PASTURE_TOP_Y = -0.015;
@@ -20,21 +57,19 @@ export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
-// Match broadphase buckets to the objects that dominate this world. The SDK's
-// one-unit default is several horse lengths wide and produces many unrelated
-// candidate pairs in a dense pile.
 const PHYSICS_GRID_CELL_SIZE = 0.2;
-
-const HORSE_MATERIAL: Physics2DMaterial = {
-  density: 1,
-  friction: 0.56,
-  restitution: 0.13,
+const STACK_MATERIALS: Readonly<Record<StackObjectKind, Physics2DMaterial>> = {
+  horse: { density: 1, friction: 0.56, restitution: 0.13 },
+  hay: { density: 0.72, friction: 0.78, restitution: 0.035 },
+  cow: { density: 1.15, friction: 0.6, restitution: 0.08 },
+  chickens: { density: 0.48, friction: 0.44, restitution: 0.2 },
 };
 const PASTURE_MATERIAL: Physics2DMaterial = {
   density: 0,
   friction: 0.38,
   restitution: 0.035,
 };
+const stackBodyKinds = new WeakMap<RigidBody2D, StackObjectKind>();
 
 export function createHorseStackWorld(): Physics2DWorld {
   const world = createPhysics2DWorld(
@@ -46,8 +81,6 @@ export function createHorseStackWorld(): Physics2DWorld {
   world.config.positionIterations = 6;
   world.config.timeToSleep = 0.65;
 
-  // The farm's green pasture is the only landing surface, with real fall-off edges
-  // at the limits of the floating island.
   const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
   pasture.colliders.push(
     createPhysics2DCollider(
@@ -65,48 +98,69 @@ export function createHorseStackWorld(): Physics2DWorld {
   return world;
 }
 
-export function addHorseBody(
+export function addStackObjectBody(
   world: Physics2DWorld,
+  kind: StackObjectKind,
   x: number,
   y: number,
   angle: number,
 ): RigidBody2D {
   const body = createRigidBody2D('dynamic', x, y, angle);
-  body.linearDamping = 0.08;
-  body.angularDamping = 0.06;
-  // Horses appear directly at the previewed landing pose with no launch
-  // velocity. Discrete collision is sufficient and avoids putting the entire
-  // awake pile through the continuous-collision path every step.
+  body.linearDamping = kind === 'chickens' ? 0.04 : 0.08;
+  body.angularDamping = kind === 'hay' ? 0.12 : 0.06;
   body.bullet = false;
-
-  // A rounded, uneven proxy makes the horses accumulate as a pile instead
-  // of clicking together into a neat tower.
   body.colliders.push(
     createPhysics2DCollider(
       {
         kind: 'polygon',
-        points: [
-          -0.0855, -0.018, -0.06075, -0.06525, -0.018, -0.0765, 0.0585,
-          -0.06525, 0.09, 0.009, 0.0675, 0.0765, -0.063, 0.072, -0.09, 0.018,
-        ],
+        points: getColliderPoints(kind),
       },
-      HORSE_MATERIAL,
+      STACK_MATERIALS[kind],
     ),
   );
-
-  return addPhysics2DBody(world, body);
+  addPhysics2DBody(world, body);
+  stackBodyKinds.set(body, kind);
+  return body;
 }
 
 export function stepHorseStack(world: Physics2DWorld): void {
   stepPhysics2D(world, PHYSICS_STEP);
 }
 
-export function getNextHorseDelay(horsesDropped: number): number {
-  return Math.max(80, 210 - horsesDropped * 3.25);
+export function getRandomStackObjectKind(random = Math.random): StackObjectKind {
+  const index = Math.min(
+    STACK_OBJECT_KINDS.length - 1,
+    Math.floor(random() * STACK_OBJECT_KINDS.length),
+  );
+  return STACK_OBJECT_KINDS[index] ?? 'horse';
 }
 
-export function getPaceLevel(horsesDropped: number): number {
-  return Math.min(6, 1 + Math.floor(horsesDropped / 7));
+export function getNextObjectDelay(objectsDropped: number): number {
+  return Math.max(80, 210 - objectsDropped * 3.25);
+}
+
+export function getPaceLevel(objectsDropped: number): number {
+  return Math.min(6, 1 + Math.floor(objectsDropped / 7));
+}
+
+export function getStackObjectVerticalExtent(kind: StackObjectKind, angle: number): number {
+  const profile = STACK_OBJECT_PROFILES[kind];
+  return (
+    Math.abs(Math.cos(angle)) * profile.halfHeight +
+    Math.abs(Math.sin(angle)) * profile.halfWidth
+  );
+}
+
+export function getStackBodyVerticalExtent(body: Readonly<RigidBody2D>): number {
+  return getStackObjectVerticalExtent(getStackBodyKind(body), body.angle);
+}
+
+export function getStackBodyHalfWidth(body: Readonly<RigidBody2D>): number {
+  return STACK_OBJECT_PROFILES[getStackBodyKind(body)].halfWidth;
+}
+
+export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {
+  return Math.abs(body.x) <= PASTURE_HALF_WIDTH + getStackBodyHalfWidth(body);
 }
 
 export function getStackHeightMeters(stackTopY: number): number {
@@ -121,7 +175,7 @@ export function getStackHeightHands(stackTopY: number): number {
 
 export function getSupportedStackHeight(
   world: Readonly<Physics2DWorld>,
-  horses: readonly Readonly<RigidBody2D>[],
+  objects: readonly Readonly<RigidBody2D>[],
 ): number {
   const touchingBodies = new Set<number>();
   for (const contact of world.contacts) {
@@ -131,17 +185,58 @@ export function getSupportedStackHeight(
   }
 
   let height = 0;
-  for (const horse of horses) {
-    const onStack = horse.sleeping || touchingBodies.has(horse.index);
-    const inPasture = Math.abs(horse.x) <= PASTURE_HALF_WIDTH + HORSE_HALF_WIDTH;
-    if (!onStack || !inPasture || horse.y < -HORSE_HALF_HEIGHT || Math.abs(horse.velocityY) > 1.2) {
+  for (const body of objects) {
+    const onStack = body.sleeping || touchingBodies.has(body.index);
+    if (
+      !onStack ||
+      !isStackBodyWithinPasture(body) ||
+      body.y < -STACK_OBJECT_PROFILES[getStackBodyKind(body)].halfHeight ||
+      Math.abs(body.velocityY) > 1.2
+    ) {
       continue;
     }
-
-    const verticalExtent =
-      Math.abs(Math.cos(horse.angle)) * HORSE_HALF_HEIGHT +
-      Math.abs(Math.sin(horse.angle)) * HORSE_HALF_WIDTH;
-    height = Math.max(height, horse.y + verticalExtent);
+    height = Math.max(height, body.y + getStackBodyVerticalExtent(body));
   }
   return height;
+}
+
+function getStackBodyKind(body: Readonly<RigidBody2D>): StackObjectKind {
+  return stackBodyKinds.get(body as RigidBody2D) ?? 'horse';
+}
+
+function getColliderPoints(kind: StackObjectKind): number[] {
+  const { halfHeight: h, halfWidth: w } = STACK_OBJECT_PROFILES[kind];
+  switch (kind) {
+    case 'horse':
+      return [
+        -w * 0.95, -h * 0.24,
+        -w * 0.675, -h * 0.853,
+        -w * 0.2, -h,
+        w * 0.65, -h * 0.853,
+        w, h * 0.118,
+        w * 0.75, h,
+        -w * 0.7, h * 0.941,
+        -w, h * 0.235,
+      ];
+    case 'hay':
+      return [-w, -h, w, -h, w, h, -w, h];
+    case 'cow':
+      return [
+        -w, -h * 0.65,
+        -w * 0.72, -h,
+        w * 0.72, -h,
+        w, -h * 0.25,
+        w * 0.82, h * 0.88,
+        -w * 0.75, h,
+      ];
+    case 'chickens':
+      return [
+        -w, -h * 0.55,
+        -w * 0.78, -h,
+        w * 0.75, -h,
+        w, -h * 0.4,
+        w * 0.86, h * 0.92,
+        -w * 0.86, h,
+      ];
+  }
 }

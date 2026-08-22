@@ -32,13 +32,12 @@
           <p class="eyebrow"><span>01</span> Experimental agriculture</p>
           <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            Unlimited horses. Sixty frantic seconds. Aim the glow, build upward, embrace the
-            consequences.
+            Horses, hay, cows, or chickens. Sixty frantic seconds. Stack whatever the farm gives you.
           </p>
 
           <div class="scoreboard" aria-label="Game status">
             <div class="score-cell">
-              <span class="score-label">Horses placed</span>
+              <span class="score-label">Objects placed</span>
               <strong id="horses-left">0</strong>
             </div>
             <div class="score-cell timer-cell">
@@ -60,7 +59,7 @@
             <span class="interaction-icon" aria-hidden="true"><span></span></span>
             <span>
               <strong>Balance the radiant marker</strong>
-              Move gently to stay level · Fast movement teeters · Click, tap, Space or Enter to place
+              Every piece is random · Move gently to stay level · Click, tap, Space or Enter to place
             </span>
           </div>
         </section>
@@ -69,13 +68,13 @@
           <div class="viewer" id="viewer">
             <div class="loading-panel" id="loading-panel">
               <div class="loader-mark" aria-hidden="true"><span></span></div>
-              <p id="loading-copy">Herding the horses…</p>
+              <p id="loading-copy">Rounding up the farm…</p>
             </div>
 
             <div class="game-panel start-panel" id="start-panel" hidden>
               <p class="panel-kicker">Flight 2D physics presents</p>
               <h2>Ready to make<br />poor choices?</h2>
-              <p>You have 60 seconds and all the horses you can place. Build the tallest pile.</p>
+              <p>You have 60 seconds. Stack every random horse, hay bale, cow, and chicken you get.</p>
               <button type="button" id="start-button" disabled>Start stacking</button>
             </div>
 
@@ -101,7 +100,7 @@
               <button type="button" id="retry-button">Try again</button>
             </div>
 
-            <div class="game-callout" id="game-callout" aria-live="off">Awaiting horses…</div>
+            <div class="game-callout" id="game-callout" aria-live="off">Awaiting farm chaos…</div>
 
             <div class="hero-timer" id="hero-timer" aria-hidden="true">
               <span>Time left</span>
@@ -114,7 +113,7 @@
             </button>
 
             <button class="drop-horse" id="drop-horse" type="button" disabled>
-              Place horse
+              Place object
               <span aria-hidden="true">↓</span>
             </button>
 

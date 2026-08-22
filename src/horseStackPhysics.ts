@@ -21,6 +21,9 @@ export const HORSE_SIZE_MULTIPLIER = 1.2;
 export const HORSE_HALF_WIDTH = 0.09 * HORSE_SIZE_MULTIPLIER;
 export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
+// This world is not metres: an upright horse is HORSE_HALF_HEIGHT * 2 units tall and
+// stands for 1.55 m, which puts one world unit at about 8.44 m.
+export const METERS_PER_WORLD_UNIT = TYPICAL_HORSE_WITHERS_METERS / (HORSE_HALF_HEIGHT * 2);
 export const METERS_PER_HAND = 0.1016;
 export const STACK_OBJECT_KINDS = ['horse', 'hay', 'cow', 'chickens'] as const;
 export const STACK_OBJECT_WEIGHTS: Readonly<Record<StackObjectKind, number>> = {
@@ -89,6 +92,17 @@ export function createHorseStackWorld(): Physics2DWorld {
   world.config.velocityIterations = 12;
   world.config.positionIterations = 6;
   world.config.timeToSleep = 0.65;
+  // Flight's default sleepLinearThreshold is Box2D's 0.01, which is tuned for a world
+  // measured in metres. Ours is measured in ~8.44 m units, so the metre default is about
+  // 8x too tight for the speeds it is judging, and a pile that has visually stopped keeps
+  // one body above it — which, because sleeping is decided per island, keeps the whole
+  // pile awake and creeping. Translating the threshold into this world's units is the fix
+  // Flight recommended after A/B-ing it on their side (never sleeps at 0.01; 162 frames at
+  // this value, with centred colliders either way).
+  //
+  // Only the LINEAR threshold scales. sleepAngularThreshold is in rad/s, and an angle is
+  // dimensionless, so its default is already correct at any world scale.
+  world.config.sleepLinearThreshold = 0.01 * METERS_PER_WORLD_UNIT;
 
   const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
   pasture.colliders.push(

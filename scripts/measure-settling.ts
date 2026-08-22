@@ -45,25 +45,24 @@ const SEEDS = Array.from({ length: 24 }, (_, index) => 0x5eed0000 + index);
 // Add variants here to A/B a tuning idea against the shipped configuration.
 const variants: Variant[] = [
   { name: 'shipped' },
+  { name: 'sleepLinear at metre default 0.01', world: (w) => setSleepLinear(w, 0.01) },
   { name: 'ground friction 0.72', world: (w) => setGroundFriction(w, 0.72) },
-  { name: 'sleep thresholds x4', world: (w) => setSleepScale(w, 4) },
 ];
 
+const shipped = createHorseStackWorld();
 console.log(
   `settling: ${OBJECTS} objects, then ${QUIET_SECONDS}s with nothing placed; mean of ${SEEDS.length} seeds`,
 );
-console.log('variant                  sleptAt   maxJump   jumps  drift/body/s  fastest@2s  kept');
+console.log(
+  `shipped world: gravity ${(-shipped.gravityY).toFixed(2)}, sleepLinearThreshold ${shipped.config.sleepLinearThreshold.toFixed(6)}, sleepAngular ${shipped.config.sleepAngularThreshold.toFixed(4)}, timeToSleep ${shipped.config.timeToSleep}, iterations ${shipped.config.velocityIterations}/${shipped.config.positionIterations}\n`,
+);
+console.log('variant                             awake@5s awake@10s  fastest@2s   maxJump   jumps  drift/body/s');
 for (const variant of variants) {
   const runs = SEEDS.map((seed) => measure(variant, seed));
   const mean = (pick: (run: (typeof runs)[number]) => number): number =>
     runs.reduce((total, run) => total + pick(run), 0) / runs.length;
-  const slept = runs.map((run) => run.sleptAt).filter((value): value is number => value >= 0);
-  const sleptLabel =
-    slept.length === runs.length
-      ? `${(slept.reduce((total, value) => total + value, 0) / slept.length).toFixed(2)}s`
-      : `${slept.length}/${runs.length}`;
   console.log(
-    `${variant.name.padEnd(24)} ${sleptLabel.padStart(7)} ${mean((r) => r.maxJump).toFixed(4).padStart(9)} ${mean((r) => r.jumps).toFixed(1).padStart(7)} ${mean((r) => r.drift).toFixed(5).padStart(13)} ${mean((r) => r.fastestAtTwoSeconds).toFixed(4).padStart(11)} ${mean((r) => r.kept).toFixed(1).padStart(5)}`,
+    `${variant.name.padEnd(35)} ${mean((r) => r.awakeAtFive).toFixed(1).padStart(8)} ${mean((r) => r.awakeAtTen).toFixed(1).padStart(9)} ${mean((r) => r.fastestAtTwoSeconds).toFixed(4).padStart(11)} ${mean((r) => r.maxJump).toFixed(4).padStart(9)} ${mean((r) => r.jumps).toFixed(1).padStart(7)} ${mean((r) => r.drift).toFixed(5).padStart(13)}`,
   );
 }
 
@@ -95,6 +94,8 @@ function measure(variant: Variant, seed: number) {
   let drift = 0;
   let sleptAt = -1;
   let fastestAtTwoSeconds = 0;
+  let awakeAtFive = 0;
+  let awakeAtTen = 0;
 
   for (let index = 0; index < quietSteps; index++) {
     stepHorseStack(world);
@@ -120,10 +121,12 @@ function measure(variant: Variant, seed: number) {
         ...awake.map((object) => Math.hypot(object.velocityX, object.velocityY)),
       );
     }
+    if (index === Math.round(5 / PHYSICS_STEP)) awakeAtFive = awake.length;
+    if (index === Math.round(10 / PHYSICS_STEP)) awakeAtTen = awake.length;
   }
 
   const kept = objects.filter((object) => object.y > -1).length;
-  return { drift: drift / Math.max(1, kept) / QUIET_SECONDS, fastestAtTwoSeconds, jumps, kept, maxJump, sleptAt };
+  return { awakeAtFive, awakeAtTen, drift: drift / Math.max(1, kept) / QUIET_SECONDS, fastestAtTwoSeconds, jumps, kept, maxJump, sleptAt };
 }
 
 function step(world: World, seconds: number): void {
@@ -136,9 +139,8 @@ function setGroundFriction(world: World, friction: number): void {
   if (collider !== undefined) collider.material = { ...collider.material, friction };
 }
 
-function setSleepScale(world: World, scale: number): void {
-  world.config.sleepLinearThreshold = 0.01 * scale;
-  world.config.sleepAngularThreshold = ((2 * scale) * Math.PI) / 180;
+function setSleepLinear(world: World, threshold: number): void {
+  world.config.sleepLinearThreshold = threshold;
 }
 
 function placementSurfaceY(

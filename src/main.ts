@@ -140,6 +140,18 @@ const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
 // the camera target keeps the whole marker visible; it costs a sliver of pasture at
 // the bottom, where there is margin to spare.
 const LANDING_MARKER_HEADROOM = 0.075;
+// The camera frames the measured stack top, but that measurement is a max over the
+// qualifying bodies: when a piece settles, the top can change by centimetres in a single
+// step while nothing visibly moves much. Feeding that straight to the camera is what made
+// it shudder. The camera follows its own copy of the height instead — deadbanded so
+// millimetre flicker is ignored outright, and rate limited so even the worst measured jump
+// (about 0.063 units) reaches the camera as at most 0.0023 per frame rather than all at
+// once. Rising is quick so a placed piece is framed promptly; falling is slow, because a
+// pile that has just lost a few millimetres is exactly the case that should not yank the
+// view. Only the camera reads this; scoring and the HUD keep the true measurement.
+const CAMERA_HEIGHT_DEADBAND = 0.008;
+const CAMERA_HEIGHT_RISE_RATE = 1.1;
+const CAMERA_HEIGHT_FALL_RATE = 0.14;
 // One lazy turn every fourteen seconds. The sails are ambient scenery, so this is
 // slow enough to read as idling wind rather than as something demanding attention.
 const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
@@ -383,6 +395,7 @@ let phase: GamePhase = 'loading';
 // world and clone a model, and on a slow first frame that work alone can outlast the
 // guard. Comparing input to input keeps the window honest whatever the frame costs.
 let placementArmedAt = 0;
+let cameraStackHeight = 0;
 let horseTemplate: Scene3D | null = null;
 const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
 // The farm's sail assembly, spun in place each frame. Null until the farm mounts.
@@ -754,6 +767,7 @@ function startGame(startedFrom?: Event): void {
   celebrationState = createParticleEmitterState();
 
   phase = 'playing';
+  cameraStackHeight = 0;
   placementArmedAt = (startedFrom?.timeStamp ?? now) + START_INPUT_GUARD_MS;
   startPanel.hidden = true;
   timeUpPanel.hidden = true;
@@ -1129,7 +1143,16 @@ function setStackObjectVisualTransform(node: Node3D, x: number, physicsY: number
   invalidateNodeLocalTransform(node);
 }
 
-function updateCamera(deltaTime: number, height: number): void {
+function followStackHeight(measured: number, deltaTime: number): number {
+  const difference = measured - cameraStackHeight;
+  if (Math.abs(difference) <= CAMERA_HEIGHT_DEADBAND) return cameraStackHeight;
+  const limit = (difference > 0 ? CAMERA_HEIGHT_RISE_RATE : CAMERA_HEIGHT_FALL_RATE) * deltaTime;
+  cameraStackHeight += difference > 0 ? Math.min(difference, limit) : Math.max(difference, -limit);
+  return cameraStackHeight;
+}
+
+function updateCamera(deltaTime: number, measuredHeight: number): void {
+  const height = followStackHeight(measuredHeight, deltaTime);
   const rise = clamp(height / 1.1, 0, 1);
   const herdProgress = clamp(objectsDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;

@@ -66,6 +66,22 @@ types, finite body state, contacts, distinct 2D
 colliders, a measurable supported pile, zero-impulse physics activation, the
 1.55m horse-height conversion, and a real fall beyond the farm-edge collider.
 
+## Deploying
+
+`.github/workflows/deploy-pages.yml` builds and publishes to GitHub Pages on every
+push to `main`, and can be run by hand from the Actions tab. It runs `npm run build`
+(which typechecks first) plus both validations, so a broken build or a bad asset never
+reaches the site, then uploads `dist` and deploys it.
+
+Two things have to be set on the repository once, from the GitHub side:
+
+- **Settings -> Pages -> Build and deployment -> Source** must be **GitHub Actions**.
+- The `github-pages` environment is created by the first run; nothing to prepare.
+
+No `base` configuration is needed for a project page at `/<repo>/`: `vite.config.ts`
+sets `base: './'` and the glTF models are resolved against `import.meta.url`, so the
+bundle is location-independent.
+
 ## Model credits
 
 - [Low Poly Farm](https://sketchfab.com/3d-models/low-poly-farm-879d61d8dfc048548ee380cace6f79d3)

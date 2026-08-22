@@ -1,0 +1,61 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# What the GITHUB_TOKEN needs for a Pages deployment: read the repo, mint the OIDC
+# token deploy-pages authenticates with, and write the Pages site itself.
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
+# One publish at a time. Not cancel-in-progress: a run that is already uploading
+# should finish rather than leave the site half-swapped; a newer commit queues.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # npm run build is tsc --noEmit followed by vite build, so this typechecks too.
+      # vite.config.ts sets base: './' and the models are loaded relative to the module
+      # URL, so the bundle works unchanged under a /<repo>/ Pages path.
+      - name: Build
+        run: npm run build
+
+      # The project's own checks, so a broken asset or a regressed pile never publishes.
+      - name: Validate assets
+        run: npm run validate:assets
+
+      - name: Validate gameplay
+        run: npm run validate:game
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

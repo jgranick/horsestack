@@ -121,7 +121,16 @@ interface StackedObject {
   node: Node3D;
 }
 
-const STACK_BASE_Y = 0.015;
+// Maps physics Y into world Y, and so decides where the play surface sits against the
+// rendered farm. PASTURE_TOP_Y is -0.015, putting the platform at world Y -0.072 — the
+// height of the modelled grass under the play band, sampled by ray-casting the farm
+// glTF's Ground/Ground2 triangles along the pile line (world x=1.55): the terrain runs
+// -0.045 to -0.079 there, mean -0.066, and this sits just under that so pieces settle
+// into the grass rather than hovering over it. Deliberately fixed HERE and not by moving
+// PASTURE_TOP_Y: the physics and scoring code treats y=0 as the floor in several places
+// (getSupportedStackHeight's empty-pile sentinel, its fall-off test, getStackHeightMeters'
+// guard), so lowering the pasture itself would read a settled chicken as fallen.
+const STACK_BASE_Y = -0.057;
 // At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
 // Pull the 2D play plane close to the island's front edge at roughly x=1.8,
 // while retaining a small strip of visible pasture beneath the pieces.

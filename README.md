@@ -1,7 +1,7 @@
 # Horse Stacker
 
 A chaotic low-poly stacking game built in TypeScript with
-[`@flighthq/sdk`](https://github.com/flighthq/flight). Flight's 2D rigid-body
+[`@flighthq/sdk`](https://github.com/flighthq/flight). Flight's 3D rigid-body
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
@@ -11,8 +11,8 @@ previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
 real horse at that exact position and angle. Flight physics activates there
-with zero linear or angular impulse, so the pile can still shift, tip, and
-tumble without an artificial drop destabilizing it.
+with zero linear or angular impulse, so the pile can still shift, tip, roll in
+depth, and tumble without an artificial drop destabilizing it.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. Displayed
 height is calibrated so one upright physics horse represents a typical 1.55m
@@ -41,9 +41,9 @@ npm run validate:game
 
 The gameplay validation runs 64-horse level, balanced, and teetered placement
 scenarios using the shipped timing and surface-placement rules, then checks for
-finite body state, contacts, a measurable supported pile, zero-impulse physics
-activation, the 1.55m horse-height conversion, and a real fall beyond the
-farm-edge collider.
+finite 3D body state, contacts, a measurable supported pile, zero-impulse
+physics activation, the 1.55m horse-height conversion, and real falls beyond
+both the lateral and depth edges of the farm collider.
 
 ## Model credits
 

@@ -57,12 +57,14 @@ export interface GameUiModel {
   canPlace: boolean;
   handsShown: number;
   height: string;
-  horsesPlaced: number;
+  horsesRemaining: number;
   resultComplete: boolean;
   resultCopy: string;
   resultHeight: string;
   score: string;
   secondsRemaining: number;
+  settlingCopy: string;
+  settlingTitle: string;
 }
 
 export interface FlightGameUi {
@@ -133,7 +135,7 @@ export function createFlightGameUi(
   setTextLabelString(readyTitleBottom, 'poor choices?');
   setTextLabelString(
     readyDescription,
-    '60 seconds. Unlimited horses. Build the tallest pile.',
+    '30 horses. 60 seconds. Still horses become permanent.',
   );
   setTextLabelString(readyButtonLabel, 'START STACKING');
   setTextLabelString(readyFooter, 'AIM IN 3D · BALANCE · CLICK / TAP / SPACE TO PLACE');
@@ -148,8 +150,8 @@ export function createFlightGameUi(
   const timerTrack = createSolidShape(playingRoot);
   const timerFill = createSolidShape(playingRoot);
   const statsCard = createSolidShape(playingRoot);
-  const horsesLabel = createLabel(playingRoot, 'HORSES', kickerFormat(COLORS.cream));
-  const horsesValue = createLabel(playingRoot, '0', displayFormat(24, COLORS.white));
+  const horsesLabel = createLabel(playingRoot, 'HERD LEFT', kickerFormat(COLORS.cream));
+  const horsesValue = createLabel(playingRoot, '30', displayFormat(24, COLORS.white));
   const heightLabel = createLabel(playingRoot, 'HEIGHT', kickerFormat(COLORS.cream));
   const heightValue = createLabel(playingRoot, '0.00 m', displayFormat(24, COLORS.white));
   const scoreLabel = createLabel(playingRoot, 'SCORE', kickerFormat(COLORS.cream));
@@ -478,7 +480,7 @@ export function createFlightGameUi(
     const urgent = model.secondsRemaining <= 10;
     setTextLabelString(timerValue, String(Math.ceil(model.secondsRemaining)));
     setTextLabelString(hudCalloutLabel, model.callout);
-    setTextLabelString(horsesValue, String(model.horsesPlaced));
+    setTextLabelString(horsesValue, String(model.horsesRemaining));
     setTextLabelString(heightValue, model.height);
     setTextLabelString(scoreValue, model.score);
     const progress = Math.max(0, Math.min(1, model.secondsRemaining / 60));
@@ -500,6 +502,10 @@ export function createFlightGameUi(
   }
 
   function updateSettlingUi(now: number): void {
+    if (currentModel !== null) {
+      setTextLabelString(timeUpTitle, currentModel.settlingTitle);
+      setTextLabelString(timeUpCopy, currentModel.settlingCopy);
+    }
     const pulse = reduceMotion ? 1 : 1 + Math.sin(now * 0.01) * 0.018;
     if (timeUpTitle.scaleX !== pulse || timeUpTitle.scaleY !== pulse) {
       timeUpTitle.scaleX = pulse;

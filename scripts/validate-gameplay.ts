@@ -1,10 +1,13 @@
 import type { Physics3DBallAndSocketJoint, RigidBody3D } from '@flighthq/sdk';
 import {
   addHorseBody,
-  attachHorseToPile,
+  attachHorseToSupport,
   createHorsePlacementResult,
   createHorseStackWorld,
+  createHorseSupportContact,
+  ejectHorseBody,
   FINAL_SETTLE_SECONDS,
+  findHorseSettlementSupport,
   getHorseTopY,
   getHorseVerticalExtent,
   getNextHorseDelay,
@@ -14,14 +17,19 @@ import {
   getStackHeightMeters,
   getSupportedStackHeight,
   HORSE_COLLIDER_HALF_LENGTH,
+  HORSE_HERD_SIZE,
   HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
   HORSE_MAX_ACTIVE_PINS,
   HORSE_PLACEMENT_ANGLES,
   HORSE_PLACEMENT_YAWS,
+  HORSE_SETTLE_DEADLINE_SECONDS,
+  HORSE_SETTLE_MAX_LINEAR_SPEED,
+  HORSE_SETTLE_QUIET_SECONDS,
   HORSE_VISUAL_HALF_DEPTH,
   isHorseWithinPasture,
+  isHorseQuietForSettlement,
   PASTURE_HALF_WIDTH,
   PASTURE_FRONT_DEPTH,
   PASTURE_TOP_Y,
@@ -44,15 +52,17 @@ interface ScenarioResult {
 
 const TARGET_HALF_WIDTH = 0.32;
 const TARGET_HALF_DEPTH = 0.16;
-const VALIDATION_HORSES = 64;
+const VALIDATION_HORSES = HORSE_HERD_SIZE;
 
 const scenarios = [
-  runScenario('level placements', 0x4c455645, 0.04, 0.34, false),
-  runScenario('balanced placements', 0x42414c41, 0.28, 0.2, false),
-  runScenario('random orientations', 0x52414e44, 0, 0.1, true),
+  runScenario('level placements', 0x4c455645, 0.04, false),
+  runScenario('balanced placements', 0x42414c41, 0.28, false),
+  runScenario('random orientations', 0x52414e44, 0, true),
 ];
 validateStableActivation();
 validateContactPinPhysics();
+validateEarnedPermanence();
+validateSpentHorseEjection();
 validatePlacementOrientations();
 validateExactPlacementPreview();
 validateHeightCalibration();
@@ -65,18 +75,18 @@ console.log(
       ({ contacts, depthSpread, hands, heightMeters, inPasture, name, pins }) =>
         `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${pins} exact pins, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; exact contact pins, progressive stability, placement preview, yaw poses, horse-height calibration, and farm-edge falloff verified`,
+    .join('; ')}; earned contact pins, two-second spent-horse ejection, progressive stability, placement preview, yaw poses, horse-height calibration, and farm-edge falloff verified`,
 );
 
 function runScenario(
   name: string,
   seed: number,
   maxTilt: number,
-  inputCadence: number,
   randomizeOrientation: boolean,
 ): ScenarioResult {
   const world = createHorseStackWorld();
   const horses: RigidBody3D[] = [];
+  const permanentHorses = new Set<RigidBody3D>();
   const random = mulberry32(seed);
   const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
   const placement = createHorsePlacementResult();
@@ -108,18 +118,22 @@ function runScenario(
     horse.angularVelocityX = 0;
     horse.angularVelocityY = 0;
     horse.angularVelocityZ = 0;
-    pins += attachHorseToPile(world, horse, placement);
-    stabilizeHorseStack(world);
     horses.push(horse);
+    if (earnHorsePermanence(world, horse, permanentHorses)) {
+      pins++;
+      stabilizeHorseStack(world, [...permanentHorses]);
+    } else {
+      ejectHorseBody(horse);
+    }
 
-    if (index === VALIDATION_HORSES - 1) continue;
-    const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    stepForDuration(world, horses, inputCadence + delaySeconds);
+    if (index < VALIDATION_HORSES - 1) {
+      stepForDuration(world, horses, getNextHorseDelay(index + 1) / 1000);
+    }
   }
 
   stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
 
-  const stackTopY = getSupportedStackHeight(world, horses);
+  const stackTopY = getSupportedStackHeight(world, [...permanentHorses]);
   const heightMeters = getStackHeightMeters(stackTopY);
   const remainingHorses = horses.filter(
     (horse) => isHorseWithinPasture(horse) && horse.y > -1,
@@ -139,8 +153,8 @@ function runScenario(
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
-  if (pins < VALIDATION_HORSES / 2 || pins >= VALIDATION_HORSES) {
-    throw new Error(`${name}: expected one exact pin for most stacked horses, received ${pins}`);
+  if (pins < VALIDATION_HORSES / 2 || pins > VALIDATION_HORSES) {
+    throw new Error(`${name}: expected most candidates to earn exact pins, received ${pins}`);
   }
   if (world.joints.length > HORSE_MAX_ACTIVE_PINS) {
     throw new Error(
@@ -162,11 +176,16 @@ function runScenario(
 function validateContactPinPhysics(): void {
   const world = createHorseStackWorld();
   const placement = createHorsePlacementResult();
+  const supportContact = createHorseSupportContact();
   resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
   const support = addHorseBody(world, 0, placement.centerY, 0);
   resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
   const horse = addHorseBody(world, 0, placement.centerY, 0);
-  const attached = attachHorseToPile(world, horse, placement);
+  supportContact.supportBody = support;
+  supportContact.x = placement.contactX;
+  supportContact.y = placement.contactY;
+  supportContact.z = placement.contactZ;
+  const attached = attachHorseToSupport(world, horse, supportContact);
   const pin = world.joints[0] as Physics3DBallAndSocketJoint | undefined;
   if (
     attached !== 1 ||
@@ -192,6 +211,67 @@ function validateContactPinPhysics(): void {
     throw new Error(
       'arcade pile: lower horses should strongly resist rotation without fixed rotation',
     );
+  }
+}
+
+function validateEarnedPermanence(): void {
+  const pendingWorld = createHorseStackWorld();
+  const pendingPlacement = createHorsePlacementResult();
+  const noPermanentHorses = new Set<RigidBody3D>();
+  resolveHorsePlacement(pendingPlacement, pendingWorld, 0, 0, 0, 0, 0.5);
+  addHorseBody(pendingWorld, 0, pendingPlacement.centerY, 0);
+  resolveHorsePlacement(pendingPlacement, pendingWorld, 0, 0, 0, 0, 0.5);
+  const unsupportedUpper = addHorseBody(
+    pendingWorld,
+    0,
+    pendingPlacement.centerY,
+    0,
+  );
+  const pendingSupport = createHorseSupportContact();
+  stepHorseStack(pendingWorld);
+  if (
+    findHorseSettlementSupport(
+      pendingSupport,
+      pendingWorld,
+      unsupportedUpper,
+      noPermanentHorses,
+    )
+  ) {
+    throw new Error('earned permanence: another unearned candidate cannot provide support');
+  }
+
+  const world = createHorseStackWorld();
+  const placement = createHorsePlacementResult();
+  const permanentHorses = new Set<RigidBody3D>();
+  resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
+  const base = addHorseBody(world, 0, placement.centerY, 0);
+  if (!earnHorsePermanence(world, base, permanentHorses)) {
+    throw new Error('earned permanence: a quiet pasture-supported horse should become permanent');
+  }
+
+  resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
+  const upper = addHorseBody(world, 0, placement.centerY, 0);
+  const support = createHorseSupportContact();
+  stepHorseStack(world);
+  if (!findHorseSettlementSupport(support, world, upper, permanentHorses)) {
+    throw new Error('earned permanence: a candidate should recognize an already-permanent horse');
+  }
+
+  const moving = addHorseBody(world, 0.4, 0.6, 0);
+  moving.velocityX = HORSE_SETTLE_MAX_LINEAR_SPEED * 2;
+  if (isHorseQuietForSettlement(moving)) {
+    throw new Error('earned permanence: moving candidates must reset their quiet streak');
+  }
+}
+
+function validateSpentHorseEjection(): void {
+  const world = createHorseStackWorld();
+  const horse = addHorseBody(world, 0, 0.7, 0);
+  const beforeVelocity = Math.hypot(horse.velocityX, horse.velocityY, horse.velocityZ);
+  ejectHorseBody(horse);
+  const afterVelocity = Math.hypot(horse.velocityX, horse.velocityY, horse.velocityZ);
+  if (afterVelocity <= beforeVelocity || horse.velocityY <= 0) {
+    throw new Error('spent horse: a failed candidate should be kicked outward and upward');
   }
 }
 
@@ -336,6 +416,33 @@ function stepForDuration(
     stepHorseStack(world);
     assertFiniteBodies(horses);
   }
+}
+
+function earnHorsePermanence(
+  world: ReturnType<typeof createHorseStackWorld>,
+  horse: RigidBody3D,
+  permanentHorses: Set<RigidBody3D>,
+): boolean {
+  const support = createHorseSupportContact();
+  let quietSeconds = 0;
+  const maxSteps = Math.ceil(HORSE_SETTLE_DEADLINE_SECONDS / PHYSICS_STEP);
+  for (let step = 0; step < maxSteps; step++) {
+    stepHorseStack(world);
+    const supported = findHorseSettlementSupport(
+      support,
+      world,
+      horse,
+      permanentHorses,
+    );
+    quietSeconds = supported && isHorseQuietForSettlement(horse)
+      ? quietSeconds + PHYSICS_STEP
+      : 0;
+    if (quietSeconds + Number.EPSILON < HORSE_SETTLE_QUIET_SECONDS) continue;
+    if (attachHorseToSupport(world, horse, support) !== 1) return false;
+    permanentHorses.add(horse);
+    return true;
+  }
+  return false;
 }
 
 function assertFiniteBodies(bodies: readonly RigidBody3D[]): void {

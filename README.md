@@ -5,7 +5,7 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
-Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
+Each run gives you 60 seconds and a permanently spent herd of 30 cow-scale horses.
 Before every placement, the real horse stays hidden and a translucent gold horse
 previews its pose anywhere across the field in 3D. An exact Flight physics shape
 cast positions that horse where its collider will first touch the live pile. A
@@ -16,8 +16,12 @@ teeters it. Each new marker chooses from several roll and yaw orientations—inc
 upside down and facing toward or away from the camera—and that preview remains the
 pose you place. On placement, the marker is immediately replaced by a fully visible
 real horse at that exact position and orientation. Flight physics activates there
-with zero linear or angular impulse, so the pile can still shift, tip, roll in
-depth, and tumble without an artificial drop destabilizing it.
+with zero linear or angular impulse. The new horse then has two seconds to remain
+supported by the pasture or an already-permanent horse while staying continuously
+quiet for 0.4 seconds. Success earns an exact contact pin and makes it part of the
+scoring stack. Failure permanently spends the horse and kicks it outward as a
+non-scoring obstacle. Multiple candidates can be active together, so rapid placement
+can keep the pile moving and sabotage otherwise safe horses.
 The cow-scale horses stay readable under a close camera that tracks the pile's
 top while gradually pulling back and changing angle with its growth. Displayed
 height is calibrated so one upright physics horse represents a typical 1.55m
@@ -44,10 +48,11 @@ npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs 64-horse level, balanced, and random-orientation
+The gameplay validation runs 30-horse level, balanced, and random-orientation
 placement scenarios using the shipped timing and surface-placement rules, then
-checks for finite 3D body state, contacts, a measurable supported pile, exact
-shape-cast placement, front/back-facing yaw options, zero-impulse physics
+checks for finite 3D body state, contacts, a measurable supported pile, earned
+contact pins, spent-horse ejection, exact shape-cast placement, front/back-facing
+yaw options, zero-impulse physics
 activation, the wide conservative single-box horse proxy, the 1.55m horse-height
 conversion, and real falls beyond both the lateral and depth edges of the farm
 collider.

@@ -6,8 +6,8 @@ physics drives cloned 3D horses in the farm scene, while Flight's 3D particle
 renderer handles impact dust and the final celebration.
 
 Each run gives you 60 seconds and an unlimited supply of cow-scale horses.
-Before every drop, the real horse stays hidden and a softly glowing gold horse
-previews its landing pose. The marker behaves like a damped
+Before every placement, the real horse stays hidden and a softly glowing gold horse
+previews its pose anywhere across the field in 3D. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement
 teeters it. On placement, the marker is immediately replaced by a fully visible
 real horse at that exact position and angle. Flight physics activates there
@@ -27,9 +27,9 @@ npm install
 npm run dev
 ```
 
-Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
-Click, tap, press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd> to reveal and place
-the horse.
+Move the pointer across the field or use the four arrow keys to position the
+yellow marker in depth and from side to side. Click, tap, press <kbd>Space</kbd>,
+or <kbd>Enter</kbd> to reveal and place the horse immediately.
 
 ## Checks
 
@@ -42,8 +42,9 @@ npm run validate:game
 The gameplay validation runs 64-horse level, balanced, and teetered placement
 scenarios using the shipped timing and surface-placement rules, then checks for
 finite 3D body state, contacts, a measurable supported pile, zero-impulse
-physics activation, the 1.55m horse-height conversion, and real falls beyond
-both the lateral and depth edges of the farm collider.
+physics activation, the wide conservative single-box horse proxy, the 1.55m
+horse-height conversion, and real falls beyond both the lateral and depth edges
+of the farm collider.
 
 ## Model credits
 

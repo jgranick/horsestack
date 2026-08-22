@@ -40,8 +40,10 @@ import {
   emitParticleBurst3D,
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
+  getCamera3DScreenToWorldRay,
   getNodeChildren,
   getNodeLocalMatrix4,
+  intersectCamera3DRayWithPlane,
   invalidateNodeLocalTransform,
   isMesh,
   isNodeLocalMatrix4Detached,
@@ -74,10 +76,13 @@ import {
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
+  HORSE_COLLIDER_HALF_LENGTH,
   HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
   isHorseWithinPasture,
+  PASTURE_BACK_DEPTH,
+  PASTURE_FRONT_DEPTH,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
@@ -96,7 +101,8 @@ type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
 
 interface ActiveHorse {
   angle: number;
-  x: number;
+  depth: number;
+  lateral: number;
 }
 
 interface StackedHorse {
@@ -111,6 +117,7 @@ const STACK_BASE_Y = 0.015;
 // centered across the farm's z = -4…-0.4 footprint.
 const STACK_X = 0.9;
 const STACK_Z = -2.15;
+const PLACEMENT_HALF_DEPTH = 0.34;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
 const GAME_DURATION_MS = 60_000;
@@ -136,11 +143,11 @@ const INDICATOR_MAX_SPIN = 5.5;
 const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
-  distance: 0.82,
+  distance: 0.95,
   maxDistance: 3.4,
-  minDistance: 0.68,
-  minPolar: 0.02,
-  polar: 0.08,
+  minDistance: 0.78,
+  minPolar: 0.14,
+  polar: 0.34,
   smoothTime: 0.2,
   target: createVector3(STACK_X, 0.1, STACK_Z),
 } as const;
@@ -358,7 +365,8 @@ let physicsWorld: Physics3DWorld = createHorseStackWorld();
 let activeHorse: ActiveHorse | null = null;
 let stackedHorses: StackedHorse[] = [];
 let horsesDropped = 0;
-let aimOffset = 0;
+let aimDepth = 0;
+let aimLateral = 0;
 let indicatorAngle = 0;
 let indicatorAngularVelocity = 0;
 let indicatorUpdatedAt = performance.now();
@@ -386,7 +394,15 @@ let impactFlashUntil = 0;
 let lastImpactAt = 0;
 let hudDirty = true;
 const measurementBodies: RigidBody3D[] = [];
-const inputBounds = { left: 0, width: 1 };
+const inputBounds = { height: 1, left: 0, top: 0, width: 1 };
+const placementRay = {
+  direction: createVector3(),
+  origin: createVector3(),
+};
+const placementHit = createVector3();
+const placementPlane = { a: 0, b: 1, c: 0, d: 0 };
+let lastPointerClientX: number | null = null;
+let lastPointerClientY: number | null = null;
 
 bindGameControls();
 bindRenderingLifecycle();
@@ -540,7 +556,8 @@ function startGame(): void {
   activeHorse = null;
   stackedHorses = [];
   horsesDropped = 0;
-  aimOffset = 0;
+  aimDepth = 0;
+  aimLateral = 0;
   indicatorAngle = 0;
   indicatorAngularVelocity = 0;
   indicatorUpdatedAt = now;
@@ -600,14 +617,18 @@ function spawnHorse(now: number): void {
   lastAimAt = now;
   activeHorse = {
     angle: 0,
-    x: 0,
+    depth: aimDepth,
+    lateral: aimLateral,
   };
   if (landingGhost !== null) landingGhost.enabled = true;
   if (landingRadiance !== null) landingRadiance.enabled = true;
   dropButton.disabled = false;
   statusCopy.textContent = `Horse ${String(horsesDropped + 1).padStart(2, '0')} queued`;
   gameCallout.textContent =
-    getPaceLevel(horsesDropped) >= 4 ? 'Keep the glowing horse upright.' : 'Move, balance, place.';
+    getPaceLevel(horsesDropped) >= 4 ? 'Keep the glowing horse upright.' : 'Aim in 3D, balance, place.';
+  if (lastPointerClientX !== null && lastPointerClientY !== null) {
+    setAimFromClientPoint(lastPointerClientX, lastPointerClientY, now);
+  }
   updateActiveHorse(now);
 }
 
@@ -617,7 +638,8 @@ function updateActiveHorse(now: number): void {
 
   updateIndicatorTeeter(now);
   const horizontalLimit = getAimHalfWidth();
-  current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
+  current.lateral = clamp(aimLateral, -horizontalLimit, horizontalLimit);
+  current.depth = clamp(aimDepth, -PLACEMENT_HALF_DEPTH, PLACEMENT_HALF_DEPTH);
   current.angle = indicatorAngle;
   updateLandingGhost(current, now);
 }
@@ -627,8 +649,14 @@ function commitHorsePlacement(now: number): void {
   if (current === null || phase !== 'playing') return;
 
   const landingY =
-    getLandingSurfaceY(current.x) + getHorseVerticalExtent(current.angle);
-  const body = addHorseBody(physicsWorld, current.x, landingY, current.angle);
+    getLandingSurfaceY(current.lateral, current.depth) + getHorseVerticalExtent(current.angle);
+  const body = addHorseBody(
+    physicsWorld,
+    current.lateral,
+    landingY,
+    current.angle,
+    current.depth,
+  );
   body.velocityX = 0;
   body.velocityY = 0;
   body.velocityZ = 0;
@@ -636,7 +664,7 @@ function commitHorsePlacement(now: number): void {
   body.angularVelocityY = 0;
   body.angularVelocityZ = 0;
   const node = createHorseVisual();
-  setHorseVisualPlacement(node, current.x, landingY, current.angle);
+  setHorseVisualPlacement(node, current.lateral, current.depth, landingY, current.angle);
   addNodeChild(horseLayer, node);
   stackedHorses.push({ body, lost: false, node });
   activeHorse = null;
@@ -845,10 +873,12 @@ function synchronizeHorseVisuals(): void {
 function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   if (landingGhost === null) return;
 
-  const previewX = current.x;
-  const landingSurfaceY = getLandingSurfaceY(previewX);
+  const landingSurfaceY = getLandingSurfaceY(current.lateral, current.depth);
 
-  landingGhost.enabled = Math.abs(previewX) <= PASTURE_HALF_WIDTH;
+  landingGhost.enabled =
+    Math.abs(current.lateral) <= PASTURE_HALF_WIDTH &&
+    current.depth >= PASTURE_BACK_DEPTH &&
+    current.depth <= PASTURE_FRONT_DEPTH;
   if (!landingGhost.enabled) {
     if (landingRadiance !== null) landingRadiance.enabled = false;
     indicatorLight.intensity = 0;
@@ -856,41 +886,53 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   }
   setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
   const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle);
-  setHorseVisualPlacement(landingGhost, previewX, previewY, current.angle);
-  updateLandingRadiance(previewX, previewY, now);
+  setHorseVisualPlacement(
+    landingGhost,
+    current.lateral,
+    current.depth,
+    previewY,
+    current.angle,
+  );
+  updateLandingRadiance(current.lateral, current.depth, previewY, now);
 }
 
-function updateLandingRadiance(x: number, physicsY: number, now: number): void {
+function updateLandingRadiance(
+  lateral: number,
+  depth: number,
+  physicsY: number,
+  now: number,
+): void {
   const radiance = landingRadiance;
   if (radiance === null) return;
   const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
   radiance.enabled = true;
   setNode3DAlpha(radiance, 0.48 + Math.sin(now * 0.008) * 0.055);
-  radiance.position.x = STACK_X + 0.006;
+  radiance.position.x = STACK_X + depth + 0.006;
   radiance.position.y = STACK_BASE_Y + physicsY;
-  radiance.position.z = STACK_Z - x;
+  radiance.position.z = STACK_Z - lateral;
   radiance.scale.x = pulse;
   radiance.scale.y = pulse;
   radiance.scale.z = pulse;
   invalidateNodeLocalTransform(radiance);
 
-  indicatorLight.position.x = STACK_X + 0.1;
+  indicatorLight.position.x = STACK_X + depth + 0.1;
   indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.09;
-  indicatorLight.position.z = STACK_Z - x;
+  indicatorLight.position.z = STACK_Z - lateral;
   indicatorLight.intensity = 0.8 + Math.sin(now * 0.008) * 0.14;
 }
 
-function getLandingSurfaceY(x: number): number {
+function getLandingSurfaceY(lateral: number, depth: number): number {
   let surfaceY = PASTURE_TOP_Y;
-  const horizontalReach = HORSE_HALF_WIDTH * 1.85;
+  const lengthReach = HORSE_COLLIDER_HALF_LENGTH * 1.9;
+  const depthReach = HORSE_HALF_DEPTH * 1.9;
 
   for (const horse of stackedHorses) {
     const body = horse.body;
     if (
       horse.lost ||
       body.y < PASTURE_TOP_Y ||
-      Math.abs(body.z + x) > horizontalReach ||
-      Math.abs(body.x) > HORSE_HALF_DEPTH * 2.4 ||
+      Math.abs(body.z + lateral) > lengthReach ||
+      Math.abs(body.x - depth) > depthReach ||
       Math.abs(body.velocityY) > 1.2
     ) {
       continue;
@@ -903,10 +945,11 @@ function getLandingSurfaceY(x: number): number {
 function setHorseVisualPlacement(
   node: Node3D,
   lateral: number,
+  depth: number,
   physicsY: number,
   angle: number,
 ): void {
-  node.position.x = STACK_X;
+  node.position.x = STACK_X + depth;
   node.position.y = STACK_BASE_Y + physicsY;
   node.position.z = STACK_Z - lateral;
   setQuaternionFromEuler(node.rotation, angle, 0, 0);
@@ -935,9 +978,9 @@ function updateCamera(deltaTime: number, height: number): void {
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
-  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.18 + herdProgress * 0.04;
-  cameraController.goalPolar = 0.06 + rise * 0.14;
-  cameraController.goalDistance = Math.min(3.25, 0.82 + height * 0.85 + herdProgress * 0.28);
+  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.08 + herdProgress * 0.02;
+  cameraController.goalPolar = 0.32 + rise * 0.12;
+  cameraController.goalDistance = Math.min(3.25, 0.95 + height * 0.88 + herdProgress * 0.28);
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
@@ -999,15 +1042,19 @@ function getScore(height: number): number {
 
 function bindGameControls(): void {
   canvas.addEventListener('pointermove', (event: PointerEvent) => {
+    lastPointerClientX = event.clientX;
+    lastPointerClientY = event.clientY;
     if (phase !== 'playing' || activeHorse === null) return;
-    setAimFromClientX(event.clientX, performance.now());
+    setAimFromClientPoint(event.clientX, event.clientY, performance.now());
   });
 
   canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0 || phase !== 'playing') return;
     canvas.focus({ preventScroll: true });
     const now = performance.now();
-    setAimFromClientX(event.clientX, now);
+    lastPointerClientX = event.clientX;
+    lastPointerClientY = event.clientY;
+    setAimFromClientPoint(event.clientX, event.clientY, now);
     placeActiveHorse(now);
   });
 
@@ -1016,11 +1063,15 @@ function bindGameControls(): void {
     const now = performance.now();
     if (event.key === 'ArrowLeft') {
       const horizontalLimit = getAimHalfWidth();
-      setAimOffset(aimOffset - 0.08, horizontalLimit, now);
+      setAimPosition(aimLateral - 0.06, aimDepth, horizontalLimit, now);
     } else if (event.key === 'ArrowRight') {
       const horizontalLimit = getAimHalfWidth();
-      setAimOffset(aimOffset + 0.08, horizontalLimit, now);
-    } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
+      setAimPosition(aimLateral + 0.06, aimDepth, horizontalLimit, now);
+    } else if (event.key === 'ArrowUp') {
+      setAimPosition(aimLateral, aimDepth - 0.055, getAimHalfWidth(), now);
+    } else if (event.key === 'ArrowDown') {
+      setAimPosition(aimLateral, aimDepth + 0.055, getAimHalfWidth(), now);
+    } else if (event.key === ' ' || event.key === 'Enter') {
       placeActiveHorse(now);
     } else {
       return;
@@ -1046,24 +1097,54 @@ function placeActiveHorse(now: number): void {
   commitHorsePlacement(now);
 }
 
-function setAimFromClientX(clientX: number, now: number): void {
-  const current = activeHorse;
-  if (current === null) return;
-  const normalized = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1) * 2 - 1;
+function setAimFromClientPoint(clientX: number, clientY: number, now: number): void {
+  if (activeHorse === null) return;
+  const normalizedX = clamp((clientX - inputBounds.left) / inputBounds.width, 0, 1);
+  const normalizedY = clamp((clientY - inputBounds.top) / inputBounds.height, 0, 1);
+  const aspect = inputBounds.width / inputBounds.height;
+  if (
+    !getCamera3DScreenToWorldRay(
+      placementRay,
+      camera,
+      normalizedX * 2 - 1,
+      1 - normalizedY * 2,
+      aspect,
+    )
+  ) {
+    return;
+  }
+
+  // Aim on a horizontal slice through the camera's current focus at the pile
+  // top. This keeps screen center pinned to the center of the placement field
+  // while making vertical pointer motion move toward or away from the camera.
+  placementPlane.d = -cameraController.target.y;
+  if (!intersectCamera3DRayWithPlane(placementHit, placementRay, placementPlane)) return;
+
   const horizontalLimit = getAimHalfWidth();
-  setAimOffset(normalized * horizontalLimit, horizontalLimit, now);
+  setAimPosition(
+    STACK_Z - placementHit.z,
+    placementHit.x - STACK_X,
+    horizontalLimit,
+    now,
+  );
 }
 
-function setAimOffset(targetX: number, horizontalLimit: number, now: number): void {
-  const nextAim = clamp(targetX, -horizontalLimit, horizontalLimit);
+function setAimPosition(
+  targetLateral: number,
+  targetDepth: number,
+  horizontalLimit: number,
+  now: number,
+): void {
+  const nextLateral = clamp(targetLateral, -horizontalLimit, horizontalLimit);
   const elapsed = clamp((now - lastAimAt) / 1000, 0.008, 0.08);
-  const pointerVelocity = (nextAim - aimOffset) / elapsed;
+  const pointerVelocity = (nextLateral - aimLateral) / elapsed;
   indicatorAngularVelocity = clamp(
     indicatorAngularVelocity - clamp(pointerVelocity * 0.32, -4.2, 4.2),
     -INDICATOR_MAX_SPIN,
     INDICATOR_MAX_SPIN,
   );
-  aimOffset = nextAim;
+  aimLateral = nextLateral;
+  aimDepth = clamp(targetDepth, -PLACEMENT_HALF_DEPTH, PLACEMENT_HALF_DEPTH);
   lastAimAt = now;
 }
 
@@ -1082,7 +1163,9 @@ function resizeCanvas(): void {
   const width = Math.max(1, Math.round(bounds.width));
   const height = Math.max(1, Math.round(bounds.height));
   inputBounds.left = bounds.left;
+  inputBounds.top = bounds.top;
   inputBounds.width = Math.max(bounds.width, 1);
+  inputBounds.height = Math.max(bounds.height, 1);
   const backingWidth = Math.round(width * nextPixelRatio);
   const backingHeight = Math.round(height * nextPixelRatio);
 
@@ -1182,7 +1265,7 @@ function initializeRenderer() {
   const nextCanvas = createGlCanvasElement(1, 1, initialPixelRatio);
   nextCanvas.setAttribute(
     'aria-label',
-    'Horse Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place.',
+    'Horse Stacker game. Aim across the field with the pointer or arrow keys, then click, tap, Space, or Enter to place.',
   );
   nextCanvas.tabIndex = 0;
   viewer.prepend(nextCanvas);

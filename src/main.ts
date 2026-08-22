@@ -1,6 +1,8 @@
 import type {
   Camera3D,
   ImportDiagnostic,
+  Mesh,
+  MeshGeometry,
   Node3D,
   ParticleEmitter3D,
   ParticleEmitterConfig,
@@ -15,7 +17,9 @@ import {
   addNodeChild,
   beginGlRenderEffectPipeline,
   clearParticleEmitter3D,
+  cloneMeshGeometry,
   cloneMesh,
+  compactMeshGeometryVertices,
   configureDirectionalShadowCamera3D,
   createAabb,
   createAmbientLight,
@@ -49,10 +53,12 @@ import {
   normalizeVector3,
   registerGlStandardPbrMaterial,
   registerStandardGlTextureResolvers,
+  refreshMeshGeometryBounds,
   removeNodeChildren,
   removePhysics2DBody,
   renderGlBackground,
   setNode3DAlpha,
+  setMeshGeometrySubsets,
   setNodeLocalMatrix4,
   setNodeTransform3D,
   setQuaternionFromEuler,
@@ -61,6 +67,11 @@ import {
 } from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import {
+  FARM_PROP_SPECS,
+  selectFarmPropTriangleIndices,
+} from './farmPropGeometry';
+import type { FarmPropPartSpec, FarmPropTriangleFilter } from './farmPropGeometry';
 import {
   addStackObjectBody,
   createHorseStackWorld,
@@ -107,13 +118,6 @@ interface StackedObject {
   node: Node3D;
 }
 
-interface FarmPropSpec {
-  centerX: number;
-  centerY: number;
-  centerZ: number;
-  nodeNames: readonly string[];
-}
-
 const STACK_BASE_Y = 0.015;
 // At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
 // Pull the 2D play plane into the front third of the island. The farm's front
@@ -123,26 +127,6 @@ const STACK_Z = -2.15;
 const HORSE_SCALE = 0.00279;
 const HORSE_VISUAL_CENTER_Y = 0.07875;
 const FARM_SCENE_SCALE = 0.018;
-const FARM_PROP_SPECS: Readonly<Partial<Record<StackObjectKind, FarmPropSpec>>> = {
-  hay: {
-    centerX: -23.4569,
-    centerY: 37.7013,
-    centerZ: 3.6675,
-    nodeNames: ['Object_20', 'Object_23'],
-  },
-  cow: {
-    centerX: -29.0454,
-    centerY: -51.3303,
-    centerZ: 4.2889,
-    nodeNames: ['Object_32'],
-  },
-  chickens: {
-    centerX: -8.3155,
-    centerY: 19.9557,
-    centerZ: 0.4335,
-    nodeNames: ['Object_27', 'Object_31', 'Object_36', 'Object_38'],
-  },
-};
 const GAME_DURATION_MS = 60_000;
 const HANDS_PER_EMOJI_COLUMN = 12;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
@@ -508,16 +492,58 @@ function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
     centeredSource.position.y = -spec.centerY;
     centeredSource.position.z = -spec.centerZ;
     invalidateNodeLocalTransform(centeredSource);
-    for (const nodeName of spec.nodeNames) {
-      const source = findNodeByName(farm.root, nodeName);
-      if (source === null) throw new Error(`Farm prop mesh ${nodeName} was not imported`);
-      addNodeChild(centeredSource, cloneNode3DHierarchy(source));
+    for (const part of spec.parts) {
+      const source = findNodeByName(farm.root, part.nodeName);
+      if (source === null || !isMesh(source)) {
+        throw new Error(`Farm prop mesh ${part.nodeName} was not imported`);
+      }
+      const materialName = source.materials[0]?.name;
+      if (materialName !== part.materialName) {
+        throw new Error(
+          `Farm prop mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
+        );
+      }
+      addNodeChild(centeredSource, cloneFarmPropPart(source, part));
     }
     addNodeChild(axisRoot, centeredSource);
     addNodeChild(scaleRoot, axisRoot);
     addNodeChild(template, scaleRoot);
     farmPropTemplates[kind] = template;
   }
+}
+
+function cloneFarmPropPart(source: Readonly<Mesh>, part: Readonly<FarmPropPartSpec>): Mesh {
+  const clone = cloneMesh(source);
+  if (part.filter !== undefined) {
+    clone.geometry = filterFarmPropGeometry(source.geometry, part.filter, part.nodeName);
+  }
+  return clone;
+}
+
+function filterFarmPropGeometry(
+  source: Readonly<MeshGeometry>,
+  filter: Readonly<FarmPropTriangleFilter>,
+  nodeName: string,
+): MeshGeometry {
+  if (source.topology !== 'triangle-list' || source.indices === null) {
+    throw new Error(`Farm prop mesh ${nodeName} is not an indexed triangle list`);
+  }
+
+  const selectedIndices = selectFarmPropTriangleIndices(source, filter);
+
+  if (selectedIndices.length === 0) {
+    throw new Error(`Farm prop mesh ${nodeName} produced no selected triangles`);
+  }
+
+  const filtered = cloneMeshGeometry(source);
+  filtered.indices =
+    source.indices instanceof Uint32Array
+      ? new Uint32Array(selectedIndices)
+      : new Uint16Array(selectedIndices);
+  setMeshGeometrySubsets(filtered, [{ indexCount: selectedIndices.length, indexOffset: 0 }]);
+  const compact = compactMeshGeometryVertices(filtered);
+  refreshMeshGeometryBounds(compact);
+  return compact;
 }
 
 function findNodeByName(root: Readonly<Node3D>, name: string): Node3D | null {

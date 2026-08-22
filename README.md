@@ -7,8 +7,10 @@ impact dust and the final celebration.
 
 Each run gives you 60 seconds and a random supply of horses, hay bales, cows,
 and chickens. The hay, cow, and chicken geometry is extracted directly from the
-low-poly farm scene and recentered as reusable stack pieces; the pile itself sits
-farther forward in the pasture than the original horse-only version.
+low-poly farm glTF and recentered as reusable stack pieces. Because the source
+scene is grouped by material, extraction combines the correct material layers
+and separates one cow and one hay bale from shared meshes at triangle level.
+The pile itself sits farther forward in the pasture than the original horse-only version.
 Before every drop, the real object stays hidden and a softly glowing gold object
 previews its landing pose. The marker behaves like a damped
 pendulum: a still pointer lets it balance level, while quick horizontal movement

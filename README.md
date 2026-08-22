@@ -5,46 +5,6 @@ A chaotic low-poly stacking game built in TypeScript with
 physics drives the 3D farm props, while Flight's 3D particle renderer handles
 impact dust and the final celebration.
 
-Each run gives you 60 seconds and a weighted random supply: 50% hay bales, 30%
-horses, 15% chickens, and 5% cows. Chicken draws randomly choose one of two
-individual source-authored hens, with the same hen carried from preview into
-the pile. The hay, cow, and chicken geometry is extracted directly from the
-low-poly farm glTF and recentered as reusable stack pieces. Because the source
-scene is grouped by material, extraction combines the correct material layers
-and separates individual cows, hens, and hay bales from shared meshes at
-triangle level.
-The bale is shown end-on with a fixed Z-axis quarter-turn, while the simplified
-2D proxies follow the visible silhouettes: tall cow, near-square bale,
-irregular horse, and circular chicken.
-The pile itself sits close to the pasture's front edge.
-Before every drop, the real object stays hidden and a softly glowing gold object
-previews its landing pose, hovering a horse-height above it with the gold halo and
-its warm light riding up to surround it. The marker behaves like a damped
-pendulum: a still pointer lets it balance level, while quick horizontal movement
-teeters it. On placement, the marker is immediately replaced by a fully visible
-real object at that exact position and angle. Flight physics activates there
-with zero linear or angular impulse, so the pile can still shift, tip, and
-tumble without an artificial drop destabilizing it.
-The mixed farm pieces stay readable under a close camera that tracks the pile's
-top while gradually pulling back and changing angle with its growth, holding enough
-headroom above the pile for the raised marker.
-Flight's directional shadow map is a fixed 1024x1024, so its sharpness comes entirely
-from how little world it has to cover: the shadow camera is tight-fitted to the farm's
-own bounds rather than to a volume sized for a much larger level. Displayed
-height is calibrated so one upright physics horse represents a typical 1.55m
-riding horse. After the TIME UP beat, the result counts upward in meters and in
-hands (4 inches each), stacking one horse emoji per hand before revealing the
-final score; a column wraps after nine so a full column always fits its frame.
-
-Game chrome stays out of the way. The numeric scoreboard is hidden, the in-viewer
-copy is not selectable, the gesture that starts a run cannot also spend its first
-object, and the "Place object" prompt retires once the player has placed one. The
-viewer is sized against the viewport height and comes first in the stacked layout, so
-the game is on screen when the page opens rather than below the pitch. While a run is
-live the whole page is the play surface: aiming and placing follow the pointer
-anywhere, so a fast click that lands beside the viewer still counts. Buttons and links
-keep their own behaviour.
-
 ## Run locally
 
 ```bash

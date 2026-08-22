@@ -89,13 +89,16 @@ export const HORSE_MAX_ACTIVE_PINS = 10;
 const HORSE_NORMAL_LINEAR_DAMPING = 0.12;
 const HORSE_NORMAL_ANGULAR_DAMPING = 0.18;
 const HORSE_MIDDLE_LINEAR_DAMPING = 0.32;
-const HORSE_MIDDLE_ANGULAR_DAMPING = 0.9;
+const HORSE_MIDDLE_ANGULAR_DAMPING = 1.2;
 const HORSE_BASE_LINEAR_DAMPING = 0.52;
-const HORSE_BASE_ANGULAR_DAMPING = 2.1;
+const HORSE_BASE_ANGULAR_DAMPING = 3.2;
 const HORSE_MIDDLE_MASS_SCALE = 1.75;
 const HORSE_BASE_MASS_SCALE = 3.2;
-const HORSE_MIDDLE_INERTIA_SCALE = 2.8;
-const HORSE_BASE_INERTIA_SCALE = 6.4;
+// Inertia intentionally grows faster than mass. This is an arcade-weighted
+// foundation: lower horses can still rotate, but an impact has a much harder
+// time starting a tip than it does at the loose top of the pile.
+const HORSE_MIDDLE_INERTIA_SCALE = 3.6;
+const HORSE_BASE_INERTIA_SCALE = 8.2;
 const HORSE_MIDDLE_LEVEL_DEPTH = 2;
 const HORSE_BASE_LEVEL_DEPTH = 4.5;
 

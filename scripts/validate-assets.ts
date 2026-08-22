@@ -56,7 +56,10 @@ for (const model of models) {
       `${model.name} imported ${meshCount} meshes and ${vertexCount} vertices; expected ${model.expectedMeshes} non-empty meshes`,
     );
   }
-  if (model.name === 'farm') validateFarmProps(nodesByName);
+  if (model.name === 'farm') {
+    validateFarmProps(nodesByName);
+    validateWindmillSails(nodesByName);
+  }
 
   console.log(
     `${model.name}: ${meshCount} meshes, ${nodeCount} nodes, ${Math.round(vertexCount).toLocaleString('en-US')} vertices`,
@@ -143,6 +146,40 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
       );
     }
   }
+}
+
+// main.ts spins Object_6 about mesh-space X through the midpoint of its Y/Z bounds.
+// That is only the hub if the sails really are a disc facing along X, so assert the
+// shape the spin depends on rather than trusting the node name alone.
+function validateWindmillSails(nodesByName: ReadonlyMap<string, Node3D>): void {
+  const node = nodesByName.get('Object_6');
+  if (node === undefined || node.kind !== MeshKind) {
+    throw new Error('windmill sails: mesh Object_6 is missing');
+  }
+  const mesh = node as Mesh;
+  const materialName = mesh.materials[0]?.name;
+  if (materialName !== 'Windmill2') {
+    throw new Error(
+      `windmill sails: Object_6 uses ${materialName ?? 'no material'}, expected Windmill2`,
+    );
+  }
+  const bounds = { max: [-Infinity, -Infinity, -Infinity], min: [Infinity, Infinity, Infinity] };
+  includeGeometryBounds(bounds, mesh, Array.from(mesh.geometry.indices ?? []));
+  const extents = bounds.max.map((maximum, axis) => maximum - (bounds.min[axis] ?? maximum));
+  const [shaft, discY, discZ] = [extents[0] ?? 0, extents[1] ?? 0, extents[2] ?? 0];
+  if (Math.abs(discY - discZ) > discY * 0.05) {
+    throw new Error(
+      `windmill sails: Y/Z extents ${discY.toFixed(2)} x ${discZ.toFixed(2)} are not a disc, so mesh-space X is not the spin axis`,
+    );
+  }
+  if (shaft >= discY) {
+    throw new Error(
+      `windmill sails: shaft extent ${shaft.toFixed(2)} is not shorter than the disc ${discY.toFixed(2)}`,
+    );
+  }
+  console.log(
+    `farm windmill sails: disc ${discY.toFixed(2)} x ${discZ.toFixed(2)} about mesh-space X (shaft ${shaft.toFixed(2)}), hub at Y ${(((bounds.min[1] ?? 0) + (bounds.max[1] ?? 0)) / 2).toFixed(2)}, Z ${(((bounds.min[2] ?? 0) + (bounds.max[2] ?? 0)) / 2).toFixed(2)}`,
+  );
 }
 
 function includeGeometryBounds(

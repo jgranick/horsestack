@@ -140,6 +140,9 @@ const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
 // the camera target keeps the whole marker visible; it costs a sliver of pasture at
 // the bottom, where there is margin to spare.
 const LANDING_MARKER_HEADROOM = 0.075;
+// One lazy turn every fourteen seconds. The sails are ambient scenery, so this is
+// slow enough to read as idling wind rather than as something demanding attention.
+const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
 // Long enough to swallow the second half of a double-click on "Start stacking",
 // short enough that a player who reacts to the first preview never notices it.
 const START_INPUT_GUARD_MS = 400;
@@ -381,6 +384,12 @@ let phase: GamePhase = 'loading';
 let placementArmedAt = 0;
 let horseTemplate: Scene3D | null = null;
 const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
+// The farm's sail assembly, spun in place each frame. Null until the farm mounts.
+let windmillSails: Node3D | null = null;
+// Centre of the sail disc in the mesh's own space, on the Y/Z axes it turns within.
+let windmillHubY = 0;
+let windmillHubZ = 0;
+let windmillAngle = 0;
 let landingGhost: Node3D | null = null;
 let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
@@ -432,6 +441,7 @@ async function start(): Promise<void> {
     ]);
 
     extractFarmPropTemplates(farm);
+    bindWindmillSails(farm);
     mountFarm(farm);
     horseTemplate = horse;
     phase = 'ready';
@@ -446,6 +456,46 @@ async function start(): Promise<void> {
   } catch (error) {
     showSceneError('Unable to load Horse Stacker.', error);
   }
+}
+
+// The farm is flattened by material, and the sails are their own layer: Object_6 holds
+// the whole rotor, Object_18 the tower it sits on. In the source's Z-up space the rotor's
+// Y and Z extents match (a disc), and X is the shaft it turns about — so it spins around
+// mesh-space X, centred on the disc's Y/Z midpoint. Rotating about a point off the node
+// origin needs no reparenting: for a rotation R about an axis through `hub`, the plain
+// TRS position that reproduces it is hub - R*hub, and the shaft-axis component cancels.
+function bindWindmillSails(farm: Readonly<Scene3D>): void {
+  const sails = findNodeByName(farm.root, 'Object_6');
+  if (sails === null || !isMesh(sails)) {
+    throw new Error('Windmill sail mesh Object_6 was not imported');
+  }
+  const materialName = sails.materials[0]?.name;
+  if (materialName !== 'Windmill2') {
+    throw new Error(
+      `Windmill sail mesh Object_6 uses ${materialName ?? 'no material'}, expected Windmill2`,
+    );
+  }
+  refreshMeshGeometryBounds(sails.geometry);
+  const bounds = sails.geometry.bounds;
+  if (bounds === null) throw new Error('Windmill sail mesh has no bounds');
+  windmillHubY = (bounds.min.y + bounds.max.y) / 2;
+  windmillHubZ = (bounds.min.z + bounds.max.z) / 2;
+  windmillSails = sails;
+  windmillAngle = 0;
+  updateWindmill(0);
+}
+
+function updateWindmill(deltaTime: number): boolean {
+  const sails = windmillSails;
+  if (sails === null || reducedMotion.matches) return false;
+  windmillAngle = (windmillAngle + WINDMILL_RADIANS_PER_SECOND * deltaTime) % (Math.PI * 2);
+  const sin = Math.sin(windmillAngle);
+  const cos = Math.cos(windmillAngle);
+  setQuaternionFromEuler(sails.rotation, windmillAngle, 0, 0);
+  sails.position.y = windmillHubY - (windmillHubY * cos - windmillHubZ * sin);
+  sails.position.z = windmillHubZ - (windmillHubY * sin + windmillHubZ * cos);
+  invalidateNodeLocalTransform(sails);
+  return true;
 }
 
 function mountFarm(model: Scene3D): void {
@@ -1311,6 +1361,8 @@ function enterFrame(now: number): void {
     if (phase === 'finished' && resultAnimationStart !== 0) {
       updateResultAnimation(now);
     }
+
+    if (updateWindmill(deltaTime)) renderRequested = true;
 
     const dustIsMoving = dustEmitter.data.particleCount > 0;
     const celebrationIsMoving = celebrationEmitter.data.particleCount > 0;

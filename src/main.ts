@@ -159,9 +159,9 @@ const GAME_VIEW = {
   maxDistance: 3.4,
   minDistance: 0.78,
   minPolar: 0.14,
-  polar: 0.34,
+  polar: 0.42,
   smoothTime: 0.2,
-  target: createVector3(STACK_X, 0.1, STACK_Z),
+  target: createVector3(STACK_X, 0.055, STACK_Z),
 } as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
@@ -996,15 +996,22 @@ function updateCamera(deltaTime: number, height: number): void {
   const rise = clamp(height / 1.1, 0, 1);
   const herdProgress = clamp(horsesDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
+  const stackTop = Math.max(restingHorseTop, height);
+  // Frame the useful pasture-to-placement interval instead of centering the
+  // empty air above the newest horse. The focus rises from 44% to 54% of the
+  // stack so the ground remains visible even when the pile gets tall.
+  const groundFocus = 0.44 + rise * 0.1;
   const desiredTargetY =
-    STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
+    STACK_BASE_Y +
+    PASTURE_TOP_Y +
+    (stackTop - PASTURE_TOP_Y) * groundFocus;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
   cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
   cameraController.target.z = STACK_Z;
   cameraController.goalAzimuth = Math.PI / 2 + rise * 0.08 + herdProgress * 0.02;
-  cameraController.goalPolar = 0.32 + rise * 0.12;
+  cameraController.goalPolar = 0.42 + rise * 0.08;
   cameraController.goalDistance = Math.min(3.25, 0.95 + height * 0.88 + herdProgress * 0.28);
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
@@ -1139,9 +1146,9 @@ function setAimFromClientPoint(clientX: number, clientY: number, now: number): v
     return;
   }
 
-  // Aim on a horizontal slice through the camera's current focus at the pile
-  // top. This keeps screen center pinned to the center of the placement field
-  // while making vertical pointer motion move toward or away from the camera.
+  // Aim on a horizontal slice through the camera's current lower-stack focus.
+  // This keeps screen center pinned to the useful placement field while making
+  // vertical pointer motion move toward or away from the camera.
   placementPlane.d = -cameraController.target.y;
   if (!intersectCamera3DRayWithPlane(placementHit, placementRay, placementPlane)) return;
 

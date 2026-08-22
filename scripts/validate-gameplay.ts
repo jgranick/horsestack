@@ -70,7 +70,7 @@ console.log(
       ({ brokenLassos, contacts, depthSpread, hands, heightMeters, inPasture, lassos, name }) =>
         `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${lassos} lassos/${brokenLassos} snapped, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; sparse arcade lassos, progressive stability, exact placement, yaw poses, horse-height calibration, and farm-edge falloff verified`,
+    .join('; ')}; bounded arcade glue, progressive stability, exact placement, yaw poses, horse-height calibration, and farm-edge falloff verified`,
 );
 
 function runScenario(
@@ -145,8 +145,8 @@ function runScenario(
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
-  if (lassos < VALIDATION_HORSES / 2 || lassos > VALIDATION_HORSES * 2) {
-    throw new Error(`${name}: expected a sparse but dependable lasso tree, received ${lassos}`);
+  if (lassos < VALIDATION_HORSES * 1.25 || lassos > VALIDATION_HORSES * 2) {
+    throw new Error(`${name}: expected aggressively sticky lasso coverage, received ${lassos}`);
   }
   if (world.joints.length > HORSE_MAX_ACTIVE_LASSOS) {
     throw new Error(
@@ -181,6 +181,7 @@ function validateArcadePilePhysics(): void {
     lasso === undefined ||
     lasso.kind !== 'Distance' ||
     !lasso.enableSpring ||
+    lasso.frequencyHz < 8 ||
     !lasso.collideConnected ||
     !Number.isFinite(lasso.breakForce)
   ) {

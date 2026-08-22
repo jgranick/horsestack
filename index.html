@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A chaotic low-poly horse stacking game powered by Flight 3D physics."
+      content="A chaotic low-poly horse stacking game powered by Flight 2D physics."
     />
     <link
       rel="icon"
@@ -32,13 +32,14 @@
           <p class="eyebrow"><span>01</span> Experimental agriculture</p>
           <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
           <p class="lede">
-            Thirty permanently spent horses. Sixty frantic seconds. Settle them or lose them.
+            Unlimited horses. Sixty frantic seconds. Aim the glow, build upward, embrace the
+            consequences.
           </p>
 
           <div class="scoreboard" aria-label="Game status">
             <div class="score-cell">
-              <span class="score-label">Herd left</span>
-              <strong id="horses-left">30</strong>
+              <span class="score-label">Horses placed</span>
+              <strong id="horses-left">0</strong>
             </div>
             <div class="score-cell timer-cell">
               <span class="score-label">Time left</span>
@@ -49,7 +50,7 @@
               <span class="score-label">Height</span>
               <strong id="stack-height">0.00 m</strong>
             </div>
-            <div class="score-cell pace-cell" hidden>
+            <div class="score-cell pace-cell">
               <span class="score-label">Score</span>
               <strong id="pace-copy">0 pts</strong>
             </div>
@@ -58,8 +59,8 @@
           <div class="interaction-note">
             <span class="interaction-icon" aria-hidden="true"><span></span></span>
             <span>
-              <strong>Preview the exact landing</strong>
-              Gold horse is the placed pose · Small ring marks first contact · Click, tap, Space or Enter
+              <strong>Balance the radiant marker</strong>
+              Move gently to stay level · Fast movement teeters · Click, tap, Space or Enter to place
             </span>
           </div>
         </section>
@@ -71,21 +72,24 @@
               <p id="loading-copy">Herding the horses…</p>
             </div>
 
-            <div class="game-panel start-panel flight-ui-mirror" id="start-panel" hidden>
-              <p class="panel-kicker">Flight 3D physics presents</p>
+            <div class="game-panel start-panel" id="start-panel" hidden>
+              <p class="panel-kicker">Flight 2D physics presents</p>
               <h2>Ready to make<br />poor choices?</h2>
-              <p>You have 30 horses and 60 seconds. Keep each one still long enough to stick.</p>
+              <p>You have 60 seconds and all the horses you can place. Build the tallest pile.</p>
               <button type="button" id="start-button" disabled>Start stacking</button>
             </div>
 
-            <div class="game-panel time-up-panel flight-ui-mirror" id="time-up-panel" hidden role="status" aria-live="assertive">
+            <div class="game-panel time-up-panel" id="time-up-panel" hidden role="status" aria-live="assertive">
               <p class="panel-kicker">Hands off the herd</p>
-              <h2 id="time-up-title">TIME UP!</h2>
-              <p id="time-up-copy">Hold everything. The pasture is counting.</p>
+              <h2>TIME<br />UP!</h2>
+              <p>Hold everything. The pasture is counting.</p>
             </div>
 
-            <div class="game-panel result-panel flight-ui-mirror" id="result-panel" hidden aria-live="polite">
+            <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
               <p class="panel-kicker">Official-ish height</p>
+              <div class="horse-tally" aria-hidden="true">
+                <div class="horse-hand-stack" id="result-horse-stack"></div>
+              </div>
               <p class="result-hand-line"><strong id="result-hand-count">0</strong> hands high</p>
               <h2><span id="result-score">0.00 m</span></h2>
               <p id="result-copy">The pasture is still assessing the situation.</p>
@@ -97,9 +101,9 @@
               <button type="button" id="retry-button">Try again</button>
             </div>
 
-            <div class="game-callout flight-ui-mirror-text" id="game-callout" aria-live="off">Awaiting horses…</div>
+            <div class="game-callout" id="game-callout" aria-live="off">Awaiting horses…</div>
 
-            <div class="hero-timer flight-ui-mirror-text" id="hero-timer" aria-hidden="true">
+            <div class="hero-timer" id="hero-timer" aria-hidden="true">
               <span>Time left</span>
               <strong id="hero-timer-copy">60</strong>
             </div>
@@ -109,12 +113,13 @@
               Start over
             </button>
 
-            <button class="drop-horse" id="drop-horse" type="button" disabled hidden>
+            <button class="drop-horse" id="drop-horse" type="button" disabled>
               Place horse
+              <span aria-hidden="true">↓</span>
             </button>
 
-            <div class="viewer-label flight-ui-mirror-text" aria-hidden="true">
-              <span>Flight Physics 3D</span>
+            <div class="viewer-label" aria-hidden="true">
+              <span>Flight Physics 2D</span>
               <span>60-second pile protocol</span>
             </div>
           </div>

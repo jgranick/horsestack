@@ -206,14 +206,9 @@ h1 em {
   max-width: 440px;
   margin-top: 36px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
-}
-
-.score-cell[hidden],
-.drop-horse[hidden] {
-  display: none !important;
 }
 
 .score-cell {
@@ -1055,121 +1050,4 @@ h1 em {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/*
- * Flight Scene2D owns the visible in-game interface. These DOM elements remain
- * as semantic live regions and keyboard/touch hit targets, but do not paint a
- * second UI over the hardware-rendered one.
- */
-.flight-ui-mirror-text {
-  display: none;
-}
-
-.game-panel.flight-ui-mirror {
-  display: block;
-  padding: 0;
-  color: transparent;
-  background: transparent;
-  backdrop-filter: none;
-  pointer-events: none;
-  animation: none;
-}
-
-.game-panel.flight-ui-mirror[hidden] {
-  display: none;
-}
-
-.game-panel.flight-ui-mirror::before {
-  display: none;
-}
-
-.flight-ui-mirror > :not(button) {
-  width: 1px !important;
-  height: 1px !important;
-  margin: -1px !important;
-  padding: 0 !important;
-  position: absolute !important;
-  overflow: hidden !important;
-  clip: rect(0 0 0 0) !important;
-  clip-path: inset(50%) !important;
-  white-space: nowrap !important;
-}
-
-.flight-ui-mirror button,
-.restart-game,
-.drop-horse {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  opacity: 0.001;
-  border: 0;
-  border-radius: 0;
-  color: transparent;
-  background: transparent;
-  box-shadow: none;
-  pointer-events: auto;
-  transform: none;
-  transition: none;
-}
-
-.flight-ui-mirror button:hover,
-.flight-ui-mirror button:focus-visible,
-.restart-game:hover,
-.restart-game:focus-visible,
-.drop-horse:hover,
-.drop-horse:focus-visible {
-  opacity: 0.001;
-  color: transparent;
-  background: transparent;
-  transform: none;
-}
-
-.flight-ui-mirror button:focus-visible,
-.restart-game:focus-visible,
-.drop-horse:focus-visible {
-  outline: 3px solid #ffd166;
-  outline-offset: 3px;
-}
-
-.start-panel #start-button {
-  width: 182px;
-  height: 44px;
-  position: absolute;
-  top: calc(50% + 48px);
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.result-panel #replay-button {
-  width: 164px;
-  height: 42px;
-  position: absolute;
-  right: auto;
-  bottom: 34px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.restart-game {
-  width: 118px;
-  height: 34px;
-}
-
-.drop-horse {
-  width: 168px;
-  height: 46px;
-  right: 50%;
-  bottom: 22px;
-  display: block;
-  transform: translateX(50%);
-}
-
-.drop-horse:disabled {
-  pointer-events: none;
-}
-
-.viewer.is-playing .drop-horse:not(:disabled) {
-  opacity: 0.001;
-  transform: translateX(50%);
 }

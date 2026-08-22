@@ -1,15 +1,20 @@
-import type { RigidBody2D } from '@flighthq/sdk';
+import type { RigidBody3D } from '@flighthq/sdk';
 import {
   addHorseBody,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
+  getHorseTopY,
+  getHorseVerticalExtent,
   getNextHorseDelay,
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
+  HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  isHorseWithinPasture,
   PASTURE_HALF_WIDTH,
+  PASTURE_FRONT_DEPTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
   stepHorseStack,
@@ -18,6 +23,7 @@ import {
 
 interface ScenarioResult {
   contacts: number;
+  depthSpread: number;
   hands: number;
   heightMeters: number;
   inPasture: number;
@@ -35,12 +41,13 @@ const scenarios = [
 validateStableActivation();
 validateHeightCalibration();
 validateFarmEdgeFalloff();
+validateFarmDepthFalloff();
 
 console.log(
   `gameplay: ${scenarios
     .map(
-      ({ contacts, hands, heightMeters, inPasture, name }) =>
-        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${heightMeters.toFixed(2)}m/${hands} hands`,
+      ({ contacts, depthSpread, hands, heightMeters, inPasture, name }) =>
+        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
     .join('; ')}; horse-height calibration and farm-edge falloff verified`,
 );
@@ -52,7 +59,7 @@ function runScenario(
   inputCadence: number,
 ): ScenarioResult {
   const world = createHorseStackWorld();
-  const horses: RigidBody2D[] = [];
+  const horses: RigidBody3D[] = [];
   const random = mulberry32(seed);
   const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
 
@@ -64,12 +71,15 @@ function runScenario(
     const horse = addHorseBody(
       world,
       x,
-      landingSurfaceY + getVerticalExtent(angle),
+      landingSurfaceY + getHorseVerticalExtent(angle),
       angle,
     );
     horse.velocityX = 0;
     horse.velocityY = 0;
-    horse.angularVelocity = 0;
+    horse.velocityZ = 0;
+    horse.angularVelocityX = 0;
+    horse.angularVelocityY = 0;
+    horse.angularVelocityZ = 0;
     horses.push(horse);
 
     if (index === VALIDATION_HORSES - 1) continue;
@@ -81,8 +91,9 @@ function runScenario(
 
   const stackTopY = getSupportedStackHeight(world, horses);
   const heightMeters = getStackHeightMeters(stackTopY);
+  const depthSpread = horses.reduce((spread, horse) => Math.max(spread, Math.abs(horse.x)), 0);
   const inPasture = horses.filter(
-    (horse) => Math.abs(horse.x) <= PASTURE_HALF_WIDTH && horse.y > -1,
+    (horse) => isHorseWithinPasture(horse) && horse.y > -1,
   ).length;
   if (inPasture < VALIDATION_HORSES / 2) {
     throw new Error(`${name}: expected at least half the herd in the farm, received ${inPasture}`);
@@ -94,9 +105,13 @@ function runScenario(
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
+  if (depthSpread < 0.001) {
+    throw new Error(`${name}: expected compound contacts to create out-of-plane motion`);
+  }
 
   return {
     contacts: world.contacts.length,
+    depthSpread,
     hands: getStackHeightHands(stackTopY),
     heightMeters,
     inPasture,
@@ -110,10 +125,17 @@ function validateStableActivation(): void {
   const horse = addHorseBody(
     world,
     0,
-    PASTURE_TOP_Y + getVerticalExtent(angle),
+    PASTURE_TOP_Y + getHorseVerticalExtent(angle),
     angle,
   );
-  if (horse.velocityX !== 0 || horse.velocityY !== 0 || horse.angularVelocity !== 0) {
+  if (
+    horse.velocityX !== 0 ||
+    horse.velocityY !== 0 ||
+    horse.velocityZ !== 0 ||
+    horse.angularVelocityX !== 0 ||
+    horse.angularVelocityY !== 0 ||
+    horse.angularVelocityZ !== 0
+  ) {
     throw new Error(
       'stable placement: a placed horse must activate without linear or angular impulse',
     );
@@ -136,42 +158,46 @@ function validateHeightCalibration(): void {
   }
 }
 
-function getPlacementSurfaceY(horses: readonly RigidBody2D[], x: number): number {
+function getPlacementSurfaceY(horses: readonly RigidBody3D[], x: number): number {
   let surfaceY = PASTURE_TOP_Y;
   const horizontalReach = HORSE_HALF_WIDTH * 1.85;
   for (const horse of horses) {
     if (
       horse.y < PASTURE_TOP_Y ||
-      Math.abs(horse.x - x) > horizontalReach ||
+      Math.abs(horse.z + x) > horizontalReach ||
+      Math.abs(horse.x) > HORSE_HALF_DEPTH * 2.4 ||
       Math.abs(horse.velocityY) > 1.2
     ) {
       continue;
     }
-    surfaceY = Math.max(surfaceY, horse.y + getVerticalExtent(horse.angle));
+    surfaceY = Math.max(surfaceY, getHorseTopY(horse));
   }
   return surfaceY;
-}
-
-function getVerticalExtent(angle: number): number {
-  return (
-    Math.abs(Math.cos(angle)) * HORSE_HALF_HEIGHT +
-    Math.abs(Math.sin(angle)) * HORSE_HALF_WIDTH
-  );
 }
 
 function validateFarmEdgeFalloff(): void {
   const world = createHorseStackWorld();
   const horse = addHorseBody(world, PASTURE_HALF_WIDTH - HORSE_HALF_WIDTH, 0.2, 0);
-  horse.velocityX = 1.4;
+  horse.velocityZ = -1.4;
   stepForDuration(world, [horse], 1);
   if (horse.y >= -0.1) {
     throw new Error(`farm edge: expected a horse to fall into the void, received y=${horse.y}`);
   }
 }
 
+function validateFarmDepthFalloff(): void {
+  const world = createHorseStackWorld();
+  const horse = addHorseBody(world, 0, 0.2, 0, PASTURE_FRONT_DEPTH - HORSE_HALF_WIDTH);
+  horse.velocityX = 1.4;
+  stepForDuration(world, [horse], 1);
+  if (horse.y >= -0.1) {
+    throw new Error(`farm depth edge: expected a horse to fall into the void, received y=${horse.y}`);
+  }
+}
+
 function stepForDuration(
   world: ReturnType<typeof createHorseStackWorld>,
-  horses: readonly RigidBody2D[],
+  horses: readonly RigidBody3D[],
   seconds: number,
 ): void {
   for (let step = 0; step < Math.ceil(seconds / PHYSICS_STEP); step++) {
@@ -180,20 +206,32 @@ function stepForDuration(
   }
 }
 
-function assertFiniteBodies(bodies: readonly RigidBody2D[]): void {
+function assertFiniteBodies(bodies: readonly RigidBody3D[]): void {
   for (let index = 0; index < bodies.length; index++) {
     const horse = bodies[index];
     if (horse === undefined) continue;
-    const values = [
-      horse.x,
-      horse.y,
-      horse.angle,
-      horse.velocityX,
-      horse.velocityY,
-      horse.angularVelocity,
-    ];
-    if (values.some((value) => !Number.isFinite(value))) {
-      throw new Error(`Horse ${index + 1} produced non-finite physics state`);
+    const values = {
+      angularVelocityX: horse.angularVelocityX,
+      angularVelocityY: horse.angularVelocityY,
+      angularVelocityZ: horse.angularVelocityZ,
+      orientationW: horse.orientationW,
+      orientationX: horse.orientationX,
+      orientationY: horse.orientationY,
+      orientationZ: horse.orientationZ,
+      velocityX: horse.velocityX,
+      velocityY: horse.velocityY,
+      velocityZ: horse.velocityZ,
+      x: horse.x,
+      y: horse.y,
+      z: horse.z,
+    };
+    const invalidFields = Object.entries(values).filter(([, value]) => !Number.isFinite(value));
+    if (invalidFields.length > 0) {
+      throw new Error(
+        `Horse ${index + 1} produced non-finite physics state: ${invalidFields
+          .map(([field, value]) => `${field}=${value}`)
+          .join(', ')}`,
+      );
     }
   }
 }

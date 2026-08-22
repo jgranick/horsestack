@@ -5,9 +5,9 @@ import type {
   ParticleEmitter3D,
   ParticleEmitterConfig,
   ParticleEmitterState,
-  Physics2DWorld,
+  Physics3DWorld,
   PointLight,
-  RigidBody2D,
+  RigidBody3D,
   Scene3D,
   Scene3DLightsLike,
 } from '@flighthq/sdk';
@@ -50,7 +50,7 @@ import {
   registerGlStandardPbrMaterial,
   registerStandardGlTextureResolvers,
   removeNodeChildren,
-  removePhysics2DBody,
+  removePhysics3DBody,
   renderGlBackground,
   setNode3DAlpha,
   setNodeLocalMatrix4,
@@ -69,11 +69,15 @@ import {
   FINAL_SETTLE_SECONDS,
   getNextHorseDelay,
   getPaceLevel,
+  getHorseTopY,
+  getHorseVerticalExtent,
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
+  HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  isHorseWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
@@ -96,7 +100,7 @@ interface ActiveHorse {
 }
 
 interface StackedHorse {
-  body: RigidBody2D;
+  body: RigidBody3D;
   lost: boolean;
   node: Node3D;
 }
@@ -350,7 +354,7 @@ let phase: GamePhase = 'loading';
 let horseTemplate: Scene3D | null = null;
 let landingGhost: Node3D | null = null;
 let landingRadiance: Node3D | null = null;
-let physicsWorld: Physics2DWorld = createHorseStackWorld();
+let physicsWorld: Physics3DWorld = createHorseStackWorld();
 let activeHorse: ActiveHorse | null = null;
 let stackedHorses: StackedHorse[] = [];
 let horsesDropped = 0;
@@ -381,7 +385,7 @@ let renderRequested = true;
 let impactFlashUntil = 0;
 let lastImpactAt = 0;
 let hudDirty = true;
-const measurementBodies: RigidBody2D[] = [];
+const measurementBodies: RigidBody3D[] = [];
 const inputBounds = { left: 0, width: 1 };
 
 bindGameControls();
@@ -627,9 +631,12 @@ function commitHorsePlacement(now: number): void {
   const body = addHorseBody(physicsWorld, current.x, landingY, current.angle);
   body.velocityX = 0;
   body.velocityY = 0;
-  body.angularVelocity = 0;
+  body.velocityZ = 0;
+  body.angularVelocityX = 0;
+  body.angularVelocityY = 0;
+  body.angularVelocityZ = 0;
   const node = createHorseVisual();
-  setHorseVisualTransform(node, current.x, landingY, current.angle);
+  setHorseVisualPlacement(node, current.x, landingY, current.angle);
   addNodeChild(horseLayer, node);
   stackedHorses.push({ body, lost: false, node });
   activeHorse = null;
@@ -696,7 +703,7 @@ function finishGame(now: number): void {
   cachedStackHeight = finalHeight;
   finalSurvivors = stackedHorses.filter(
     ({ body, lost }) =>
-      !lost && body.y > -1 && Math.abs(body.x) <= PASTURE_HALF_WIDTH + HORSE_HALF_WIDTH,
+      !lost && body.y > -1 && isHorseWithinPasture(body, HORSE_HALF_WIDTH),
   ).length;
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
@@ -805,9 +812,9 @@ function handlePhysicsContacts(now: number): void {
     dustState,
     dustConfig,
     8,
-    STACK_X,
+    STACK_X + point.x,
     STACK_BASE_Y + point.y,
-    STACK_Z - point.x,
+    STACK_Z + point.z,
     0xe8d6a9cc,
   );
   maybePlayCollisionWhinny(now);
@@ -820,14 +827,14 @@ function synchronizeHorseVisuals(): void {
     const body = horse.body;
 
     // Leave enough void beyond the collider for the whole tumble to remain visible.
-    if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
+    if (body.y < -1 || !isHorseWithinPasture(body, 1.5)) {
       horse.lost = true;
       horse.node.enabled = false;
-      removePhysics2DBody(physicsWorld, body);
+      removePhysics3DBody(physicsWorld, body);
       continue;
     }
 
-    setHorseVisualTransform(horse.node, body.x, body.y, body.angle);
+    setHorseVisualFromBody(horse.node, body);
     stackedHorses[retainedCount++] = horse;
   }
   // Fallen horses have already left the physics world and score calculation;
@@ -849,7 +856,7 @@ function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
   }
   setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
   const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle);
-  setHorseVisualTransform(landingGhost, previewX, previewY, current.angle);
+  setHorseVisualPlacement(landingGhost, previewX, previewY, current.angle);
   updateLandingRadiance(previewX, previewY, now);
 }
 
@@ -882,29 +889,38 @@ function getLandingSurfaceY(x: number): number {
     if (
       horse.lost ||
       body.y < PASTURE_TOP_Y ||
-      Math.abs(body.x - x) > horizontalReach ||
+      Math.abs(body.z + x) > horizontalReach ||
+      Math.abs(body.x) > HORSE_HALF_DEPTH * 2.4 ||
       Math.abs(body.velocityY) > 1.2
     ) {
       continue;
     }
-    const horseTop = body.y + getHorseVerticalExtent(body.angle);
-    surfaceY = Math.max(surfaceY, horseTop);
+    surfaceY = Math.max(surfaceY, getHorseTopY(body));
   }
   return surfaceY;
 }
 
-function getHorseVerticalExtent(angle: number): number {
-  return (
-    Math.abs(Math.cos(angle)) * HORSE_HALF_HEIGHT +
-    Math.abs(Math.sin(angle)) * HORSE_HALF_WIDTH
-  );
-}
-
-function setHorseVisualTransform(node: Node3D, x: number, physicsY: number, angle: number): void {
+function setHorseVisualPlacement(
+  node: Node3D,
+  lateral: number,
+  physicsY: number,
+  angle: number,
+): void {
   node.position.x = STACK_X;
   node.position.y = STACK_BASE_Y + physicsY;
-  node.position.z = STACK_Z - x;
+  node.position.z = STACK_Z - lateral;
   setQuaternionFromEuler(node.rotation, angle, 0, 0);
+  invalidateNodeLocalTransform(node);
+}
+
+function setHorseVisualFromBody(node: Node3D, body: Readonly<RigidBody3D>): void {
+  node.position.x = STACK_X + body.x;
+  node.position.y = STACK_BASE_Y + body.y;
+  node.position.z = STACK_Z + body.z;
+  node.rotation.x = body.orientationX;
+  node.rotation.y = body.orientationY;
+  node.rotation.z = body.orientationZ;
+  node.rotation.w = body.orientationW;
   invalidateNodeLocalTransform(node);
 }
 

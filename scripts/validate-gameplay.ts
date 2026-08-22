@@ -1,6 +1,7 @@
-import type { RigidBody3D } from '@flighthq/sdk';
+import type { Physics3DDistanceJoint, RigidBody3D } from '@flighthq/sdk';
 import {
   addHorseBody,
+  attachHorseToPile,
   createHorsePlacementResult,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
@@ -16,6 +17,7 @@ import {
   HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  HORSE_MAX_ACTIVE_LASSOS,
   HORSE_PLACEMENT_ANGLES,
   HORSE_PLACEMENT_YAWS,
   HORSE_VISUAL_HALF_DEPTH,
@@ -25,17 +27,24 @@ import {
   PASTURE_TOP_Y,
   PHYSICS_STEP,
   resolveHorsePlacement,
+  stabilizeHorseStack,
   stepHorseStack,
   TYPICAL_HORSE_WITHERS_METERS,
 } from '../src/horseStackPhysics';
 
 interface ScenarioResult {
+  brokenLassos: number;
   contacts: number;
   depthSpread: number;
   hands: number;
   heightMeters: number;
   inPasture: number;
+  lassos: number;
   name: string;
+}
+
+interface SimulationStats {
+  brokenLassos: number;
 }
 
 const TARGET_HALF_WIDTH = 0.32;
@@ -48,6 +57,7 @@ const scenarios = [
   runScenario('random orientations', 0x52414e44, 0, 0.1, true),
 ];
 validateStableActivation();
+validateArcadePilePhysics();
 validatePlacementOrientations();
 validateExactPlacementPreview();
 validateHeightCalibration();
@@ -57,10 +67,10 @@ validateFarmDepthFalloff();
 console.log(
   `gameplay: ${scenarios
     .map(
-      ({ contacts, depthSpread, hands, heightMeters, inPasture, name }) =>
-        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
+      ({ brokenLassos, contacts, depthSpread, hands, heightMeters, inPasture, lassos, name }) =>
+        `${name} ${inPasture}/${VALIDATION_HORSES} in farm, ${lassos} lassos/${brokenLassos} snapped, ${contacts} contacts, ${depthSpread.toFixed(3)} depth spread, ${heightMeters.toFixed(2)}m/${hands} hands`,
     )
-    .join('; ')}; exact placement, yaw poses, horse-height calibration, and farm-edge falloff verified`,
+    .join('; ')}; sparse arcade lassos, progressive stability, exact placement, yaw poses, horse-height calibration, and farm-edge falloff verified`,
 );
 
 function runScenario(
@@ -75,6 +85,8 @@ function runScenario(
   const random = mulberry32(seed);
   const horizontalLimit = TARGET_HALF_WIDTH * 0.85;
   const placement = createHorsePlacementResult();
+  const simulationStats: SimulationStats = { brokenLassos: 0 };
+  let lassos = 0;
 
   for (let index = 0; index < VALIDATION_HORSES; index++) {
     const horseSeed = random() * Math.PI * 2;
@@ -102,14 +114,16 @@ function runScenario(
     horse.angularVelocityX = 0;
     horse.angularVelocityY = 0;
     horse.angularVelocityZ = 0;
+    lassos += attachHorseToPile(world, horse, placement, random);
+    stabilizeHorseStack(world);
     horses.push(horse);
 
     if (index === VALIDATION_HORSES - 1) continue;
     const delaySeconds = getNextHorseDelay(index + 1) / 1000;
-    stepForDuration(world, horses, inputCadence + delaySeconds);
+    stepForDuration(world, horses, inputCadence + delaySeconds, simulationStats);
   }
 
-  stepForDuration(world, horses, FINAL_SETTLE_SECONDS);
+  stepForDuration(world, horses, FINAL_SETTLE_SECONDS, simulationStats);
 
   const stackTopY = getSupportedStackHeight(world, horses);
   const heightMeters = getStackHeightMeters(stackTopY);
@@ -131,15 +145,57 @@ function runScenario(
     );
   }
   if (world.contacts.length === 0) throw new Error(`${name}: expected contacts`);
+  if (lassos < VALIDATION_HORSES / 2 || lassos > VALIDATION_HORSES * 2) {
+    throw new Error(`${name}: expected a sparse but dependable lasso tree, received ${lassos}`);
+  }
+  if (world.joints.length > HORSE_MAX_ACTIVE_LASSOS) {
+    throw new Error(
+      `${name}: active lasso cap exceeded (${world.joints.length}/${HORSE_MAX_ACTIVE_LASSOS})`,
+    );
+  }
 
   return {
+    brokenLassos: simulationStats.brokenLassos,
     contacts: world.contacts.length,
     depthSpread,
     hands: getStackHeightHands(stackTopY),
     heightMeters,
     inPasture,
+    lassos,
     name,
   };
+}
+
+function validateArcadePilePhysics(): void {
+  const world = createHorseStackWorld();
+  const placement = createHorsePlacementResult();
+  resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
+  const support = addHorseBody(world, 0, placement.centerY, 0);
+  resolveHorsePlacement(placement, world, 0, 0, 0, 0, 0.5);
+  const horse = addHorseBody(world, 0, placement.centerY, 0);
+  const attached = attachHorseToPile(world, horse, placement, () => 0.99);
+  const lasso = world.joints[0] as Physics3DDistanceJoint | undefined;
+  if (
+    attached !== 1 ||
+    world.joints.length !== 1 ||
+    lasso === undefined ||
+    lasso.kind !== 'Distance' ||
+    !lasso.enableSpring ||
+    !lasso.collideConnected ||
+    !Number.isFinite(lasso.breakForce)
+  ) {
+    throw new Error('arcade pile: expected one springy, colliding, breakable lasso');
+  }
+
+  const highHorse = addHorseBody(world, 0, support.y + HORSE_HALF_HEIGHT * 12, 0);
+  stabilizeHorseStack(world);
+  if (
+    support.mass <= highHorse.mass ||
+    support.angularDamping <= highHorse.angularDamping ||
+    support.fixedRotation
+  ) {
+    throw new Error('arcade pile: lower horses should resist impacts without fixed rotation');
+  }
 }
 
 function validatePlacementOrientations(): void {
@@ -278,9 +334,11 @@ function stepForDuration(
   world: ReturnType<typeof createHorseStackWorld>,
   horses: readonly RigidBody3D[],
   seconds: number,
+  stats?: SimulationStats,
 ): void {
   for (let step = 0; step < Math.ceil(seconds / PHYSICS_STEP); step++) {
     stepHorseStack(world);
+    if (stats !== undefined) stats.brokenLassos += world.jointEvents.broke.length;
     assertFiniteBodies(horses);
   }
 }

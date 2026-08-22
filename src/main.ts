@@ -66,6 +66,7 @@ import type { FlightGameUi, GameUiModel } from './gameUi';
 import type { HorsePlacementResult } from './horseStackPhysics';
 import {
   addHorseBody,
+  attachHorseToPile,
   createHorsePlacementResult,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
@@ -88,6 +89,7 @@ import {
   PASTURE_TOP_Y,
   PHYSICS_STEP,
   resolveHorsePlacement,
+  stabilizeHorseStack,
   stepHorseStack,
 } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
@@ -674,6 +676,12 @@ function commitHorsePlacement(now: number): void {
   body.angularVelocityX = 0;
   body.angularVelocityY = 0;
   body.angularVelocityZ = 0;
+  const lassoCount = attachHorseToPile(
+    physicsWorld,
+    body,
+    activePlacement,
+  );
+  stabilizeHorseStack(physicsWorld);
   const node = createHorseVisual();
   setHorseVisualPlacement(
     node,
@@ -694,11 +702,15 @@ function commitHorsePlacement(now: number): void {
 
   const tilt = Math.abs(current.angle);
   gameCallout.textContent =
-    tilt > 0.42
-      ? 'Precariously placed!'
-      : tilt > 0.16
-        ? 'A little crooked.'
-        : 'Placed gently.';
+    lassoCount > 1
+      ? 'DOUBLE HORSE LASSO!'
+      : lassoCount > 0
+        ? 'Horse magnet engaged!'
+        : tilt > 0.42
+          ? 'Precariously placed!'
+          : tilt > 0.16
+            ? 'A little crooked.'
+            : 'Placed gently.';
   nextHorseAt = now + getNextHorseDelay(horsesDropped);
   hudDirty = true;
   renderRequested = true;

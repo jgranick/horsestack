@@ -96,13 +96,6 @@ import {
   stepHorseStack,
 } from './horseStackPhysics';
 import type { StackObjectKind } from './horseStackPhysics';
-import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
-import horseThudUrl from '../free-sound-1674747349.mp3?url';
-import resultTickUrl from '../free-sound-1674778893.mp3?url';
-import resultTadaUrl from '../free-sound-1674895520.mp3?url';
-import countFanfareUrl from '../free-sound-1674977569.mp3?url';
-import farmAmbienceUrl from '../free-sound-1674978362.mp3?url';
-import horseWhinniesUrl from '../free-sound-effects-HORSE3.mp3?url';
 import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
@@ -210,18 +203,24 @@ const gameCallout = requireElement<HTMLDivElement>('game-callout');
 const heroTimer = requireElement<HTMLDivElement>('hero-timer');
 const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const soundtrack = createAudioTrack(soundtrackUrl, 0.36);
-const farmAmbience = createAudioTrack(farmAmbienceUrl, 0.16, true);
-const horseThud = createAudioTrack(horseThudUrl, 0.24);
-const countFanfare = createAudioTrack(countFanfareUrl, 0.46);
-const resultTada = createAudioTrack(resultTadaUrl, 0.52);
-const horseWhinnies = createAudioTrack(horseWhinniesUrl, 0.22);
+// Keep these paths indirect so Vite leaves the runtime module-relative URLs untouched
+// without warning. Both directories are served straight out of public/.
+const modelPathFromModule = '../models/';
+const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
+const soundPathFromModule = '../sounds/';
+const soundRoot = new URL(soundPathFromModule, import.meta.url).href;
+const soundUrl = (file: string): string => new URL(encodeURIComponent(file), soundRoot).href;
+
+const soundtrack = createAudioTrack(soundUrl("Elijah_K - The Mountain's Happy Song.mp3"), 0.36);
+const farmAmbience = createAudioTrack(soundUrl('free-sound-1674978362.mp3'), 0.16, true);
+const horseThud = createAudioTrack(soundUrl('free-sound-1674747349.mp3'), 0.24);
+const countFanfare = createAudioTrack(soundUrl('free-sound-1674977569.mp3'), 0.46);
+const resultTada = createAudioTrack(soundUrl('free-sound-1674895520.mp3'), 0.52);
+const horseWhinnies = createAudioTrack(soundUrl('free-sound-effects-HORSE3.mp3'), 0.22);
+const resultTickUrl = soundUrl('free-sound-1674778893.mp3');
 const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
   createAudioTrack(resultTickUrl, 0.1),
 );
-// Keep this path indirect so Vite leaves the runtime module-relative URL untouched without warning.
-const modelPathFromModule = '../models/';
-const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 
 retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();

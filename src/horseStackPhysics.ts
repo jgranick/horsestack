@@ -1,15 +1,34 @@
-import type { Physics3DMaterial, Physics3DWorld, RigidBody3D } from '@flighthq/sdk';
+import type {
+  CollisionBuiltInShape3D,
+  Physics3DMaterial,
+  Physics3DWorld,
+  RigidBody3D,
+} from '@flighthq/sdk';
 import {
   addPhysics3DBody,
   createPhysics3DCollider,
+  createPhysics3DShapeCastResult,
   createPhysics3DWorld,
   createRigidBody3D,
   createUniformGridSpatialBackend3D,
+  queryPhysics3DShapeCast,
   registerBuiltInCollisionFaceQueries3D,
   registerBuiltInCollisionSupports3D,
   setPhysics3DBodyTransform,
+  setQuaternionFromEuler,
   stepPhysics3D,
 } from '@flighthq/sdk';
+
+export interface HorsePlacementResult {
+  centerY: number;
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  hit: boolean;
+  normalX: number;
+  normalY: number;
+  normalZ: number;
+}
 
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
@@ -45,6 +64,7 @@ export const HORSE_PLACEMENT_ANGLES = [
   -Math.PI / 2,
   Math.PI,
 ] as const;
+export const HORSE_PLACEMENT_YAWS = [0, Math.PI / 2, Math.PI, -Math.PI / 2] as const;
 
 // Match broadphase buckets to the objects that dominate this world. Flight's
 // metre-scale default is several horse lengths wide and creates unnecessary
@@ -63,6 +83,21 @@ const PASTURE_MATERIAL: Physics3DMaterial = {
 };
 
 let collisionShapesRegistered = false;
+const placementOrientation = { w: 1, x: 0, y: 0, z: 0 };
+const placementCast = createPhysics3DShapeCastResult();
+const placementShape = {
+  kind: 'box',
+  halfX: HORSE_HALF_DEPTH,
+  halfY: HORSE_HALF_HEIGHT,
+  halfZ: HORSE_COLLIDER_HALF_LENGTH,
+  rotationW: 1,
+  rotationX: 0,
+  rotationY: 0,
+  rotationZ: 0,
+  x: 0,
+  y: 0,
+  z: 0,
+} satisfies CollisionBuiltInShape3D;
 
 export function createHorseStackWorld(): Physics3DWorld {
   registerCollisionShapes();
@@ -117,18 +152,19 @@ export function addHorseBody(
   y: number,
   angle: number,
   depth = 0,
+  yaw = 0,
 ): RigidBody3D {
   const body = createRigidBody3D('dynamic');
-  const halfAngle = angle / 2;
+  setHorsePlacementOrientation(angle, yaw);
   setPhysics3DBodyTransform(
     body,
     depth,
     y,
     -lateral,
-    Math.sin(halfAngle),
-    0,
-    0,
-    Math.cos(halfAngle),
+    placementOrientation.x,
+    placementOrientation.y,
+    placementOrientation.z,
+    placementOrientation.w,
   );
   body.linearDamping = 0.12;
   body.angularDamping = 0.18;
@@ -178,6 +214,77 @@ export function getRandomHorsePlacementAngle(random = Math.random): number {
     Math.floor(random() * HORSE_PLACEMENT_ANGLES.length),
   );
   return HORSE_PLACEMENT_ANGLES[index] ?? 0;
+}
+
+export function getRandomHorsePlacementYaw(random = Math.random): number {
+  const index = Math.min(
+    HORSE_PLACEMENT_YAWS.length - 1,
+    Math.floor(random() * HORSE_PLACEMENT_YAWS.length),
+  );
+  return HORSE_PLACEMENT_YAWS[index] ?? 0;
+}
+
+export function createHorsePlacementResult(): HorsePlacementResult {
+  return {
+    centerY: PASTURE_TOP_Y + HORSE_HALF_HEIGHT,
+    contactX: 0,
+    contactY: PASTURE_TOP_Y,
+    contactZ: 0,
+    hit: false,
+    normalX: 0,
+    normalY: 1,
+    normalZ: 0,
+  };
+}
+
+export function resolveHorsePlacement(
+  out: HorsePlacementResult,
+  world: Physics3DWorld,
+  lateral: number,
+  depth: number,
+  angle: number,
+  yaw: number,
+  startY: number,
+): void {
+  setHorsePlacementOrientation(angle, yaw);
+  placementShape.x = depth;
+  placementShape.y = startY;
+  placementShape.z = -lateral;
+  placementShape.rotationX = placementOrientation.x;
+  placementShape.rotationY = placementOrientation.y;
+  placementShape.rotationZ = placementOrientation.z;
+  placementShape.rotationW = placementOrientation.w;
+
+  const sweepBottomY = PASTURE_TOP_Y - HORSE_HALF_HEIGHT * 4;
+  const sweepDistance = Math.max(0.01, startY - sweepBottomY);
+  queryPhysics3DShapeCast(
+    world,
+    placementShape,
+    0,
+    -sweepDistance,
+    0,
+    placementCast,
+  );
+
+  out.hit = placementCast.hit;
+  if (placementCast.hit) {
+    out.centerY = startY - sweepDistance * placementCast.fraction;
+    out.contactX = placementCast.x;
+    out.contactY = placementCast.y;
+    out.contactZ = placementCast.z;
+    out.normalX = placementCast.normalX;
+    out.normalY = placementCast.normalY;
+    out.normalZ = placementCast.normalZ;
+    return;
+  }
+
+  out.centerY = PASTURE_TOP_Y + getHorseVerticalExtent(angle);
+  out.contactX = depth;
+  out.contactY = PASTURE_TOP_Y;
+  out.contactZ = -lateral;
+  out.normalX = 0;
+  out.normalY = 1;
+  out.normalZ = 0;
 }
 
 export function getPaceLevel(horsesDropped: number): number {
@@ -250,6 +357,12 @@ function registerCollisionShapes(): void {
   registerBuiltInCollisionSupports3D();
   registerBuiltInCollisionFaceQueries3D();
   collisionShapesRegistered = true;
+}
+
+function setHorsePlacementOrientation(angle: number, yaw: number): void {
+  // YXZ applies the facing direction first, then rolls around the horse's own
+  // local width axis. Visuals use the same order, so preview and collider match.
+  setQuaternionFromEuler(placementOrientation, angle, yaw, 0, 'YXZ');
 }
 
 function getColliderTopY(shape: RigidBody3D['colliders'][number]['world']): number {

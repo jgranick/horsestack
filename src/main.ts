@@ -6,7 +6,6 @@ import type {
   ParticleEmitterConfig,
   ParticleEmitterState,
   Physics3DWorld,
-  PointLight,
   RigidBody3D,
   Scene3D,
   Scene3DLightsLike,
@@ -20,7 +19,6 @@ import {
   createAabb,
   createAmbientLight,
   createCamera3D,
-  createCylinderMeshGeometry,
   createDirectionalLight,
   createGlCanvasElement,
   createGlRenderEffectPipeline,
@@ -33,7 +31,7 @@ import {
   createParticleEmitterConfig,
   createParticleEmitterState,
   createPerspectiveProjection,
-  createPointLight,
+  createPlaneMeshGeometry,
   createRingMeshGeometry,
   createStandardPbrMaterial,
   createVector3,
@@ -54,10 +52,10 @@ import {
   removeNodeChildren,
   removePhysics3DBody,
   renderGlBackground,
-  setNode3DAlpha,
   setNodeLocalMatrix4,
   setNodeTransform3D,
   setQuaternionFromEuler,
+  setQuaternionFromUnitVectors,
   stepParticleEmitter3D,
   updateOrbitCameraController,
 } from '@flighthq/sdk';
@@ -65,15 +63,17 @@ import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import { createFlightGameUi } from './gameUi';
 import type { FlightGameUi, GameUiModel } from './gameUi';
+import type { HorsePlacementResult } from './horseStackPhysics';
 import {
   addHorseBody,
+  createHorsePlacementResult,
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
   getNextHorseDelay,
   getPaceLevel,
   getRandomHorsePlacementAngle,
+  getRandomHorsePlacementYaw,
   getHorseTopY,
-  getHorseVerticalExtent,
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
@@ -87,6 +87,7 @@ import {
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
+  resolveHorsePlacement,
   stepHorseStack,
 } from './horseStackPhysics';
 import soundtrackUrl from "../Elijah_K - The Mountain's Happy Song.mp3?url";
@@ -105,6 +106,13 @@ interface ActiveHorse {
   baseAngle: number;
   depth: number;
   lateral: number;
+  yaw: number;
+}
+
+interface LandingGuide {
+  contact: Node3D;
+  footprint: Node3D;
+  root: Node3D;
 }
 
 interface StackedHorse {
@@ -216,30 +224,30 @@ const horseLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
 addNodeChild(scene, horseLayer);
 const landingGhostMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
-  baseColor: 0xe2b83fff,
+  baseColor: 0xe8c65aff,
   doubleSided: true,
-  emissive: 0x8a5a0bff,
-  emissiveStrength: 0.7,
-  metallic: 0.18,
-  roughness: 0.38,
-});
-const landingBeamMaterial = createStandardPbrMaterial({
-  alphaMode: 'blend',
-  baseColor: 0xf1d88aff,
-  doubleSided: true,
-  emissive: 0xc58a18ff,
-  emissiveStrength: 0.65,
+  emissive: 0x6b4b0dff,
+  emissiveStrength: 0.18,
   metallic: 0,
-  roughness: 0.62,
+  roughness: 0.72,
 });
-const landingHaloMaterial = createStandardPbrMaterial({
+const landingFootprintMaterial = createStandardPbrMaterial({
   alphaMode: 'blend',
-  baseColor: 0xf5d36aff,
+  baseColor: 0xffd166ff,
   doubleSided: true,
-  emissive: 0xd49a22ff,
-  emissiveStrength: 1.15,
-  metallic: 0.1,
-  roughness: 0.42,
+  emissive: 0x7a5410ff,
+  emissiveStrength: 0.18,
+  metallic: 0,
+  roughness: 0.9,
+});
+const landingContactMaterial = createStandardPbrMaterial({
+  alphaMode: 'blend',
+  baseColor: 0xffe49aff,
+  doubleSided: true,
+  emissive: 0xb77b18ff,
+  emissiveStrength: 0.4,
+  metallic: 0,
+  roughness: 0.75,
 });
 
 const dustEmitter: ParticleEmitter3D = createParticleEmitter3D({
@@ -337,16 +345,9 @@ const directionalLight = createDirectionalLight({
   pcfRadius: 1,
   shadowBias: 0.001,
 });
-const indicatorLight: PointLight = createPointLight({
-  color: 0xffd56aff,
-  intensity: 0,
-  position: createVector3(STACK_X + 0.16, 0.2, STACK_Z),
-  range: 0.68,
-});
 const lights: Scene3DLightsLike = {
   ambient: createAmbientLight({ color: 0xbdd0b5ff, intensity: 0.72 }),
   directional: directionalLight,
-  point: [indicatorLight],
 };
 const shadowCamera = createCamera3D({
   far: 55,
@@ -362,7 +363,7 @@ configureDirectionalShadowCamera3D(
 let phase: GamePhase = 'loading';
 let horseTemplate: Scene3D | null = null;
 let landingGhost: Node3D | null = null;
-let landingRadiance: Node3D | null = null;
+let landingGuide: LandingGuide | null = null;
 let physicsWorld: Physics3DWorld = createHorseStackWorld();
 let activeHorse: ActiveHorse | null = null;
 let stackedHorses: StackedHorse[] = [];
@@ -396,6 +397,9 @@ let impactFlashUntil = 0;
 let lastImpactAt = 0;
 let hudDirty = true;
 const measurementBodies: RigidBody3D[] = [];
+const activePlacement = createHorsePlacementResult();
+const placementContactNormal = createVector3(0, 1, 0);
+const placementContactUp = createVector3(0, 1, 0);
 const inputBounds = { height: 1, left: 0, top: 0, width: 1 };
 const placementRay = {
   direction: createVector3(),
@@ -473,24 +477,24 @@ function createHorseVisual(
   return pivot;
 }
 
-function createLandingRadiance(): Node3D {
-  const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
-  const beam = createMesh(
-    createCylinderMeshGeometry(0.16, 0.022, 0.58, 18, false),
-    [landingBeamMaterial],
+function createLandingGuide(): LandingGuide {
+  const root = createNode3D(Node3DKind, { name: 'landing-guide' });
+  const footprint = createMesh(
+    createPlaneMeshGeometry(HORSE_HALF_DEPTH * 2, HORSE_COLLIDER_HALF_LENGTH * 2),
+    [landingFootprintMaterial],
   );
-  beam.alpha = 0.045;
-  beam.position.y = 0.29;
-  invalidateNodeLocalTransform(beam);
-  addNodeChild(root, beam);
+  footprint.alpha = 0.24;
+  footprint.name = 'placement-footprint';
+  addNodeChild(root, footprint);
 
-  const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
-  halo.alpha = 0.24;
-  halo.position.x = 0.012;
-  setQuaternionFromEuler(halo.rotation, 0, 0, Math.PI / 2);
-  invalidateNodeLocalTransform(halo);
-  addNodeChild(root, halo);
-  return root;
+  const contact = createMesh(
+    createRingMeshGeometry(0.011, 0.019, 20),
+    [landingContactMaterial],
+  );
+  contact.alpha = 0.78;
+  contact.name = 'placement-contact';
+  addNodeChild(root, contact);
+  return { contact, footprint, root };
 }
 
 function cloneNode3DHierarchy(
@@ -577,12 +581,11 @@ function startGame(): void {
   impactFlashUntil = 0;
   lastImpactAt = 0;
   removeNodeChildren(horseLayer);
-  landingGhost = createHorseVisual(landingGhostMaterial, 0.36);
+  landingGhost = createHorseVisual(landingGhostMaterial, 0.62);
   landingGhost.name = 'landing-preview';
   addNodeChild(horseLayer, landingGhost);
-  landingRadiance = createLandingRadiance();
-  addNodeChild(horseLayer, landingRadiance);
-  indicatorLight.intensity = 0;
+  landingGuide = createLandingGuide();
+  addNodeChild(horseLayer, landingGuide.root);
   clearParticleEmitter3D(dustEmitter);
   clearParticleEmitter3D(celebrationEmitter);
   dustState = createParticleEmitterState();
@@ -604,7 +607,7 @@ function startGame(): void {
   viewer.classList.remove('is-finished', 'is-time-up', 'is-bumping', 'is-panicking');
   sceneStatus.classList.add('is-ready');
   statusCopy.textContent = '60 seconds. Go!';
-  gameCallout.textContent = 'Move fast to make it teeter…';
+  gameCallout.textContent = 'Gold horse = exact placement.';
   hudDirty = true;
   spawnHorse(now);
   renderRequested = true;
@@ -623,13 +626,16 @@ function spawnHorse(now: number): void {
     baseAngle,
     depth: aimDepth,
     lateral: aimLateral,
+    yaw: getRandomHorsePlacementYaw(),
   };
   if (landingGhost !== null) landingGhost.enabled = true;
-  if (landingRadiance !== null) landingRadiance.enabled = true;
+  if (landingGuide !== null) landingGuide.root.enabled = true;
   dropButton.disabled = false;
   statusCopy.textContent = `Horse ${String(horsesDropped + 1).padStart(2, '0')} queued`;
   gameCallout.textContent =
-    getPaceLevel(horsesDropped) >= 4 ? 'Keep the glowing horse upright.' : 'Aim in 3D, balance, place.';
+    getPaceLevel(horsesDropped) >= 4
+      ? 'Ring marks first contact.'
+      : 'Gold horse = exact placement.';
   if (lastPointerClientX !== null && lastPointerClientY !== null) {
     setAimFromClientPoint(lastPointerClientX, lastPointerClientY, now);
   }
@@ -645,21 +651,22 @@ function updateActiveHorse(now: number): void {
   current.lateral = clamp(aimLateral, -horizontalLimit, horizontalLimit);
   current.depth = clamp(aimDepth, -PLACEMENT_HALF_DEPTH, PLACEMENT_HALF_DEPTH);
   current.angle = current.baseAngle + indicatorAngle;
-  updateLandingGhost(current, now);
+  updateLandingGhost(current);
 }
 
 function commitHorsePlacement(now: number): void {
   const current = activeHorse;
   if (current === null || phase !== 'playing') return;
 
-  const landingY =
-    getLandingSurfaceY(current.lateral, current.depth) + getHorseVerticalExtent(current.angle);
+  resolveActiveHorsePlacement(current);
+  const landingY = activePlacement.centerY;
   const body = addHorseBody(
     physicsWorld,
     current.lateral,
     landingY,
     current.angle,
     current.depth,
+    current.yaw,
   );
   body.velocityX = 0;
   body.velocityY = 0;
@@ -668,14 +675,20 @@ function commitHorsePlacement(now: number): void {
   body.angularVelocityY = 0;
   body.angularVelocityZ = 0;
   const node = createHorseVisual();
-  setHorseVisualPlacement(node, current.lateral, current.depth, landingY, current.angle);
+  setHorseVisualPlacement(
+    node,
+    current.lateral,
+    current.depth,
+    landingY,
+    current.angle,
+    current.yaw,
+  );
   addNodeChild(horseLayer, node);
   stackedHorses.push({ body, lost: false, node });
   activeHorse = null;
   dropButton.disabled = true;
   if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
-  indicatorLight.intensity = 0;
+  if (landingGuide !== null) landingGuide.root.enabled = false;
   horsesDropped++;
   restartAudioTrack(horseThud, 'Horse thud');
 
@@ -697,9 +710,7 @@ function updateGame(now: number): void {
       beginSettling(now);
       return;
     }
-    if (activeHorse !== null) {
-      updateActiveHorse(now);
-    } else if (now >= nextHorseAt) {
+    if (activeHorse === null && now >= nextHorseAt) {
       spawnHorse(now);
     }
   } else if (phase === 'settling' && now >= finishAt) {
@@ -717,8 +728,7 @@ function beginSettling(now: number): void {
   dropButton.disabled = true;
   restartButton.hidden = true;
   if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
-  indicatorLight.intensity = 0;
+  if (landingGuide !== null) landingGuide.root.enabled = false;
   timeUpPanel.hidden = false;
   viewer.classList.remove('is-playing', 'is-panicking');
   viewer.classList.add('is-time-up');
@@ -758,7 +768,6 @@ function finishGame(now: number): void {
   resultPanel.hidden = false;
   viewer.classList.remove('is-playing', 'is-time-up', 'is-panicking', 'is-bumping');
   viewer.classList.add('is-finished');
-  indicatorLight.intensity = 0;
   statusCopy.textContent = 'Counting hands…';
   gameCallout.textContent = 'One 🐴 per hand. Keep counting…';
   hudDirty = true;
@@ -874,76 +883,75 @@ function synchronizeHorseVisuals(): void {
   stackedHorses.length = retainedCount;
 }
 
-function updateLandingGhost(current: Readonly<ActiveHorse>, now: number): void {
+function updateLandingGhost(current: Readonly<ActiveHorse>): void {
   if (landingGhost === null) return;
-
-  const landingSurfaceY = getLandingSurfaceY(current.lateral, current.depth);
 
   landingGhost.enabled =
     Math.abs(current.lateral) <= PASTURE_HALF_WIDTH &&
     current.depth >= PASTURE_BACK_DEPTH &&
     current.depth <= PASTURE_FRONT_DEPTH;
   if (!landingGhost.enabled) {
-    if (landingRadiance !== null) landingRadiance.enabled = false;
-    indicatorLight.intensity = 0;
+    if (landingGuide !== null) landingGuide.root.enabled = false;
     return;
   }
-  setNode3DAlpha(landingGhost, 0.38 + Math.sin(now * 0.009) * 0.035);
-  const previewY = landingSurfaceY + getHorseVerticalExtent(current.angle);
+  resolveActiveHorsePlacement(current);
   setHorseVisualPlacement(
     landingGhost,
     current.lateral,
     current.depth,
-    previewY,
+    activePlacement.centerY,
     current.angle,
+    current.yaw,
   );
-  updateLandingRadiance(current.lateral, current.depth, previewY, now);
+  updateLandingGuide(current, activePlacement);
 }
 
-function updateLandingRadiance(
-  lateral: number,
-  depth: number,
-  physicsY: number,
-  now: number,
-): void {
-  const radiance = landingRadiance;
-  if (radiance === null) return;
-  const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
-  radiance.enabled = true;
-  setNode3DAlpha(radiance, 0.48 + Math.sin(now * 0.008) * 0.055);
-  radiance.position.x = STACK_X + depth + 0.006;
-  radiance.position.y = STACK_BASE_Y + physicsY;
-  radiance.position.z = STACK_Z - lateral;
-  radiance.scale.x = pulse;
-  radiance.scale.y = pulse;
-  radiance.scale.z = pulse;
-  invalidateNodeLocalTransform(radiance);
-
-  indicatorLight.position.x = STACK_X + depth + 0.1;
-  indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.09;
-  indicatorLight.position.z = STACK_Z - lateral;
-  indicatorLight.intensity = 0.8 + Math.sin(now * 0.008) * 0.14;
-}
-
-function getLandingSurfaceY(lateral: number, depth: number): number {
-  let surfaceY = PASTURE_TOP_Y;
-  const lengthReach = HORSE_COLLIDER_HALF_LENGTH * 1.9;
-  const depthReach = HORSE_HALF_DEPTH * 1.9;
-
+function resolveActiveHorsePlacement(current: Readonly<ActiveHorse>): void {
+  let startY = Math.max(PASTURE_TOP_Y + 0.5, cachedStackHeight + 0.4);
   for (const horse of stackedHorses) {
-    const body = horse.body;
-    if (
-      horse.lost ||
-      body.y < PASTURE_TOP_Y ||
-      Math.abs(body.z + lateral) > lengthReach ||
-      Math.abs(body.x - depth) > depthReach ||
-      Math.abs(body.velocityY) > 1.2
-    ) {
-      continue;
-    }
-    surfaceY = Math.max(surfaceY, getHorseTopY(body));
+    if (!horse.lost) startY = Math.max(startY, getHorseTopY(horse.body) + 0.24);
   }
-  return surfaceY;
+  resolveHorsePlacement(
+    activePlacement,
+    physicsWorld,
+    current.lateral,
+    current.depth,
+    current.angle,
+    current.yaw,
+    startY,
+  );
+}
+
+function updateLandingGuide(
+  current: Readonly<ActiveHorse>,
+  placement: Readonly<HorsePlacementResult>,
+): void {
+  const guide = landingGuide;
+  if (guide === null) return;
+  guide.root.enabled = true;
+
+  guide.footprint.position.x = STACK_X + current.depth;
+  guide.footprint.position.y = STACK_BASE_Y + placement.contactY + 0.0015;
+  guide.footprint.position.z = STACK_Z - current.lateral;
+  const projectedHalfLength =
+    Math.abs(Math.cos(current.angle)) * HORSE_COLLIDER_HALF_LENGTH +
+    Math.abs(Math.sin(current.angle)) * HORSE_HALF_HEIGHT;
+  guide.footprint.scale.z = projectedHalfLength / HORSE_COLLIDER_HALF_LENGTH;
+  setQuaternionFromEuler(guide.footprint.rotation, 0, current.yaw, 0);
+  invalidateNodeLocalTransform(guide.footprint);
+
+  guide.contact.position.x = STACK_X + placement.contactX;
+  guide.contact.position.y = STACK_BASE_Y + placement.contactY + 0.0025;
+  guide.contact.position.z = STACK_Z + placement.contactZ;
+  placementContactNormal.x = placement.normalX;
+  placementContactNormal.y = placement.normalY;
+  placementContactNormal.z = placement.normalZ;
+  setQuaternionFromUnitVectors(
+    guide.contact.rotation,
+    placementContactUp,
+    placementContactNormal,
+  );
+  invalidateNodeLocalTransform(guide.contact);
 }
 
 function setHorseVisualPlacement(
@@ -952,11 +960,12 @@ function setHorseVisualPlacement(
   depth: number,
   physicsY: number,
   angle: number,
+  yaw: number,
 ): void {
   node.position.x = STACK_X + depth;
   node.position.y = STACK_BASE_Y + physicsY;
   node.position.z = STACK_Z - lateral;
-  setQuaternionFromEuler(node.rotation, angle, 0, 0);
+  setQuaternionFromEuler(node.rotation, angle, yaw, 0, 'YXZ');
   invalidateNodeLocalTransform(node);
 }
 
@@ -1192,12 +1201,12 @@ function setLoadingState(copy: string): void {
 
 function renderFrame(): void {
   const ghostEnabled = landingGhost?.enabled ?? false;
-  const radianceEnabled = landingRadiance?.enabled ?? false;
+  const guideEnabled = landingGuide?.root.enabled ?? false;
   if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
+  if (landingGuide !== null) landingGuide.root.enabled = false;
   drawGlScene3DShadowMap(renderState, scene, shadowCamera, directionalLight);
   if (landingGhost !== null) landingGhost.enabled = ghostEnabled;
-  if (landingRadiance !== null) landingRadiance.enabled = radianceEnabled;
+  if (landingGuide !== null) landingGuide.root.enabled = guideEnabled;
   beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
   renderGlBackground(renderState);
   renderState.gl.depthMask(true);
@@ -1229,6 +1238,9 @@ function enterFrame(now: number): void {
       stepGamePhysics(now, deltaTime);
       synchronizeHorseVisuals();
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
+      // Resolve the indicator after this frame's physics movement so its exact
+      // shape-cast stop matches the pile that is about to be rendered.
+      if (phase === 'playing' && activeHorse !== null) updateActiveHorse(now);
       renderRequested = true;
     }
     if (phase === 'finished' && resultAnimationStart !== 0) {

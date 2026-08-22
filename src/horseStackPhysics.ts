@@ -37,6 +37,14 @@ export const PASTURE_TOP_Y = -0.015;
 export const PHYSICS_GRAVITY = 10.8;
 export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
+export const HORSE_PLACEMENT_ANGLES = [
+  0,
+  Math.PI / 4,
+  -Math.PI / 4,
+  Math.PI / 2,
+  -Math.PI / 2,
+  Math.PI,
+] as const;
 
 // Match broadphase buckets to the objects that dominate this world. Flight's
 // metre-scale default is several horse lengths wide and creates unnecessary
@@ -162,6 +170,14 @@ export function stepHorseStack(world: Physics3DWorld): void {
 
 export function getNextHorseDelay(horsesDropped: number): number {
   return Math.max(80, 210 - horsesDropped * 3.25);
+}
+
+export function getRandomHorsePlacementAngle(random = Math.random): number {
+  const index = Math.min(
+    HORSE_PLACEMENT_ANGLES.length - 1,
+    Math.floor(random() * HORSE_PLACEMENT_ANGLES.length),
+  );
+  return HORSE_PLACEMENT_ANGLES[index] ?? 0;
 }
 
 export function getPaceLevel(horsesDropped: number): number {

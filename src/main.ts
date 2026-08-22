@@ -135,11 +135,17 @@ const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
 // object reads as "about to drop" rather than as an object already in the pile.
 // Placement still uses the unlifted landing pose.
 const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 2;
-// The lifted preview carries its halo ring with it, and at the tightest camera
-// distance the pair reached past the top of the frame. This much extra headroom on
-// the camera target keeps the whole marker visible; it costs a sliver of pasture at
-// the bottom, where there is margin to spare.
-const LANDING_MARKER_HEADROOM = 0.075;
+// The camera used to hold a constant lift above the pile so the raised marker always
+// cleared the top of the frame. Measured over a played run, that spent 56% of the screen
+// on empty sky and pushed the base of the pile off the bottom edge in 32 of 41 samples.
+// Framing is pulled toward the pile instead: the target sits this share of the visible
+// half-height BELOW the pile top, and the camera starts a little further back so the
+// marker still fits. Measured after: 40% sky, the pile top at +0.19 of the frame instead
+// of -0.13, and the ground never leaving the frame at all. The marker's centre grazes the
+// top edge somewhat more often (8 samples in 43 against 3), which is the deliberate trade
+// — the pile is the subject, the marker is a cue.
+const CAMERA_PILE_FOCUS = 0.2;
+const CAMERA_BASE_DISTANCE = 1.05;
 // The camera frames the measured stack top, but that measurement is a max over the
 // qualifying bodies: when a piece settles, the top can change by centimetres in a single
 // step while nothing visibly moves much. Feeding that straight to the camera is what made
@@ -1156,10 +1162,17 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   const rise = clamp(height / 1.1, 0, 1);
   const herdProgress = clamp(objectsDropped / 50, 0, 1);
   const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
+  // Half the frame height in world units at the current distance, so the framing below
+  // can be expressed as a share of what is actually on screen rather than as a fixed
+  // world offset that means something different at every zoom level.
+  const visibleHalfHeight =
+    camera.projection.kind === 'perspective'
+      ? cameraController.distance * Math.tan(camera.projection.fovY / 2)
+      : 0;
   const desiredTargetY =
     STACK_BASE_Y +
-    Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2) +
-    LANDING_MARKER_HEADROOM;
+    Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2) -
+    CAMERA_PILE_FOCUS * visibleHalfHeight;
   if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
   const follow = 1 - Math.exp(-deltaTime * 2.4);
   cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
@@ -1167,7 +1180,10 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   cameraController.target.z = STACK_Z;
   cameraController.goalAzimuth = Math.PI / 2 + rise * 0.18 + herdProgress * 0.04;
   cameraController.goalPolar = 0.06 + rise * 0.14;
-  cameraController.goalDistance = Math.min(3.25, 0.82 + height * 0.85 + herdProgress * 0.28);
+  cameraController.goalDistance = Math.min(
+    3.25,
+    CAMERA_BASE_DISTANCE + height * 0.85 + herdProgress * 0.28,
+  );
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 

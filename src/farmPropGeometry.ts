@@ -9,6 +9,7 @@ export interface FarmPropPoint {
 }
 
 export type FarmPropTriangleFilter =
+  | { kind: 'aabb'; max: FarmPropPoint; min: FarmPropPoint }
   | { kind: 'max-x'; value: number }
   | { centers: readonly FarmPropPoint[]; kind: 'nearest-component'; selectedIndex: number };
 
@@ -39,10 +40,15 @@ const FIRST_HAY_BALE_FILTER: FarmPropTriangleFilter = {
   selectedIndex: 0,
 };
 const FRONT_COW_FILTER: FarmPropTriangleFilter = { kind: 'max-x', value: -20 };
+const SINGLE_CHICKEN_FILTER: FarmPropTriangleFilter = {
+  kind: 'aabb',
+  max: { x: -6.5, y: 16.2, z: 1.4 },
+  min: { x: -8.3, y: 13.5, z: -1.2 },
+};
 
 // Sketchfab flattened the farm by material. These are the complete material
-// layers for each prop; filters split one bale/cow from meshes containing more
-// than one instance.
+// layers for each prop; filters split one bale, cow, or chicken from meshes
+// containing more than one instance.
 export const FARM_PROP_SPECS: Readonly<Record<FarmPropKind, FarmPropSpec>> = {
   hay: {
     centerX: -25.6,
@@ -65,15 +71,14 @@ export const FARM_PROP_SPECS: Readonly<Record<FarmPropKind, FarmPropSpec>> = {
     ],
   },
   chickens: {
-    centerX: -7,
-    centerY: 19.9557,
-    centerZ: 0.249,
+    centerX: -7.395,
+    centerY: 14.865,
+    centerZ: 0.115,
     parts: [
-      { materialName: 'material', nodeName: 'Object_27' },
-      { materialName: 'Hen4', nodeName: 'Object_29' },
-      { materialName: 'Hen3', nodeName: 'Object_33' },
-      { materialName: 'Hen2', nodeName: 'Object_38' },
-      { materialName: 'Hen_2', nodeName: 'Object_40' },
+      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen4', nodeName: 'Object_29' },
+      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen3', nodeName: 'Object_33' },
+      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
+      { filter: SINGLE_CHICKEN_FILTER, materialName: 'Hen_2', nodeName: 'Object_40' },
     ],
   },
 };
@@ -107,7 +112,16 @@ export function selectFarmPropTriangleIndices(
       y: (coordinate(a, 1) + coordinate(b, 1) + coordinate(c, 1)) / 3,
       z: (coordinate(a, 2) + coordinate(b, 2) + coordinate(c, 2)) / 3,
     };
-    if (center.x < filter.value) selectedIndices.push(a, b, c);
+    const matches =
+      filter.kind === 'max-x'
+        ? center.x < filter.value
+        : center.x >= filter.min.x &&
+          center.x <= filter.max.x &&
+          center.y >= filter.min.y &&
+          center.y <= filter.max.y &&
+          center.z >= filter.min.z &&
+          center.z <= filter.max.z;
+    if (matches) selectedIndices.push(a, b, c);
   }
   return selectedIndices;
 }

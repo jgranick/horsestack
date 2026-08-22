@@ -44,9 +44,9 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
   },
   chickens: {
     emoji: '🐔',
-    halfHeight: 0.03,
-    halfWidth: 0.113,
-    label: 'Three chickens',
+    halfHeight: 0.021,
+    halfWidth: 0.022,
+    label: 'Chicken',
   },
 };
 

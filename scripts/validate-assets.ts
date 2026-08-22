@@ -65,7 +65,12 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
   const expectedExtents: Readonly<Record<FarmPropKind, readonly [number, number, number]>> = {
     hay: [5.2, 8.7, 5.6],
     cow: [8.8, 10.8, 8.3],
-    chickens: [11.3, 12.7, 3.4],
+    chickens: [1.5, 2.4, 2.4],
+  };
+  const expectedTriangleCounts: Readonly<Record<FarmPropKind, number>> = {
+    hay: 124,
+    cow: 3_780,
+    chickens: 1_312,
   };
 
   for (const kind of ['hay', 'cow', 'chickens'] as const) {
@@ -99,6 +104,12 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
       }
       triangleCount += indices.length / 3;
       includeGeometryBounds(bounds, mesh, indices);
+    }
+
+    if (triangleCount !== expectedTriangleCounts[kind]) {
+      throw new Error(
+        `farm prop ${kind} selected ${triangleCount} triangles, expected ${expectedTriangleCounts[kind]}`,
+      );
     }
 
     const extents = bounds.max.map((maximum, axis) => maximum - (bounds.min[axis] ?? maximum));

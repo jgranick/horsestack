@@ -79,12 +79,12 @@ interface PhaseLayer {
 }
 
 const COLORS = {
-  cream: 0xfbf7ec,
-  gold: 0xffd166,
-  green: 0x1f2d1d,
-  orange: 0xd97143,
-  red: 0x7e311f,
-  white: 0xffffff,
+  cream: 0xfbf7ecff,
+  gold: 0xffd166ff,
+  green: 0x1f2d1dff,
+  orange: 0xd97143ff,
+  red: 0x7e311fff,
+  white: 0xffffffff,
 } as const;
 const UI_FONT = 'Helvetica Neue, Helvetica, Arial, sans-serif';
 const DISPLAY_FONT = 'Georgia, Times New Roman, serif';
@@ -128,7 +128,7 @@ export function createFlightGameUi(
   const readyButton = createSolidShape(readyRoot);
   const readyButtonLabel = createLabel(readyRoot, '', buttonFormat(COLORS.green));
   const readyFooter = createLabel(readyRoot, '', kickerFormat(COLORS.cream));
-  setTextLabelString(readyKicker, 'FLIGHT 2D PHYSICS PRESENTS');
+  setTextLabelString(readyKicker, 'FLIGHT 3D PHYSICS PRESENTS');
   setTextLabelString(readyTitleTop, 'Ready to make');
   setTextLabelString(readyTitleBottom, 'poor choices?');
   setTextLabelString(
@@ -136,7 +136,7 @@ export function createFlightGameUi(
     '60 seconds. Unlimited horses. Build the tallest pile.',
   );
   setTextLabelString(readyButtonLabel, 'START STACKING');
-  setTextLabelString(readyFooter, 'MOVE · BALANCE · CLICK / TAP / SPACE TO PLACE');
+  setTextLabelString(readyFooter, 'AIM IN 3D · BALANCE · CLICK / TAP / SPACE TO PLACE');
 
   const hudCallout = createSolidShape(playingRoot);
   const hudCalloutLabel = createLabel(playingRoot, '', buttonFormat(COLORS.white));
@@ -157,10 +157,10 @@ export function createFlightGameUi(
   const dropRoot = createDisplayObject({ name: 'place-control-visual' });
   addNodeChild(playingRoot, dropRoot);
   const dropButton = createSolidShape(dropRoot);
-  const dropButtonLabel = createLabel(dropRoot, 'PLACE HORSE  ↓', buttonFormat(COLORS.white));
+  const dropButtonLabel = createLabel(dropRoot, 'PLACE HORSE', buttonFormat(COLORS.white));
   const restartButton = createSolidShape(playingRoot);
   const restartButtonLabel = createLabel(playingRoot, '↺  START OVER', buttonFormat(COLORS.white));
-  const viewerBrand = createLabel(playingRoot, 'FLIGHT PHYSICS 2D', kickerFormat(COLORS.cream));
+  const viewerBrand = createLabel(playingRoot, 'FLIGHT PHYSICS 3D', kickerFormat(COLORS.cream));
   const viewerProtocol = createLabel(
     playingRoot,
     '60-SECOND PILE PROTOCOL',

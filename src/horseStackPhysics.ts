@@ -13,9 +13,17 @@ import {
 
 export const HORSE_HALF_WIDTH = 0.09;
 export const HORSE_HALF_HEIGHT = 0.0765;
-// Deliberately wider than the rendered model. The camera reads the horse from
-// the side, while this hidden depth gives each one a forgiving support base.
-export const HORSE_HALF_DEPTH = 0.06;
+// The horse is viewed broadside, so X is its hidden cross-field thickness and
+// Z is its visible nose-to-tail length. The wide hidden base is deliberately
+// close to twice the model's apparent thickness, making a toy horse less eager
+// to roll out of the pile in full 3D.
+// This visual half-depth is the shipped horse bounds at its 0.00279 scene scale.
+export const HORSE_VISUAL_HALF_DEPTH = 0.0215;
+export const HORSE_HALF_DEPTH = HORSE_VISUAL_HALF_DEPTH * 1.95;
+// Keep the collision footprint inside the rendered nose and tail. A second
+// head collider would make horse pairs more expensive and add a small ledge,
+// so the performant single-body proxy remains intentionally conservative.
+export const HORSE_COLLIDER_HALF_LENGTH = 0.064;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
 export const METERS_PER_HAND = 0.1016;
 
@@ -134,7 +142,7 @@ export function addHorseBody(
         z: 0,
         halfX: HORSE_HALF_DEPTH,
         halfY: HORSE_HALF_HEIGHT,
-        halfZ: HORSE_HALF_WIDTH,
+        halfZ: HORSE_COLLIDER_HALF_LENGTH,
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
@@ -173,7 +181,7 @@ export function getStackHeightHands(stackTopY: number): number {
 export function getHorseVerticalExtent(angle: number): number {
   return (
     Math.abs(Math.cos(angle)) * HORSE_HALF_HEIGHT +
-    Math.abs(Math.sin(angle)) * HORSE_HALF_WIDTH
+    Math.abs(Math.sin(angle)) * HORSE_COLLIDER_HALF_LENGTH
   );
 }
 

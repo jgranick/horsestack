@@ -9,9 +9,11 @@ import {
   getStackHeightHands,
   getStackHeightMeters,
   getSupportedStackHeight,
+  HORSE_COLLIDER_HALF_LENGTH,
   HORSE_HALF_DEPTH,
   HORSE_HALF_HEIGHT,
   HORSE_HALF_WIDTH,
+  HORSE_VISUAL_HALF_DEPTH,
   isHorseWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_FRONT_DEPTH,
@@ -31,6 +33,7 @@ interface ScenarioResult {
 }
 
 const TARGET_HALF_WIDTH = 0.32;
+const TARGET_HALF_DEPTH = 0.16;
 const VALIDATION_HORSES = 64;
 
 const scenarios = [
@@ -65,14 +68,16 @@ function runScenario(
 
   for (let index = 0; index < VALIDATION_HORSES; index++) {
     const horseSeed = random() * Math.PI * 2;
-    const x = Math.sin(horseSeed) * horizontalLimit;
+    const lateral = Math.sin(horseSeed) * horizontalLimit;
+    const depth = (random() * 2 - 1) * TARGET_HALF_DEPTH;
     const angle = (random() * 2 - 1) * maxTilt;
-    const landingSurfaceY = getPlacementSurfaceY(horses, x);
+    const landingSurfaceY = getPlacementSurfaceY(horses, lateral, depth);
     const horse = addHorseBody(
       world,
-      x,
+      lateral,
       landingSurfaceY + getHorseVerticalExtent(angle),
       angle,
+      depth,
     );
     horse.velocityX = 0;
     horse.velocityY = 0;
@@ -147,6 +152,16 @@ function validateStableActivation(): void {
   if (horse.colliders.length !== 1 || horse.colliders[0]?.local.kind !== 'box') {
     throw new Error('stable placement: each horse should use one inexpensive box collider');
   }
+  const proxy = horse.colliders[0].local;
+  if (
+    proxy.kind !== 'box' ||
+    proxy.halfX !== HORSE_HALF_DEPTH ||
+    proxy.halfZ !== HORSE_COLLIDER_HALF_LENGTH ||
+    proxy.halfX < HORSE_VISUAL_HALF_DEPTH * 1.8 ||
+    proxy.halfX > HORSE_VISUAL_HALF_DEPTH * 2.05
+  ) {
+    throw new Error('stable placement: the horse proxy should be wide and nose-to-tail conservative');
+  }
 }
 
 function validateHeightCalibration(): void {
@@ -162,14 +177,19 @@ function validateHeightCalibration(): void {
   }
 }
 
-function getPlacementSurfaceY(horses: readonly RigidBody3D[], x: number): number {
+function getPlacementSurfaceY(
+  horses: readonly RigidBody3D[],
+  lateral: number,
+  depth: number,
+): number {
   let surfaceY = PASTURE_TOP_Y;
-  const horizontalReach = HORSE_HALF_WIDTH * 1.85;
+  const lengthReach = HORSE_COLLIDER_HALF_LENGTH * 1.9;
+  const depthReach = HORSE_HALF_DEPTH * 1.9;
   for (const horse of horses) {
     if (
       horse.y < PASTURE_TOP_Y ||
-      Math.abs(horse.z + x) > horizontalReach ||
-      Math.abs(horse.x) > HORSE_HALF_DEPTH * 2.4 ||
+      Math.abs(horse.z + lateral) > lengthReach ||
+      Math.abs(horse.x - depth) > depthReach ||
       Math.abs(horse.velocityY) > 1.2
     ) {
       continue;

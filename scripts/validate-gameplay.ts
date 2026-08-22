@@ -181,12 +181,17 @@ function validateContactPinPhysics(): void {
 
   const highHorse = addHorseBody(world, 0, support.y + HORSE_HALF_HEIGHT * 12, 0);
   stabilizeHorseStack(world);
+  const supportInertiaPerMass = support.inertiaXX / support.mass;
+  const highHorseInertiaPerMass = highHorse.inertiaXX / highHorse.mass;
   if (
     support.mass <= highHorse.mass ||
-    support.angularDamping <= highHorse.angularDamping ||
+    support.angularDamping < 3 ||
+    supportInertiaPerMass < highHorseInertiaPerMass * 2.4 ||
     support.fixedRotation
   ) {
-    throw new Error('arcade pile: lower horses should resist impacts without fixed rotation');
+    throw new Error(
+      'arcade pile: lower horses should strongly resist rotation without fixed rotation',
+    );
   }
 }
 

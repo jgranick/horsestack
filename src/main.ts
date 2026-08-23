@@ -1461,12 +1461,24 @@ function renderFrame(): void {
   renderState.gl.clear(renderState.gl.DEPTH_BUFFER_BIT);
   drawGlScene3D(renderState, scene, camera, lights);
   endGlRenderEffectPipeline(renderState, pipeline, []);
+  const countProgress =
+    resultAnimationStart === 0
+      ? phase === 'finished' ? 1 : 0
+      : clamp((performance.now() - resultAnimationStart) / resultAnimationDuration, 0, 1);
+  const shownMeters = getStackHeightMeters(finalHeight) * (1 - Math.pow(1 - countProgress, 3));
   gameUi.update({
+    countProgress,
     creditsOpen,
-    handsText: `${resultHands} HANDS`,
-    heightText: formatHeight(finalHeight),
+    handsShown: resultHandsShown,
+    now: performance.now(),
+    handsText: String(resultHandsShown),
+    heightText: countProgress >= 1 ? formatHeight(finalHeight) : formatMeters(shownMeters),
+    pointsText: countProgress >= 1 ? `${getScore(finalHeight).toLocaleString()} points` : '',
     screen: getUiScreen(),
     secondsLeft: Math.max(0, (gameEndsAt - performance.now()) / 1000),
+    timeUpProgress: finishAt === 0
+      ? 0
+      : clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6,
   });
   gameUi.render();
 }

@@ -60,10 +60,44 @@ export interface UiState {
 
 export interface UiModel {
   creditsOpen: boolean;
+  // 0..1 across the result count-up, used for the score slam on arrival.
+  countProgress: number;
+  creditsText?: string;
+  handsShown: number;
   handsText: string;
   heightText: string;
+  pointsText: string;
+  now: number;
   screen: UiScreen;
   secondsLeft: number;
+  // 0..1 over the TIME UP arrival, driving its overshoot.
+  timeUpProgress: number;
+}
+
+const HANDS_PER_EMOJI_COLUMN = 9;
+const GOLD = 0xffd166;
+
+// The DOM original eased each of these with CSS keyframes; recreated here so the beats
+// survive the move to Flight 2D. See docs/result-screen-reference.png.
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+// time-up-arrive: 1.18 -> 0.97 at 55% -> 1.0, with the panel fading in.
+function timeUpScale(t: number): number {
+  if (t >= 1) return 1;
+  if (t <= 0) return 1.18;
+  return t < 0.55
+    ? 1.18 + (0.97 - 1.18) * easeOutCubic(t / 0.55)
+    : 0.97 + 0.03 * easeOutCubic((t - 0.55) / 0.45);
+}
+
+// total-score-slam: 0.58 -> 1.16 at 68% -> 1.0.
+function slamScale(t: number): number {
+  if (t >= 1 || t <= 0) return 1;
+  return t < 0.68
+    ? 0.58 + (1.16 - 0.58) * easeOutCubic(t / 0.68)
+    : 1.16 - 0.16 * easeOutCubic((t - 0.68) / 0.32);
 }
 
 const INK = 0xfbf7ec;
@@ -128,7 +162,9 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
 
   const root = createDisplayObject();
   const scrim = createShape();
-  const titleText = label('Horse Stacker', 76, INK, SERIF);
+  // Same treatment as TIME UP and the result height: big gold serif, so the three
+  // screens read as one family. Upright rather than tilted — the tilt is TIME UP's.
+  const titleText = label('Horse Stacker', 96, GOLD, SERIF, true);
   const playPill = createShape();
   const playText = label('PLAY', 13, 0x252420, SANS, true);
   const timerPill = createShape();
@@ -136,9 +172,22 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   const timerValue = label('60', 34, INK, SERIF);
   const restartPill = createShape();
   const restartText = label('START OVER', 10, INK, SANS, true);
-  const timeUpText = label('TIME UP', 68, INK, SERIF);
+  const timeUpScrim = createShape();
+  const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
+  const tallyRule = createShape();
+  // One label per hand, like the DOM original's one span per hand: it is what lets each
+  // horse pop in as the count reaches it. TextLabel has no multiline switch on its data,
+  // so a column cannot be one label with newlines.
+  const TALLY_CAPACITY = 126;
+  const tallyHorses: TextLabel[] = [];
+  for (let index = 0; index < TALLY_CAPACITY; index += 1) {
+    tallyHorses.push(label('🐴', 15, INK, SANS));
+  }
+  const horseAppearedAt = new Float64Array(TALLY_CAPACITY);
+  const handsCaption = label('HANDS HIGH', 10, 0xd8e0d2, SANS, true);
+  const pointsText = label('', 12, 0xd8e0d2, SERIF);
   const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
-  const resultHands = label('0 HANDS', 11, 0xd8e0d2, SANS, true);
+  const resultHands = label('0', 22, GOLD, SERIF);
   const againPill = createShape();
   const againText = label('PLAY AGAIN', 13, 0x252420, SANS, true);
   const creditsPill = createShape();
@@ -150,7 +199,9 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
 
   for (const node of [
     scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
-    restartPill, restartText, timeUpText, resultHeight, resultHands, againPill, againText,
+    restartPill, restartText, timeUpScrim, timeUpText,
+    ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight, pointsText,
+    againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
   ]) {
     addNodeChild(root, node);
@@ -179,7 +230,7 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
     const onResult = model.screen === 'result';
     const onTimeUp = model.screen === 'timeup';
     const playing = model.screen === 'playing';
-    const dim = onTitle || onResult || onTimeUp;
+    const dim = onTitle || onResult;
 
     show(scrim, dim);
     if (dim) {
@@ -195,19 +246,101 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
       pill(playPill, playText, 'play', width / 2 - 84, height * 0.5 + 30, 168, 44, INK, 1);
     }
 
+    show(timeUpScrim, onTimeUp);
     show(timeUpText, onTimeUp);
-    if (onTimeUp) centreLabel(timeUpText, height * 0.5 - 60);
+    if (onTimeUp) {
+      const t = Math.min(1, Math.max(0, model.timeUpProgress));
+      const scale = timeUpScale(t);
+      fill(timeUpScrim, 0x7e311f, 0.88 * Math.min(1, t * 3), 0, 0, width, height, 0);
+      place(timeUpScrim, 0, 0);
+      setTextLabelWidth(timeUpText, width);
+      timeUpText.scaleX = scale;
+      timeUpText.scaleY = scale;
+      timeUpText.alpha = Math.min(1, t * 2.4);
+      timeUpText.pivotX = width / 2;
+      timeUpText.pivotY = 60;
+      timeUpText.rotation = -0.052;
+      place(timeUpText, width / 2, height * 0.5);
+      invalidateNodeAppearance(timeUpText);
+    }
 
+    const showAgain = onResult && model.countProgress >= 1;
     show(resultHeight, onResult);
     show(resultHands, onResult);
-    show(againPill, onResult);
-    show(againText, onResult);
+    show(handsCaption, onResult);
+    show(pointsText, showAgain);
+    show(tallyRule, onResult);
+    show(againPill, showAgain);
+    show(againText, showAgain);
+    if (!onResult) {
+      for (const horse of tallyHorses) show(horse, false);
+    }
     if (onResult) {
-      centreLabel(resultHeight, height * 0.5 - 130);
-      setText(resultHeight, model.heightText);
-      centreLabel(resultHands, height * 0.5 - 20);
+      // Column-major, bottom-up, nine to a column — the DOM tally's layout.
+      const ruleY = height * 0.5 - 42;
+      const cell = 17;
+      const columnWidth = 19;
+      const shown = Math.min(model.handsShown, TALLY_CAPACITY);
+      const columns = Math.max(1, Math.ceil(shown / HANDS_PER_EMOJI_COLUMN));
+      const startX = width / 2 - (columns * columnWidth) / 2;
+      for (let index = 0; index < TALLY_CAPACITY; index += 1) {
+        const horse = tallyHorses[index];
+        if (horse === undefined) continue;
+        if (index >= shown) {
+          show(horse, false);
+          horseAppearedAt[index] = 0;
+          continue;
+        }
+        if (horseAppearedAt[index] === 0) horseAppearedAt[index] = model.now;
+        const column = Math.floor(index / HANDS_PER_EMOJI_COLUMN);
+        const row = index % HANDS_PER_EMOJI_COLUMN;
+        // horse-hand-pop: rises into place from below with a slight overshoot.
+        const age = Math.min(1, (model.now - (horseAppearedAt[index] ?? 0)) / 340);
+        const pop = age < 0.7
+          ? 0.2 + 0.98 * easeOutCubic(age / 0.7)
+          : 1.18 - 0.18 * easeOutCubic((age - 0.7) / 0.3);
+        show(horse, true);
+        setTextLabelWidth(horse, columnWidth);
+        horse.scaleX = pop;
+        horse.scaleY = pop;
+        horse.alpha = Math.min(1, age * 3);
+        place(
+          horse,
+          startX + column * columnWidth,
+          ruleY - (row + 1) * cell - 4 + (1 - age) * 18,
+        );
+        invalidateNodeAppearance(horse);
+      }
+      fill(tallyRule, GOLD, 0.42, 0, 0, Math.min(430, width - 48), 1, 0);
+      place(tallyRule, width / 2 - Math.min(430, width - 48) / 2, ruleY);
+
+      // The gold count and its caption sit on one line, as in the DOM original:
+      // a right-aligned number butted against a left-aligned label.
+      setTextLabelFormat(resultHands, {
+        align: 'right', color: GOLD, font: SERIF, size: 22,
+      });
+      setTextLabelWidth(resultHands, width / 2 - 34);
       setText(resultHands, model.handsText);
-      pill(againPill, againText, 'again', width / 2 - 96, height * 0.5 + 40, 192, 44, INK, 1);
+      place(resultHands, 0, ruleY + 10);
+      setTextLabelFormat(handsCaption, {
+        align: 'left', bold: true, color: 0xd8e0d2, font: SANS, size: 10,
+      });
+      setTextLabelWidth(handsCaption, width / 2);
+      place(handsCaption, width / 2 - 28, ruleY + 22);
+
+      const slam = slamScale(Math.min(1, model.countProgress * 1.02));
+      setTextLabelWidth(resultHeight, width);
+      setText(resultHeight, model.heightText);
+      resultHeight.scaleX = slam;
+      resultHeight.scaleY = slam;
+      resultHeight.pivotX = width / 2;
+      resultHeight.pivotY = 40;
+      // pivot is the anchor, so x/y address the pivot rather than the top-left corner
+      place(resultHeight, width / 2, ruleY + 52 + 40);
+
+      centreLabel(pointsText, ruleY + 150);
+      setText(pointsText, model.pointsText);
+      pill(againPill, againText, 'again', width / 2 - 96, ruleY + 186, 192, 44, INK, 1);
     }
 
     show(timerPill, playing);

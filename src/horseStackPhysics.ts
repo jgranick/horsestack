@@ -128,6 +128,14 @@ const ASSIST_LINEAR = 1.1;
 // actually feels like. Its real inertia is left alone — only the solver's view of it is
 // stiffened, and only while the piece is quiet, so a shove still spins it.
 const ASSIST_INERTIA = 10;
+// A pile of loose pieces always seeks its angle of repose: it spreads into a cone rather
+// than rising, because nothing stops a piece sliding down the outside after it lands. What
+// makes a tower instead of a heap is COHESION. A settled piece remembers where it came to
+// rest and is pulled back toward that spot, so it resists being slid off what it is
+// standing on. It is a soft pull, not a weld — a real collapse still overwhelms it, and
+// losing quiet time drops the anchor entirely.
+const COHESION_PULL = 26;
+const COHESION_GRIP = 7;
 // Height alone earns some of the same help: the higher a piece rides, the calmer it is
 // held, so a tall pile is quietly propped up rather than honestly balanced.
 const STABILITY_FULL_HEIGHT = 0.9;
@@ -141,6 +149,8 @@ const stackBodyQuiet = new WeakMap<RigidBody2D, number>();
 // The solver-computed inertia, kept so the assist always stiffens from the true value
 // rather than compounding on its own previous output.
 const stackBodyInertia = new WeakMap<RigidBody2D, number>();
+// Where a settled piece came to rest, and what cohesion pulls it back toward.
+const stackBodyAnchor = new WeakMap<RigidBody2D, number>();
 
 export function createHorseStackWorld(): Physics2DWorld {
   const world = createPhysics2DWorld(
@@ -235,6 +245,7 @@ function applyStackAssist(world: Physics2DWorld): void {
       body.linearDamping = base.linear + ASSIST_LINEAR;
       body.angularDamping = base.angular + ASSIST_ANGULAR;
       applyAssistInertia(body, 1);
+      stackBodyAnchor.set(body, body.x);
       continue;
     }
     const still =
@@ -256,7 +267,25 @@ function applyStackAssist(world: Physics2DWorld): void {
     body.linearDamping = base.linear + assist * ASSIST_LINEAR;
     body.angularDamping = base.angular + assist * ASSIST_ANGULAR;
     applyAssistInertia(body, assist);
+    applyCohesion(body, assist, still);
   }
+}
+
+// Holds a settled piece over the spot it settled on. Horizontal only: vertical motion is
+// the game, sideways motion is the pile giving up.
+function applyCohesion(body: RigidBody2D, assist: number, still: boolean): void {
+  if (assist <= 0 || !still) {
+    stackBodyAnchor.delete(body);
+    return;
+  }
+  const anchor = stackBodyAnchor.get(body);
+  if (anchor === undefined) {
+    stackBodyAnchor.set(body, body.x);
+    return;
+  }
+  const drift = anchor - body.x;
+  body.velocityX += drift * COHESION_PULL * assist * PHYSICS_STEP;
+  body.velocityX -= body.velocityX * COHESION_GRIP * assist * PHYSICS_STEP;
 }
 
 function applyAssistInertia(body: RigidBody2D, assist: number): void {

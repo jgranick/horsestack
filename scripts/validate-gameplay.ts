@@ -234,8 +234,11 @@ function validateRandomObjectSelection(): void {
 }
 
 function validateObjectProfiles(): void {
-  if (Math.abs(HORSE_SIZE_MULTIPLIER - 1.2) > Number.EPSILON) {
-    throw new Error(`horse profile: expected 20% visual/physics scale increase`);
+  // Pinned because the mesh scale, the collider and the metre calibration all derive from
+  // it, so a stray edit silently resizes the horse everywhere at once. The value is set by
+  // measurement against the cow — see the note on the constant.
+  if (Math.abs(HORSE_SIZE_MULTIPLIER - 1.35) > Number.EPSILON) {
+    throw new Error(`horse profile: expected the measured 1.35 scale against the cow`);
   }
   const uniqueSizes = new Set<string>();
   for (const kind of STACK_OBJECT_KINDS) {

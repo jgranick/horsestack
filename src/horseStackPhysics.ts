@@ -22,7 +22,13 @@ export interface StackObjectProfile {
   supportHalfHeight: number;
 }
 
-export const HORSE_SIZE_MULTIPLIER = 1.2;
+// Sized against the cow, which is left as authored. Measured off both meshes as rendered,
+// comparing the height at which each body is still broad — the withers line — rather than
+// the full silhouette, because a horse is measured at the withers and its head and neck
+// carry another 27% above that. At 1.2 the horse's back sat at 0.1337 against the cow's
+// 0.1408: the horse was SHORTER than the cow, where a 1.55m horse should stand about 1.07x
+// a 1.45m dairy cow. 1.35 puts the ratio right.
+export const HORSE_SIZE_MULTIPLIER = 1.35;
 export const HORSE_HALF_WIDTH = 0.09 * HORSE_SIZE_MULTIPLIER;
 export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
 // Measured off the horse glTF projected into collider space: the back of the barrel sits

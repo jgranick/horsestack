@@ -1,4 +1,5 @@
 import type {
+  VertexAttributeLayout,
   Camera3D,
   ImportDiagnostic,
   Mesh,
@@ -34,6 +35,7 @@ import {
   createOrbitCameraController,
   createOrthographicProjection,
   createParticleEmitter3D,
+  buildParticleCurve,
   createParticleEmitterConfig,
   createParticleEmitterState,
   createPerspectiveProjection,
@@ -41,6 +43,15 @@ import {
   createRingMeshGeometry,
   createStandardPbrMaterial,
   createVector3,
+  registerGlVertexColorMaterial,
+  srgbChannelToLinear,
+  setMeshGeometryVertexColor0,
+  getMeshGeometryVertexPosition,
+  getMeshGeometryVertexCount,
+  createVertexColorMaterial,
+  createSphereMeshGeometry,
+  convertMeshGeometryLayout,
+  easeOutCubic,
   emitParticleBurst3D,
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
@@ -265,6 +276,71 @@ let pointerY = -1;
 let pointerDown = false;
 
 const scene = createNode3D(Node3DKind);
+// The sky, in Flight rather than in CSS. It used to be a linear-gradient on the viewer
+// showing through a transparent canvas, which meant the game's own background lived
+// outside the renderer and could not travel with it. It is now a vertex-coloured dome
+// inside the scene: an inverted sphere big enough to sit outside the farm and inside the
+// camera's far plane, lit by nothing (createVertexColorMaterial is unlit), with the
+// gradient written into color0 by height. The forward pass renders with culling off, so
+// looking at the sphere from inside shows its back faces normally.
+//
+// The canonical mesh layout has no color0, so the geometry is converted to one that does.
+const SKY_RADIUS = 40;
+const SKY_LAYOUT = {
+  attributes: [
+    { byteOffset: 0, format: 'float32x3', semantic: 'position' },
+    { byteOffset: 12, format: 'float32x3', semantic: 'normal' },
+    { byteOffset: 24, format: 'float32x4', semantic: 'tangent' },
+    { byteOffset: 40, format: 'float32x2', semantic: 'uv0' },
+    { byteOffset: 48, format: 'float32x4', semantic: 'color0' },
+  ],
+  stride: 64,
+} as const satisfies VertexAttributeLayout;
+// The stops the stylesheet used, so the sky is the one the game shipped with.
+const SKY_STOPS = [
+  { at: 0, color: [0x6c, 0xb8, 0xee] },
+  { at: 0.45, color: [0xa8, 0xd8, 0xf5] },
+  { at: 0.78, color: [0xdf, 0xf0, 0xfb] },
+  { at: 1, color: [0xf3, 0xf7, 0xe9] },
+] as const;
+
+function sampleSkyGradient(t: number): readonly [number, number, number] {
+  for (let index = 1; index < SKY_STOPS.length; index += 1) {
+    const previous = SKY_STOPS[index - 1];
+    const next = SKY_STOPS[index];
+    if (previous === undefined || next === undefined || t > next.at) continue;
+    const span = next.at - previous.at;
+    const mix = span > 0 ? (t - previous.at) / span : 0;
+    return [0, 1, 2].map((channel) => {
+      const from = previous.color[channel] ?? 0;
+      const to = next.color[channel] ?? 0;
+      // The stops are sRGB; the scene composites linear, so decode rather than lerp bytes.
+      return srgbChannelToLinear((from + (to - from) * mix) / 255);
+    }) as unknown as readonly [number, number, number];
+  }
+  return [1, 1, 1];
+}
+
+function createSkyDome(): Mesh {
+  const geometry = convertMeshGeometryLayout(
+    createSphereMeshGeometry(SKY_RADIUS, 32, 20),
+    SKY_LAYOUT,
+  );
+  const position = { x: 0, y: 0, z: 0 };
+  const vertexCount = getMeshGeometryVertexCount(geometry);
+  for (let index = 0; index < vertexCount; index += 1) {
+    getMeshGeometryVertexPosition(position, geometry, index);
+    // The stylesheet ran its gradient top to bottom, so t is 0 at the zenith.
+    const [r, g, b] = sampleSkyGradient(clamp(0.5 - position.y / (SKY_RADIUS * 2), 0, 1));
+    setMeshGeometryVertexColor0(geometry, index, r, g, b, 1);
+  }
+  const dome = createMesh(geometry, [createVertexColorMaterial({ tint: 0xffffffff })]);
+  dome.name = 'sky';
+  return dome;
+}
+
+const skyDome = createSkyDome();
+addNodeChild(scene, skyDome);
 const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
 addNodeChild(scene, stackLayer);
 // The hovering preview and its halo ring share one parent so a single detach keeps both
@@ -305,8 +381,13 @@ const celebrationEmitter: ParticleEmitter3D = createParticleEmitter3D({
 });
 addNodeChild(scene, celebrationEmitter);
 const celebrationConfig: ParticleEmitterConfig = createParticleEmitterConfig({
-  alphaEnd: 0,
-  alphaStart: 0.95,
+  // Paper, not sparks. Four things separate the two, and the old burst had all four wrong:
+  // confetti keeps its size (scaleEnd is a MULTIPLIER, so the old 0.02 shrank every piece
+  // to nothing), holds its colour until it lands rather than dimming from the first frame,
+  // tumbles fast, and falls slowly enough to hang in the air and flutter.
+  alphaCurve: buildParticleCurve((t) => (t < 0.74 ? 1 : 1 - (t - 0.74) / 0.26)),
+  alphaEnd: 1,
+  alphaStart: 1,
   colorEndB: 1,
   colorEndG: 1,
   colorEndR: 1,
@@ -317,24 +398,29 @@ const celebrationConfig: ParticleEmitterConfig = createParticleEmitterConfig({
   directionY: 1,
   directionZ: 0,
   duration: 0,
-  emitterConeAngle: 1.65,
-  emitterRadius: 0.16,
+  // Nearly a hemisphere: a party popper sprays sideways as much as up, where the old
+  // narrower cone threw a fountain.
+  emitterConeAngle: 2.5,
+  emitterRadius: 0.22,
   emitterShape: 'cone3d',
-  gravityY: -3.2,
-  lifetimeMax: 2.1,
-  lifetimeMin: 0.9,
+  gravityY: -1.15,
+  lifetimeMax: 4.4,
+  lifetimeMin: 2.4,
   loop: false,
-  maxParticles: 240,
-  rotationSpeedMax: 8,
-  rotationSpeedMin: -8,
-  scaleEnd: 0.02,
-  scaleMax: 0.48,
-  scaleMin: 0.18,
+  maxParticles: 760,
+  rotationSpeedMax: 17,
+  rotationSpeedMin: -17,
+  scaleEnd: 1,
+  // Small and many. At 0.26 the pieces read as sheets of paper rather than confetti,
+  // especially early on when the camera is still close to the pile.
+  scaleMax: 0.135,
+  scaleMin: 0.05,
   spawnRate: 0,
-  speedMax: 5.2,
-  speedMin: 2.1,
+  speedMax: 3.4,
+  speedMin: 1.5,
   worldSpace: true,
 });
+
 const dustConfig: ParticleEmitterConfig = createParticleEmitterConfig({
   alphaEnd: 0,
   alphaStart: 0.42,
@@ -366,6 +452,7 @@ const dustConfig: ParticleEmitterConfig = createParticleEmitterConfig({
   speedMin: 0.08,
   worldSpace: true,
 });
+
 let celebrationState: ParticleEmitterState = createParticleEmitterState();
 let dustState: ParticleEmitterState = createParticleEmitterState();
 
@@ -818,8 +905,9 @@ function spawnObject(now: number): void {
   setLandingGhostKind(kind, variantIndex);
   if (landingGhost !== null) landingGhost.enabled = true;
   if (landingRadiance !== null) landingRadiance.enabled = true;
-  const profile = STACK_OBJECT_PROFILES[kind];
-  statusCopy.textContent = `${profile.emoji} ${getStackObjectVisualLabel(kind, variantIndex)}`;
+  // Announced to screen readers only. The label alone: an emoji here is read aloud as its
+  // own name before the word it duplicates.
+  statusCopy.textContent = getStackObjectVisualLabel(kind, variantIndex);
   updateActiveStackObject(now);
 }
 
@@ -924,7 +1012,7 @@ function finishGame(now: number): void {
 function updateResultAnimation(now: number): void {
   if (resultAnimationStart === 0) return;
   const progress = clamp((now - resultAnimationStart) / resultAnimationDuration, 0, 1);
-  const easedProgress = 1 - Math.pow(1 - progress, 3);
+  const easedProgress = easeOutCubic(progress);
   const handsToShow = Math.min(resultHands, Math.floor(resultHands * easedProgress));
   if (advanceHorseHands(handsToShow)) playResultTick(now);
 
@@ -989,14 +1077,17 @@ function recordFinalHeight(meters: number): void {
 
 function celebrateFinalHeight(): void {
   const burstY = STACK_BASE_Y + Math.max(0.8, finalHeight);
-  const colors = [0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff];
+  // One popper per colour, strung out across the pile.
+  const colors = [
+    0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff, 0xb08fd8ff,
+  ];
   for (let index = 0; index < colors.length; index++) {
     const horizontalOffset = -1.8 + (index / (colors.length - 1)) * 3.6;
     emitParticleBurst3D(
       celebrationEmitter,
       celebrationState,
       celebrationConfig,
-      28,
+      92,
       STACK_X + (Math.random() - 0.5) * 0.16,
       burstY,
       STACK_Z - horizontalOffset,
@@ -1442,9 +1533,15 @@ function renderFrame(): void {
   // at the index they held so forward draw order is untouched. See previewLayer above for
   // why switching them off is not enough.
   const previewParent = getNodeParent(previewLayer);
+  const skyParent = getNodeParent(skyDome);
   if (previewParent !== null) removeNodeChild(previewParent, previewLayer);
+  // The sky has to come out too, and for a sharper reason than the halo: the shadow pass
+  // draws every node with geometry, and a dome that ENCLOSES the shadow camera would write
+  // depth in front of the whole farm and shadow all of it.
+  if (skyParent !== null) removeNodeChild(skyParent, skyDome);
   drawGlScene3DShadowMap(renderState, scene, shadowCamera, directionalLight);
   if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
+  if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
   beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
   renderGlBackground(renderState);
   renderState.gl.depthMask(true);
@@ -1456,7 +1553,7 @@ function renderFrame(): void {
     resultAnimationStart === 0
       ? phase === 'finished' ? 1 : 0
       : clamp((performance.now() - resultAnimationStart) / resultAnimationDuration, 0, 1);
-  const shownMeters = getStackHeightMeters(finalHeight) * (1 - Math.pow(1 - countProgress, 3));
+  const shownMeters = getStackHeightMeters(finalHeight) * easeOutCubic(countProgress);
   const uiWantsAnotherFrame = gameUi.update({
     // Blank on a first ever round: there is no previous best to measure this one against,
     // and echoing the number already on screen back as "BEST" says nothing.
@@ -1564,6 +1661,7 @@ function initializeRenderer() {
     if (import.meta.env.DEV) enableFlightDiagnostics(nextRenderState);
     registerStandardGlTextureResolvers(nextRenderState);
     registerGlStandardPbrMaterial(nextRenderState);
+    registerGlVertexColorMaterial(nextRenderState);
     const nextPipeline = createGlRenderEffectPipeline(nextRenderState, {
       sampleCount: 4,
       format: 'rgba16f',

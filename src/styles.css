@@ -30,7 +30,9 @@ body {
   height: 100%;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, #6cb8ee 0%, #a8d8f5 45%, #dff0fb 78%, #f3f7e9 100%);
+  /* Flat sky, not the gradient: the gradient is now a dome inside the scene, and this is
+     only what shows before the first frame and behind any sub-pixel seam at an edge. */
+  background: #6cb8ee;
   -webkit-user-select: none;
   user-select: none;
   touch-action: none;

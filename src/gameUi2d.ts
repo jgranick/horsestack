@@ -44,6 +44,10 @@ import {
   createMatrix,
   createShape,
   createTextLabel,
+  easeOutBack,
+  easeOutCubic,
+  easePiecewise,
+  easeScaleOutput,
   defaultGlShapeCommands,
   defaultGlRichTextRenderer,
   defaultGlShapeRenderer,
@@ -115,39 +119,29 @@ export interface UiModel {
 const HANDS_PER_EMOJI_COLUMN = 9;
 const GOLD = 0xffd166;
 
-// The DOM original eased each of these with CSS keyframes; recreated here so the beats
-// survive the move to Flight 2D. See docs/result-screen-reference.png.
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
-
+// The DOM original eased each of these with CSS keyframes; recreated here on Flight's
+// easing primitives so the beats survive the move to Flight 2D, and so the curves are the
+// library's rather than four hand-rolled polynomials. See docs/result-screen-reference.png.
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
-// Overshoots past 1 then settles, so a screen arrives with a bit of bounce instead of
-// simply appearing.
-function easeOutBack(t: number): number {
-  const c = 1.7;
-  const u = t - 1;
-  return 1 + (c + 1) * u * u * u + c * u * u;
-}
-
 // time-up-arrive: 1.18 -> 0.97 at 55% -> 1.0, with the panel fading in.
-function timeUpScale(t: number): number {
-  if (t >= 1) return 1;
-  if (t <= 0) return 1.18;
-  return t < 0.55
-    ? 1.18 + (0.97 - 1.18) * easeOutCubic(t / 0.55)
-    : 0.97 + 0.03 * easeOutCubic((t - 0.55) / 0.45);
-}
+const timeUpScale = easePiecewise([
+  { ease: easeScaleOutput(easeOutCubic, 1.18, 0.97), weight: 0.55 },
+  { ease: easeScaleOutput(easeOutCubic, 0.97, 1), weight: 0.45 },
+]);
 
 // total-score-slam: 0.58 -> 1.16 at 68% -> 1.0.
+const slamCurve = easePiecewise([
+  { ease: easeScaleOutput(easeOutCubic, 0.58, 1.16), weight: 0.68 },
+  { ease: easeScaleOutput(easeOutCubic, 1.16, 1), weight: 0.32 },
+]);
+
+// Before the beat the height sits at rest scale; the slam starts the moment it begins, so
+// t == 0 is "not yet" rather than the bottom of the curve.
 function slamScale(t: number): number {
-  if (t >= 1 || t <= 0) return 1;
-  return t < 0.68
-    ? 0.58 + (1.16 - 0.58) * easeOutCubic(t / 0.68)
-    : 1.16 - 0.16 * easeOutCubic((t - 0.68) / 0.32);
+  return t <= 0 ? 1 : slamCurve(t);
 }
 
 const INK = 0xfbf7ec;

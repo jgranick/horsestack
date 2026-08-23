@@ -11,7 +11,6 @@ import {
 export type StackObjectKind = 'horse' | 'hay' | 'cow' | 'chickens';
 
 export interface StackObjectProfile {
-  emoji: string;
   halfHeight: number;
   halfWidth: number;
   label: string;
@@ -54,28 +53,24 @@ export const STACK_OBJECT_WEIGHTS: Readonly<Record<StackObjectKind, number>> = {
 };
 export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObjectProfile>> = {
   horse: {
-    emoji: '🐎',
     halfHeight: HORSE_HALF_HEIGHT,
     halfWidth: HORSE_HALF_WIDTH,
     label: 'Horse',
     supportHalfHeight: HORSE_SUPPORT_HALF_HEIGHT,
   },
   hay: {
-    emoji: '🌾',
     halfHeight: 0.046,
     halfWidth: 0.0505,
     label: 'Hay bale',
     supportHalfHeight: 0.046,
   },
   cow: {
-    emoji: '🐄',
     halfHeight: 0.097,
     halfWidth: 0.074,
     label: 'Cow',
     supportHalfHeight: 0.097,
   },
   chickens: {
-    emoji: '🐔',
     halfHeight: 0.021,
     halfWidth: 0.021,
     label: 'Chicken',

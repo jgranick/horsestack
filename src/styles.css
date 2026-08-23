@@ -1211,3 +1211,20 @@ h1 em {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* ── The game UI is drawn by Flight 2D (src/gameUi2d.ts) on its own canvas. These DOM
+   nodes stay in the document because main.ts still reads and writes them, but nothing
+   shows them. The loading and error panels are deliberately NOT here: they have to be
+   visible before WebGL exists and when it fails. ── */
+.start-panel,
+.time-up-panel,
+.result-panel,
+.hero-timer,
+.restart-game,
+.drop-horse,
+.credits-toggle,
+.credits-panel,
+.fullscreen-toggle {
+  display: none !important;
+}

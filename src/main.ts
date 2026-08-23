@@ -66,6 +66,8 @@ import {
 } from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import { createGameUi2D } from './gameUi2d';
+import type { UiScreen } from './gameUi2d';
 import {
   FARM_PROP_SCENE_SCALE,
   FARM_PROP_VARIANTS,
@@ -256,6 +258,8 @@ const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
 
 retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
+const gameUi = createGameUi2D(viewer, renderState.pixelRatio);
+let creditsOpen = false;
 
 const scene = createNode3D(Node3DKind);
 const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
@@ -1243,7 +1247,12 @@ function bindGameControls(): void {
   });
 
   window.addEventListener('pointerdown', (event: PointerEvent) => {
-    if (!event.isPrimary || event.button !== 0 || phase !== 'playing') return;
+    if (!event.isPrimary || event.button !== 0) return;
+    if (handleUiPress(event)) {
+      event.preventDefault();
+      return;
+    }
+    if (phase !== 'playing') return;
     // Controls and links keep their own meaning: Start over must restart, the place
     // prompt has its own handler, and a credit link must still open.
     if (isInteractiveEventTarget(event.target)) return;
@@ -1283,6 +1292,44 @@ function bindGameControls(): void {
   restartButton.addEventListener('click', startGame);
 }
 
+function handleUiPress(event: PointerEvent): boolean {
+  const bounds = canvas.getBoundingClientRect();
+  const x = event.clientX - bounds.left;
+  const y = event.clientY - bounds.top;
+  if (x < 0 || y < 0 || x > bounds.width || y > bounds.height) return false;
+  const screen = getUiScreen();
+  for (const button of gameUi.buttons) {
+    if (
+      x < button.x || y < button.y ||
+      x > button.x + button.width || y > button.y + button.height
+    ) {
+      continue;
+    }
+    if (button.id === 'credits') {
+      creditsOpen = !creditsOpen;
+      renderRequested = true;
+      return true;
+    }
+    if (button.id === 'fullscreen') {
+      toggleFullscreen();
+      return true;
+    }
+    if (button.id === 'play' && screen === 'title') {
+      startGame(event);
+      return true;
+    }
+    if (button.id === 'again' && screen === 'result') {
+      startGame(event);
+      return true;
+    }
+    if (button.id === 'restart' && screen === 'playing') {
+      startGame(event);
+      return true;
+    }
+  }
+  return false;
+}
+
 function isInteractiveEventTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
@@ -1298,13 +1345,7 @@ function bindFullscreenToggle(): void {
     fullscreenToggle.hidden = true;
     return;
   }
-  fullscreenToggle.addEventListener('click', () => {
-    const request =
-      document.fullscreenElement === viewer ? document.exitFullscreen() : viewer.requestFullscreen();
-    request.catch((error: unknown) => {
-      console.info('Fullscreen request was refused:', error);
-    });
-  });
+  fullscreenToggle.addEventListener('click', () => toggleFullscreen());
   document.addEventListener('fullscreenchange', () => {
     syncFullscreenToggle();
     // The viewer's box changes before a resize event necessarily arrives, and
@@ -1313,6 +1354,15 @@ function bindFullscreenToggle(): void {
     renderRequested = true;
   });
   syncFullscreenToggle();
+}
+
+function toggleFullscreen(): void {
+  if (typeof viewer.requestFullscreen !== 'function') return;
+  const request =
+    document.fullscreenElement === viewer ? document.exitFullscreen() : viewer.requestFullscreen();
+  request.catch((error: unknown) => {
+    console.info('Fullscreen request was refused:', error);
+  });
 }
 
 function syncFullscreenToggle(): void {
@@ -1385,6 +1435,7 @@ function resizeCanvas(): void {
     canvas.height = backingHeight;
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+    gameUi.resize(width, height, nextPixelRatio);
     if (camera.projection.kind === 'perspective') camera.projection.aspect = width / height;
     renderRequested = true;
   }
@@ -1410,6 +1461,22 @@ function renderFrame(): void {
   renderState.gl.clear(renderState.gl.DEPTH_BUFFER_BIT);
   drawGlScene3D(renderState, scene, camera, lights);
   endGlRenderEffectPipeline(renderState, pipeline, []);
+  gameUi.update({
+    creditsOpen,
+    handsText: `${resultHands} HANDS`,
+    heightText: formatHeight(finalHeight),
+    screen: getUiScreen(),
+    secondsLeft: Math.max(0, (gameEndsAt - performance.now()) / 1000),
+  });
+  gameUi.render();
+}
+
+function getUiScreen(): UiScreen {
+  if (phase === 'loading') return 'loading';
+  if (phase === 'playing') return 'playing';
+  if (phase === 'settling') return 'timeup';
+  if (phase === 'finished') return 'result';
+  return 'title';
 }
 
 function enterFrame(now: number): void {

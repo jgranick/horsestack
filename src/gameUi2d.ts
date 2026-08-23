@@ -1,0 +1,269 @@
+// The game's UI, drawn with Flight's 2D renderer instead of DOM and CSS.
+//
+// It lives on its OWN canvas and its OWN GL context, layered over the 3D one. That is not
+// incidental: sharing a GlRenderState with the 3D pipeline corrupts it (props lose their
+// textures) because the two passes fight over renderer registrations and per-frame batch
+// state, and rendering 2D after the 3D pipeline has composited draws nothing at all
+// because no target is bound any more. A separate context sidesteps both.
+import type { DisplayObject, GlRenderState, Shape, TextLabel } from '@flighthq/sdk';
+import {
+  addNodeChild,
+  appendShapeBeginFill,
+  appendShapeRoundRectangle,
+  clearShapeCommands,
+  createCanvasShapeRasterizer,
+  createCanvasTextureResolvers,
+  createDisplayObject,
+  createGlCanvasElement,
+  createGlRenderState,
+  createMatrix,
+  createShape,
+  createTextLabel,
+  defaultGlShapeCommands,
+  defaultGlShapeRenderer,
+  defaultGlTextLabelRenderer,
+  invalidateNodeAppearance,
+  invalidateNodeRender,
+  invalidateNodeLocalTransform,
+  prepareScene2DRender,
+  registerGlShapeCommands,
+  registerGlShapeRasterizer,
+  registerGlStandardMaterial,
+  registerRenderer,
+  renderGlBackground,
+  renderGlScene2D,
+  setTextLabelFormat,
+  setTextLabelHeight,
+  setTextLabelString,
+  setTextLabelWidth,
+  ShapeKind,
+  TextLabelKind,
+} from '@flighthq/sdk';
+
+export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
+
+export interface UiButton {
+  height: number;
+  id: 'play' | 'again' | 'restart' | 'fullscreen' | 'credits';
+  width: number;
+  x: number;
+  y: number;
+}
+
+export interface UiState {
+  buttons: UiButton[];
+  canvas: HTMLCanvasElement;
+  render: () => void;
+  resize: (width: number, height: number, pixelRatio: number) => void;
+  update: (model: UiModel) => void;
+}
+
+export interface UiModel {
+  creditsOpen: boolean;
+  handsText: string;
+  heightText: string;
+  screen: UiScreen;
+  secondsLeft: number;
+}
+
+const INK = 0xfbf7ec;
+const SERIF = 'Georgia, "Times New Roman", serif';
+const SANS = 'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif';
+
+function label(text: string, size: number, color: number, font: string, bold = false): TextLabel {
+  const node = createTextLabel();
+  setTextLabelString(node, text);
+  setTextLabelFormat(node, { align: 'center', bold, color, font, size });
+  setTextLabelWidth(node, 10);
+  setTextLabelHeight(node, size * 1.6);
+  return node;
+}
+
+function place(node: DisplayObject, x: number, y: number): void {
+  node.x = x;
+  node.y = y;
+  invalidateNodeLocalTransform(node);
+}
+
+function show(node: DisplayObject, visible: boolean): void {
+  if (node.visible === visible) return;
+  node.visible = visible;
+  invalidateNodeAppearance(node);
+}
+
+function setText(node: TextLabel, text: string): void {
+  if (node.data.text === text) return;
+  setTextLabelString(node, text);
+}
+
+function fill(shape: Shape, colour: number, alpha: number, x: number, y: number, w: number, h: number, r: number): void {
+  clearShapeCommands(shape);
+  appendShapeBeginFill(shape, colour, alpha);
+  appendShapeRoundRectangle(shape, x, y, w, h, r, r);
+  invalidateNodeRender(shape);
+}
+
+export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
+  const canvas = createGlCanvasElement(1, 1, pixelRatio);
+  canvas.style.position = 'absolute';
+  canvas.style.inset = '0';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.pointerEvents = 'none';
+  canvas.style.zIndex = '8';
+  canvas.setAttribute('aria-hidden', 'true');
+  host.appendChild(canvas);
+
+  const state: GlRenderState = createGlRenderState(canvas, {
+    pixelRatio,
+    backgroundColor: 0x00000000,
+    contextAttributes: { alpha: true, antialias: true },
+  });
+  registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
+  registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
+  registerGlShapeCommands(state, defaultGlShapeCommands);
+  registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers()));
+  registerGlStandardMaterial(state);
+  state.renderTransform2D = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+  const root = createDisplayObject();
+  const scrim = createShape();
+  const titleText = label('Horse Stacker', 76, INK, SERIF);
+  const playPill = createShape();
+  const playText = label('PLAY', 13, 0x252420, SANS, true);
+  const timerPill = createShape();
+  const timerCaption = label('TIME LEFT', 9, 0xd8e0d2, SANS, true);
+  const timerValue = label('60', 34, INK, SERIF);
+  const restartPill = createShape();
+  const restartText = label('START OVER', 10, INK, SANS, true);
+  const timeUpText = label('TIME UP', 68, INK, SERIF);
+  const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
+  const resultHands = label('0 HANDS', 11, 0xd8e0d2, SANS, true);
+  const againPill = createShape();
+  const againText = label('PLAY AGAIN', 13, 0x252420, SANS, true);
+  const creditsPill = createShape();
+  const creditsText = label('i', 15, INK, SERIF);
+  const creditsBody = createShape();
+  const creditsCopy = label('', 11, 0xd8e0d2, SANS);
+  const fullscreenPill = createShape();
+  const fullscreenText = label('⛶', 15, INK, SANS);
+
+  for (const node of [
+    scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
+    restartPill, restartText, timeUpText, resultHeight, resultHands, againPill, againText,
+    creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
+  ]) {
+    addNodeChild(root, node);
+  }
+
+  let width = 1;
+  let height = 1;
+  const buttons: UiButton[] = [];
+
+  function centreLabel(node: TextLabel, y: number): void {
+    setTextLabelWidth(node, width);
+    place(node, 0, y);
+  }
+
+  function pill(shape: Shape, text: TextLabel, id: UiButton['id'], x: number, y: number, w: number, h: number, colour: number, alpha: number): void {
+    fill(shape, colour, alpha, 0, 0, w, h, h / 2);
+    place(shape, x, y);
+    setTextLabelWidth(text, w);
+    place(text, x, y + (h - (text.data.textFormat.size ?? 12) * 1.35) / 2);
+    buttons.push({ height: h, id, width: w, x, y });
+  }
+
+  function update(model: UiModel): void {
+    buttons.length = 0;
+    const onTitle = model.screen === 'title';
+    const onResult = model.screen === 'result';
+    const onTimeUp = model.screen === 'timeup';
+    const playing = model.screen === 'playing';
+    const dim = onTitle || onResult || onTimeUp;
+
+    show(scrim, dim);
+    if (dim) {
+      fill(scrim, 0x1c2a1b, onTitle ? 0.72 : 0.78, 0, 0, width, height, 0);
+      place(scrim, 0, 0);
+    }
+
+    show(titleText, onTitle);
+    show(playPill, onTitle);
+    show(playText, onTitle);
+    if (onTitle) {
+      centreLabel(titleText, height * 0.5 - 120);
+      pill(playPill, playText, 'play', width / 2 - 84, height * 0.5 + 30, 168, 44, INK, 1);
+    }
+
+    show(timeUpText, onTimeUp);
+    if (onTimeUp) centreLabel(timeUpText, height * 0.5 - 60);
+
+    show(resultHeight, onResult);
+    show(resultHands, onResult);
+    show(againPill, onResult);
+    show(againText, onResult);
+    if (onResult) {
+      centreLabel(resultHeight, height * 0.5 - 130);
+      setText(resultHeight, model.heightText);
+      centreLabel(resultHands, height * 0.5 - 20);
+      setText(resultHands, model.handsText);
+      pill(againPill, againText, 'again', width / 2 - 96, height * 0.5 + 40, 192, 44, INK, 1);
+    }
+
+    show(timerPill, playing);
+    show(timerCaption, playing);
+    show(timerValue, playing);
+    show(restartPill, playing);
+    show(restartText, playing);
+    if (playing) {
+      const w = 104;
+      const x = width - w - 24;
+      fill(timerPill, 0x1f2d1d, 0.72, 0, 0, w, 62, 18);
+      place(timerPill, x, 18);
+      setTextLabelWidth(timerCaption, w);
+      place(timerCaption, x, 26);
+      setTextLabelWidth(timerValue, w);
+      place(timerValue, x, 38);
+      setText(timerValue, String(Math.max(0, Math.ceil(model.secondsLeft))));
+      pill(restartPill, restartText, 'restart', width - 128, 92, 104, 30, 0x1f2d1d, 0.5);
+    }
+
+    pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);
+    pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1d, 0.42);
+
+    show(creditsBody, model.creditsOpen);
+    show(creditsCopy, model.creditsOpen);
+    if (model.creditsOpen) {
+      const w = Math.min(420, width - 48);
+      fill(creditsBody, 0x182217, 0.9, 0, 0, w, 96, 16);
+      place(creditsBody, 24, height - 162);
+      setText(
+        creditsCopy,
+        'Built with Flight · Models by EdwinRC and SleepyPineapple, CC BY 4.0 · ' +
+          'Music “The Mountain’s Happy Song” by Elijah_K via Free Music Archive, CC BY · ' +
+          'Ambience and effects via Free Sound Effects',
+      );
+      setTextLabelFormat(creditsCopy, { ...creditsCopy.data.textFormat, align: 'left' });
+      setTextLabelWidth(creditsCopy, w - 32);
+      setTextLabelHeight(creditsCopy, 80);
+      place(creditsCopy, 40, height - 146);
+    }
+  }
+
+  function resize(nextWidth: number, nextHeight: number, nextPixelRatio: number): void {
+    width = Math.max(1, Math.round(nextWidth));
+    height = Math.max(1, Math.round(nextHeight));
+    canvas.width = Math.round(width * nextPixelRatio);
+    canvas.height = Math.round(height * nextPixelRatio);
+    state.pixelRatio = nextPixelRatio;
+    state.renderTransform2D = createMatrix(nextPixelRatio, 0, 0, nextPixelRatio, 0, 0);
+  }
+
+  function render(): void {
+    if (!prepareScene2DRender(state, root)) return;
+    renderGlBackground(state);
+    renderGlScene2D(state, root);
+  }
+
+  return { buttons, canvas, render, resize, update };
+}

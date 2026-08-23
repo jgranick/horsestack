@@ -34,6 +34,7 @@ import {
   createBlurEffect,
   createBrightnessContrastAdjustment,
   createColorMatrixAdjustment,
+  createColorMatrixFromTint,
   createSaturationColorMatrix,
   createGlRenderState,
   createVignetteEffect,
@@ -226,20 +227,23 @@ const START_INPUT_GUARD_MS = 400;
 const BACKDROP_BLUR_MAX = 13;
 const backdropBlurEffect = createBlurEffect({ blurX: 0, blurY: 0 });
 const backdropVignetteEffect = createVignetteEffect({
-  color: 0x101a10,
+  color: 0x2a1608,
   intensity: 0,
   radius: 0.5,
   softness: 0.85,
 });
-// Blur alone was not enough: gold serif over a bright, in-focus-coloured farm is hard to
-// read even when the farm is out of focus, because the problem is chroma and value, not
-// sharpness. Pulling the saturation and the exposure down turns the scene into a soft
-// backdrop the type sits on top of, and reads as a deliberate treatment rather than the
-// black wash this replaced. Both are MATRIX-tier adjustments, so the pipeline fuses them
-// with each other into a single pass — a hue/saturation adjustment would be LUT-tier and
-// would rebake its table on every frame of the ramp.
-const BACKDROP_SATURATION = 0.45;
-const BACKDROP_BRIGHTNESS = -0.26;
+// Blur alone was not enough: gold serif over a bright farm is hard to read even when the
+// farm is out of focus, because the problem is chroma and value, not sharpness. Rather than
+// simply draining the colour, the backdrop is pushed toward a warm amber — dusk over the
+// pasture — which separates it from the cool blue sky and the gold type without the scene
+// reading as merely dimmed. A little desaturation first stops the barn's red fighting the
+// tint, and the exposure drop is what buys the type its contrast. All three are MATRIX-tier
+// adjustments, so the pipeline fuses them into a single pass; a hue/saturation adjustment
+// would be LUT-tier and would rebake its table on every frame of the ramp.
+const BACKDROP_TINT = 0xc4611aff;
+const BACKDROP_TINT_AMOUNT = 0.62;
+const BACKDROP_SATURATION = 0.62;
+const BACKDROP_BRIGHTNESS = -0.36;
 const NO_EFFECTS: readonly RenderEffect[] = [];
 // Rebuilt only while the ramp is moving: brightness/contrast bake their matrix at
 // construction, so a mutated field would not take.
@@ -257,6 +261,7 @@ function getBackdropEffects(focus: number): readonly RenderEffect[] {
   backdropEffects = [
     backdropBlurEffect,
     createColorMatrixAdjustment(createSaturationColorMatrix(1 + (BACKDROP_SATURATION - 1) * amount)),
+    createColorMatrixAdjustment(createColorMatrixFromTint(BACKDROP_TINT, BACKDROP_TINT_AMOUNT * amount)),
     createBrightnessContrastAdjustment({ brightness: BACKDROP_BRIGHTNESS * amount }),
     backdropVignetteEffect,
   ];
@@ -352,12 +357,15 @@ const SKY_LAYOUT = {
   ],
   stride: 64,
 } as const satisfies VertexAttributeLayout;
-// The stops the stylesheet used, so the sky is the one the game shipped with.
+// A deeper blue overhead easing to a pale, almost warm horizon. The stylesheet's original
+// stops are still in here in the middle, but the ramp now RESOLVES over the band the camera
+// actually sees: mapping it pole to pole spent almost all of it below the island, and the
+// visible sliver above the horizon came out as one flat blue.
 const SKY_STOPS = [
-  { at: 0, color: [0x6c, 0xb8, 0xee] },
-  { at: 0.45, color: [0xa8, 0xd8, 0xf5] },
-  { at: 0.78, color: [0xdf, 0xf0, 0xfb] },
-  { at: 1, color: [0xf3, 0xf7, 0xe9] },
+  { at: 0, color: [0x3f9be4] },
+  { at: 0.42, color: [0x6cb8ee] },
+  { at: 0.74, color: [0xa8d8f5] },
+  { at: 1, color: [0xe4f2fb] },
 ] as const;
 
 function sampleSkyGradient(t: number): readonly [number, number, number] {
@@ -367,11 +375,13 @@ function sampleSkyGradient(t: number): readonly [number, number, number] {
     if (previous === undefined || next === undefined || t > next.at) continue;
     const span = next.at - previous.at;
     const mix = span > 0 ? (t - previous.at) / span : 0;
-    return [0, 1, 2].map((channel) => {
-      const from = previous.color[channel] ?? 0;
-      const to = next.color[channel] ?? 0;
+    const from = previous.color[0];
+    const to = next.color[0];
+    return [16, 8, 0].map((shift) => {
+      const a = (from >>> shift) & 0xff;
+      const b = (to >>> shift) & 0xff;
       // The stops are sRGB; the scene composites linear, so decode rather than lerp bytes.
-      return srgbChannelToLinear((from + (to - from) * mix) / 255);
+      return srgbChannelToLinear((a + (b - a) * mix) / 255);
     }) as unknown as readonly [number, number, number];
   }
   return [1, 1, 1];
@@ -387,7 +397,10 @@ function createSkyDome(): Mesh {
   for (let index = 0; index < vertexCount; index += 1) {
     getMeshGeometryVertexPosition(position, geometry, index);
     // The stylesheet ran its gradient top to bottom, so t is 0 at the zenith.
-    const [r, g, b] = sampleSkyGradient(clamp(0.5 - position.y / (SKY_RADIUS * 2), 0, 1));
+    // Zenith at 0, horizon at 1: the whole ramp lands in the band above the island, and
+    // everything below the horizon — which the island covers — holds the last stop.
+    const height = position.y / SKY_RADIUS;
+    const [r, g, b] = sampleSkyGradient(clamp(1 - height * 1.35, 0, 1));
     setMeshGeometryVertexColor0(geometry, index, r, g, b, 1);
   }
   // Double-sided because the camera lives INSIDE this sphere: the forward pass culls back

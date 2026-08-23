@@ -72,35 +72,28 @@
             </div>
 
             <div class="game-panel start-panel" id="start-panel" hidden>
-              <p class="panel-kicker">Flight presents</p>
-              <h2>Ready to make<br />poor choices?</h2>
-              <p>You have 60 seconds. Stack every random horse, hay bale, cow, and chicken you get.</p>
-              <button type="button" id="start-button" disabled>Start stacking</button>
+              <h2>Horse<br />Stacker</h2>
+              <button type="button" id="start-button" disabled>Play</button>
             </div>
 
             <div class="game-panel time-up-panel" id="time-up-panel" hidden role="status" aria-live="assertive">
-              <p class="panel-kicker">Hands off the herd</p>
               <h2>TIME<br />UP!</h2>
-              <p>Hold everything. The pasture is counting.</p>
             </div>
 
             <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
-              <p class="panel-kicker">Official-ish height</p>
               <div class="horse-tally" aria-hidden="true">
                 <div class="horse-hand-stack" id="result-horse-stack"></div>
               </div>
               <p class="result-hand-line"><strong id="result-hand-count">0</strong> hands high</p>
               <h2><span id="result-score">0.00 m</span></h2>
-              <p id="result-copy">The pasture is still assessing the situation.</p>
-              <button type="button" id="replay-button" hidden>Stack again</button>
+              <p id="result-copy"></p>
+              <button type="button" id="replay-button" hidden>Play again</button>
             </div>
 
             <div class="error-panel" id="error-panel" hidden>
               <p>We couldn’t open the pasture.</p>
               <button type="button" id="retry-button">Try again</button>
             </div>
-
-            <div class="game-callout" id="game-callout" aria-live="off">Awaiting farm chaos…</div>
 
             <div class="hero-timer" id="hero-timer" aria-hidden="true">
               <span>Time left</span>
@@ -116,6 +109,22 @@
               Place object
               <span aria-hidden="true">↓</span>
             </button>
+
+            <button class="credits-toggle" id="credits-toggle" type="button" aria-label="Credits" title="Credits">
+              <span aria-hidden="true">i</span>
+            </button>
+
+            <div class="credits-panel" id="credits-panel" hidden>
+              <p>
+                Built with <a href="https://github.com/flighthq" target="_blank" rel="noreferrer">Flight</a>.
+                Models by <a href="https://sketchfab.com/Edwin3D" target="_blank" rel="noreferrer">EdwinRC</a>
+                and <a href="https://sketchfab.com/SleepyPineapple" target="_blank" rel="noreferrer">SleepyPineapple</a>, CC BY 4.0.
+                Music “The Mountain's Happy Song” by Elijah_K via
+                <a href="https://freemusicarchive.org/" target="_blank" rel="noreferrer">Free Music Archive</a>, CC BY.
+                Ambience and effects via
+                <a href="https://free-sound-effects.net/" target="_blank" rel="noreferrer">Free Sound Effects</a>.
+              </p>
+            </div>
 
             <button
               class="fullscreen-toggle"
@@ -140,7 +149,7 @@
         </section>
       </main>
 
-      <footer class="site-footer">
+      <footer class="site-footer" hidden>
         <a href="https://github.com/flighthq" target="_blank" rel="noreferrer">Built with Flight</a>
         <span class="footer-rule" aria-hidden="true"></span>
         <span>

@@ -78,7 +78,6 @@ import {
   createHorseStackWorld,
   FINAL_SETTLE_SECONDS,
   getNextObjectDelay,
-  getPaceLevel,
   getRandomStackObjectKind,
   getStackBodyHalfWidth,
   getStackBodySupportExtent,
@@ -88,7 +87,6 @@ import {
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_SIZE_MULTIPLIER,
-  isStackBodyWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
@@ -227,12 +225,13 @@ const replayButton = requireElement<HTMLButtonElement>('replay-button');
 const restartButton = requireElement<HTMLButtonElement>('restart-game');
 const dropButton = requireElement<HTMLButtonElement>('drop-horse');
 const fullscreenToggle = requireElement<HTMLButtonElement>('fullscreen-toggle');
+const creditsToggle = requireElement<HTMLButtonElement>('credits-toggle');
+const creditsPanel = requireElement<HTMLDivElement>('credits-panel');
 const horsesLeftCopy = requireElement<HTMLSpanElement>('horses-left');
 const timerCopy = requireElement<HTMLSpanElement>('drop-timer');
 const timerFill = requireElement<HTMLSpanElement>('timer-fill');
 const heightCopy = requireElement<HTMLSpanElement>('stack-height');
 const paceCopy = requireElement<HTMLSpanElement>('pace-copy');
-const gameCallout = requireElement<HTMLDivElement>('game-callout');
 const heroTimer = requireElement<HTMLDivElement>('hero-timer');
 const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -437,7 +436,6 @@ let gameEndsAt = 0;
 let finishAt = 0;
 let finalHeight = 0;
 let cachedStackHeight = 0;
-let finalSurvivors = 0;
 let resultAnimationStart = 0;
 let resultAnimationDuration = 0;
 let resultHands = 0;
@@ -760,7 +758,6 @@ function startGame(startedFrom?: Event): void {
   finishAt = 0;
   finalHeight = 0;
   cachedStackHeight = 0;
-  finalSurvivors = 0;
   resultAnimationStart = 0;
   resultAnimationDuration = 0;
   resultHands = 0;
@@ -793,7 +790,6 @@ function startGame(startedFrom?: Event): void {
   resultHorseStack.replaceChildren();
   resultHandCount.textContent = '0';
   resultScore.textContent = '0.00 m';
-  resultCopy.textContent = 'The pasture is still assessing the situation.';
   replayButton.hidden = true;
   restartButton.hidden = false;
   dropButton.disabled = true;
@@ -801,8 +797,6 @@ function startGame(startedFrom?: Event): void {
   viewer.classList.add('is-playing');
   viewer.classList.remove('is-finished', 'is-time-up', 'is-bumping', 'is-panicking');
   sceneStatus.classList.add('is-ready');
-  statusCopy.textContent = '60 seconds. Go!';
-  gameCallout.textContent = 'Move fast to make it teeter…';
   hudDirty = true;
   spawnObject(now);
   renderRequested = true;
@@ -828,12 +822,7 @@ function spawnObject(now: number): void {
   if (landingRadiance !== null) landingRadiance.enabled = true;
   dropButton.disabled = false;
   const profile = STACK_OBJECT_PROFILES[kind];
-  const label = getStackObjectVisualLabel(kind, variantIndex);
-  statusCopy.textContent = `${profile.emoji} ${label} queued`;
-  gameCallout.textContent =
-    getPaceLevel(objectsDropped) >= 4
-      ? `Keep the glowing ${label.toLowerCase()} upright.`
-      : `${profile.emoji} Next: ${label}. Move, balance, place.`;
+  statusCopy.textContent = `${profile.emoji} ${getStackObjectVisualLabel(kind, variantIndex)}`;
   updateActiveStackObject(now);
 }
 
@@ -879,13 +868,6 @@ function commitObjectPlacement(now: number): void {
   objectsDropped++;
   restartAudioTrack(horseThud, 'Stack thud');
 
-  const tilt = Math.abs(current.angle);
-  gameCallout.textContent =
-    tilt > 0.42
-      ? 'Precariously placed!'
-      : tilt > 0.16
-        ? 'A little crooked.'
-        : `${STACK_OBJECT_PROFILES[current.kind].emoji} Placed gently.`;
   nextObjectAt = now + getNextObjectDelay(objectsDropped);
   hudDirty = true;
   renderRequested = true;
@@ -925,8 +907,6 @@ function beginSettling(now: number): void {
   timeUpPanel.hidden = false;
   viewer.classList.remove('is-playing', 'is-panicking');
   viewer.classList.add('is-time-up');
-  statusCopy.textContent = 'Time up!';
-  gameCallout.textContent = 'Hands off the pile!';
   hudDirty = true;
   renderRequested = true;
 }
@@ -935,10 +915,6 @@ function finishGame(now: number): void {
   phase = 'finished';
   finalHeight = getCurrentStackHeight();
   cachedStackHeight = finalHeight;
-  finalSurvivors = stackedObjects.filter(
-    ({ body, lost }) =>
-      !lost && body.y > -1 && isStackBodyWithinPasture(body),
-  ).length;
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
   resultTickIndex = 0;
@@ -954,7 +930,6 @@ function finishGame(now: number): void {
   resultHorseStack.replaceChildren();
   resultHandCount.textContent = '0';
   resultScore.textContent = '0.00 m';
-  resultCopy.textContent = 'Counting the pile, one hand at a time…';
   replayButton.hidden = true;
   resultPanel.classList.remove('is-total-revealed');
   timeUpPanel.hidden = true;
@@ -962,8 +937,6 @@ function finishGame(now: number): void {
   viewer.classList.remove('is-playing', 'is-time-up', 'is-panicking', 'is-bumping');
   viewer.classList.add('is-finished');
   indicatorLight.intensity = 0;
-  statusCopy.textContent = 'Counting hands…';
-  gameCallout.textContent = 'One 🐴 per hand. Keep counting…';
   hudDirty = true;
   renderRequested = true;
 }
@@ -1006,14 +979,10 @@ function completeResultAnimation(): void {
   appendHorseHands(resultHands);
   resultHandCount.textContent = String(resultHands);
   resultScore.textContent = formatHeight(finalHeight);
-  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points · ${finalSurvivors} of ${objectsDropped} farm things remained in the general vicinity.`;
+  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points`;
   replayButton.hidden = false;
   resultPanel.classList.add('is-total-revealed');
-  statusCopy.textContent = 'Officially measured';
-  gameCallout.textContent =
-    finalHeight >= 0.45
-      ? 'A monument to poor judgement.'
-      : 'Structurally questionable. Perfect.';
+
   celebrateFinalHeight();
 }
 
@@ -1305,6 +1274,10 @@ function bindGameControls(): void {
     placeActiveStackObject(performance.now(), event.timeStamp),
   );
   bindFullscreenToggle();
+  creditsToggle.addEventListener('click', () => {
+    creditsPanel.hidden = !creditsPanel.hidden;
+    creditsToggle.setAttribute('aria-expanded', String(!creditsPanel.hidden));
+  });
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);

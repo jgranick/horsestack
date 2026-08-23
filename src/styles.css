@@ -48,12 +48,20 @@ a {
 }
 
 .site-shell {
-  width: min(100%, 1640px);
-  min-height: 100vh;
-  margin: 0 auto;
-  padding: 0 4vw;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* One row, not auto/1fr/auto: the header and footer are display:none and so are not
+     grid items at all, which put <main> in the auto row and collapsed its height. */
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.site-footer[hidden] {
+  display: none;
 }
 
 .site-header[hidden] {
@@ -153,13 +161,17 @@ a {
 }
 
 .experience {
+  /* The viewer resolves its height against this row, so the item has to stretch:
+     with align-items: center the grid item is auto-height and height:100% collapses. */
   min-height: 0;
-  padding: clamp(38px, 5.8vh, 68px) 0 clamp(30px, 4.4vh, 50px);
+  height: 100%;
+  padding: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  gap: clamp(42px, 6vw, 102px);
-  align-items: center;
+  grid-template-rows: minmax(0, 1fr);
+  justify-items: stretch;
+  align-items: stretch;
+  gap: 0;
 }
 
 .intro[hidden] {
@@ -334,23 +346,21 @@ h1 em {
 
 .viewer-wrap {
   width: 100%;
-  max-width: min(100%, 1180px);
+  height: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 .viewer {
   width: 100%;
-  /* Sized off what the viewport actually has left: 250px covers the header, the
-     experience padding, and the footer. Taller than the old 71vh on a big screen,
-     and it gives way instead of pushing the game below the fold on a short one. */
-  height: clamp(400px, calc(100vh - 170px), 900px);
+  /* The viewer is the page now, so it simply takes the whole shell row. */
+  height: 100%;
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid rgba(34, 49, 34, 0.14);
-  border-radius: 38px 38px 38px 8px;
+  border: 0;
+  border-radius: 0;
   background: #dbe5d1;
-  box-shadow: 0 34px 90px rgba(50, 61, 43, 0.14);
 }
 
 .viewer::before {
@@ -475,14 +485,6 @@ h1 em {
   color: var(--cream);
   background: rgba(28, 42, 27, 0.74);
   backdrop-filter: blur(15px);
-}
-
-.game-panel::before {
-  content: '';
-  width: 86px;
-  height: 1px;
-  margin-bottom: 4px;
-  background: rgba(255, 255, 255, 0.46);
 }
 
 .panel-kicker {
@@ -793,13 +795,71 @@ h1 em {
   display: none;
 }
 
+.credits-toggle {
+  width: 30px;
+  height: 30px;
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  z-index: 9;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(31, 45, 29, 0.34);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.credits-toggle:hover,
+.credits-toggle:focus-visible {
+  outline: none;
+  color: #fff;
+  background: rgba(31, 45, 29, 0.78);
+}
+
+.credits-panel {
+  max-width: min(420px, calc(100% - 48px));
+  position: absolute;
+  left: 24px;
+  bottom: 64px;
+  z-index: 9;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 16px;
+  color: rgba(251, 247, 236, 0.86);
+  background: rgba(24, 34, 23, 0.9);
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.credits-panel[hidden] {
+  display: none;
+}
+
+.credits-panel p {
+  margin: 0;
+}
+
+.credits-panel a {
+  color: #ffd166;
+}
+
 .fullscreen-toggle {
   width: 38px;
   height: 38px;
   position: absolute;
   right: 24px;
   bottom: 24px;
-  z-index: 5;
+  z-index: 9;
   padding: 0;
   display: grid;
   place-items: center;
@@ -991,13 +1051,13 @@ h1 em {
 
 @media (max-width: 1040px) {
   .site-shell {
-    padding: 0 28px;
+    padding: 0;
   }
 
   .experience {
-    padding-top: 28px;
+    padding-top: 0;
     grid-template-columns: minmax(0, 1fr);
-    gap: 46px;
+    gap: 0;
   }
 
   /* One column means source order decides what you see first, and that has to be
@@ -1020,7 +1080,7 @@ h1 em {
   }
 
   .viewer {
-    height: max(340px, min(86vw, calc(100vh - 76px), 860px));
+    height: 100%;
   }
 
   .site-footer {
@@ -1031,7 +1091,7 @@ h1 em {
 
 @media (max-width: 600px) {
   .site-shell {
-    padding: 0 15px;
+    padding: 0;
   }
 
   .site-header {
@@ -1047,8 +1107,8 @@ h1 em {
 
   .experience {
     min-height: 0;
-    padding: 38px 0 28px;
-    gap: 34px;
+    padding: 0;
+    gap: 0;
   }
 
   .eyebrow {
@@ -1078,10 +1138,7 @@ h1 em {
   }
 
   .viewer {
-    /* The narrow layout had its own fixed 72vh and so ignored the reclaimed header
-       space; this spends it while still leaving the pitch visible below the fold. */
-    height: max(500px, min(82vh, calc(100vh - 72px)));
-    border-radius: 25px 25px 25px 6px;
+    height: 100%;
   }
 
   .game-panel {

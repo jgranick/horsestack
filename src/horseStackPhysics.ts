@@ -36,9 +36,14 @@ export const HORSE_HALF_HEIGHT = 0.0765 * HORSE_SIZE_MULTIPLIER;
 export const HORSE_BACK_RATIO = 0.447;
 export const HORSE_SUPPORT_HALF_HEIGHT = HORSE_HALF_HEIGHT * HORSE_BACK_RATIO;
 export const TYPICAL_HORSE_WITHERS_METERS = 1.55;
-// This world is not metres: an upright horse is HORSE_HALF_HEIGHT * 2 units tall and
-// stands for 1.55 m, which puts one world unit at about 8.44 m.
-export const METERS_PER_WORLD_UNIT = TYPICAL_HORSE_WITHERS_METERS / (HORSE_HALF_HEIGHT * 2);
+// How tall a horse stands at the withers, which is the line 1.55 m actually refers to.
+// HORSE_HALF_HEIGHT covers the full silhouette, and this model carries better than a
+// quarter of that in head and neck above the back, so the two must not be confused.
+export const HORSE_WITHERS_HEIGHT = HORSE_HALF_HEIGHT * (1 + HORSE_BACK_RATIO);
+// This world is not metres. Calibrating on the WITHERS rather than the full silhouette:
+// mapping 1.55 m onto the top of a raised head made every reported height about 27% short,
+// and made a dairy cow standing beside a "1.55 m" horse read as 1.11 m.
+export const METERS_PER_WORLD_UNIT = TYPICAL_HORSE_WITHERS_METERS / HORSE_WITHERS_HEIGHT;
 export const METERS_PER_HAND = 0.1016;
 export const STACK_OBJECT_KINDS = ['horse', 'hay', 'cow', 'chickens'] as const;
 export const STACK_OBJECT_WEIGHTS: Readonly<Record<StackObjectKind, number>> = {
@@ -328,7 +333,7 @@ export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {
 export function getStackHeightMeters(stackTopY: number): number {
   if (stackTopY <= 0) return 0;
   const heightAbovePasture = Math.max(0, stackTopY - PASTURE_TOP_Y);
-  return heightAbovePasture * (TYPICAL_HORSE_WITHERS_METERS / (HORSE_HALF_HEIGHT * 2));
+  return heightAbovePasture * METERS_PER_WORLD_UNIT;
 }
 
 export function getStackHeightHands(stackTopY: number): number {

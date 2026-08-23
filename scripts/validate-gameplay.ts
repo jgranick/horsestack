@@ -14,6 +14,7 @@ import {
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
   HORSE_SIZE_MULTIPLIER,
+  HORSE_WITHERS_HEIGHT,
   isStackBodyWithinPasture,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
@@ -264,15 +265,24 @@ function validateObjectProfiles(): void {
 }
 
 function validateHeightCalibration(): void {
-  const oneHorseTopY = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 2;
-  const meters = getStackHeightMeters(oneHorseTopY);
+  // 1.55 m is a horse's WITHERS height, so that is the line the scale hangs off — not the
+  // top of its head, which stands another quarter of its height higher again.
+  const withersTopY = PASTURE_TOP_Y + HORSE_WITHERS_HEIGHT;
+  const meters = getStackHeightMeters(withersTopY);
   if (Math.abs(meters - TYPICAL_HORSE_WITHERS_METERS) > 0.000_001) {
     throw new Error(
-      `height calibration: one upright horse should read ${TYPICAL_HORSE_WITHERS_METERS}m, received ${meters}m`,
+      `height calibration: a horse's withers should read ${TYPICAL_HORSE_WITHERS_METERS}m, received ${meters}m`,
     );
   }
-  if (getStackHeightHands(oneHorseTopY) !== 15) {
+  if (getStackHeightHands(withersTopY) !== 15) {
     throw new Error('height calibration: a 1.55m horse should round to 15 hands');
+  }
+  // The whole horse, head included, must therefore read taller than its withers.
+  const wholeHorse = getStackHeightMeters(PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 2);
+  if (!(wholeHorse > TYPICAL_HORSE_WITHERS_METERS * 1.2)) {
+    throw new Error(
+      `height calibration: a whole horse should stand well above its withers, received ${wholeHorse}m`,
+    );
   }
 }
 

@@ -1,4 +1,5 @@
 import type {
+  RenderEffect,
   VertexAttributeLayout,
   Camera3D,
   ImportDiagnostic,
@@ -30,7 +31,12 @@ import {
   createDirectionalLight,
   createGlCanvasElement,
   createGlRenderEffectPipeline,
+  createBlurEffect,
+  createBrightnessContrastAdjustment,
+  createColorMatrixAdjustment,
+  createSaturationColorMatrix,
   createGlRenderState,
+  createVignetteEffect,
   createMesh,
   createNode3D,
   createOrbitCameraController,
@@ -66,7 +72,9 @@ import {
   isNodeLocalMatrix4Detached,
   Node3DKind,
   normalizeVector3,
+  registerGlBlurEffect,
   registerGlStandardPbrMaterial,
+  registerGlVignetteEffect,
   registerStandardGlTextureResolvers,
   refreshMeshGeometryBounds,
   removeNodeChild,
@@ -210,6 +218,52 @@ const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
 // Long enough to swallow the second half of a double-click on "Start stacking",
 // short enough that a player who reacts to the first preview never notices it.
 const START_INPUT_GUARD_MS = 400;
+// The title and score screens used to sit behind a flat black wash. The scene is the nicest
+// thing on screen, so instead of hiding it the pipeline defocuses it: a real blur, plus a
+// vignette to pull the eye to the middle and keep light text legible over bright grass.
+// Both are Flight render effects, which is what the effect list on endGlRenderEffectPipeline
+// is for — the game ran it empty until now.
+const BACKDROP_BLUR_MAX = 13;
+const backdropBlurEffect = createBlurEffect({ blurX: 0, blurY: 0 });
+const backdropVignetteEffect = createVignetteEffect({
+  color: 0x101a10,
+  intensity: 0,
+  radius: 0.5,
+  softness: 0.85,
+});
+// Blur alone was not enough: gold serif over a bright, in-focus-coloured farm is hard to
+// read even when the farm is out of focus, because the problem is chroma and value, not
+// sharpness. Pulling the saturation and the exposure down turns the scene into a soft
+// backdrop the type sits on top of, and reads as a deliberate treatment rather than the
+// black wash this replaced. Both are MATRIX-tier adjustments, so the pipeline fuses them
+// with each other into a single pass — a hue/saturation adjustment would be LUT-tier and
+// would rebake its table on every frame of the ramp.
+const BACKDROP_SATURATION = 0.45;
+const BACKDROP_BRIGHTNESS = -0.26;
+const NO_EFFECTS: readonly RenderEffect[] = [];
+// Rebuilt only while the ramp is moving: brightness/contrast bake their matrix at
+// construction, so a mutated field would not take.
+let backdropEffects: RenderEffect[] = [];
+let backdropEffectsAt = -1;
+
+function getBackdropEffects(focus: number): readonly RenderEffect[] {
+  const quantized = Math.round(focus * 60);
+  if (quantized === backdropEffectsAt) return backdropEffects;
+  backdropEffectsAt = quantized;
+  const amount = quantized / 60;
+  backdropBlurEffect.blurX = BACKDROP_BLUR_MAX * amount;
+  backdropBlurEffect.blurY = BACKDROP_BLUR_MAX * amount;
+  backdropVignetteEffect.intensity = 0.7 * amount;
+  backdropEffects = [
+    backdropBlurEffect,
+    createColorMatrixAdjustment(createSaturationColorMatrix(1 + (BACKDROP_SATURATION - 1) * amount)),
+    createBrightnessContrastAdjustment({ brightness: BACKDROP_BRIGHTNESS * amount }),
+    backdropVignetteEffect,
+  ];
+  return backdropEffects;
+}
+
+let backdropFocus = 0;
 const GAME_DURATION_MS = 30_000;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
@@ -841,6 +895,9 @@ function startGame(startedFrom?: Event): void {
   if (horseTemplate === null || phase === 'loading') return;
 
   const now = performance.now();
+  // The credits only exist on the score screen now, so a panel left open there must not
+  // still be open when the next score screen arrives.
+  creditsOpen = false;
   startGameAudio(now);
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
@@ -1556,7 +1613,13 @@ function renderFrame(): void {
     drawGlScene3D(renderState, scene, camera, lights);
     endGlRenderPass(renderState);
   }
-  endGlRenderEffectPipeline(renderState, pipeline, []);
+  // An empty list is the fast path: no ping-pong targets are acquired and no pass runs, so
+  // the game pays for the defocus only on the screens that show it.
+  endGlRenderEffectPipeline(
+    renderState,
+    pipeline,
+    backdropFocus > 0.002 ? getBackdropEffects(backdropFocus) : NO_EFFECTS,
+  );
   const countProgress =
     resultAnimationStart === 0
       ? phase === 'finished' ? 1 : 0
@@ -1577,7 +1640,6 @@ function renderFrame(): void {
     pointerDown,
     pointerX,
     pointerY,
-    handsText: String(resultHandsShown),
     heightText: countProgress >= 1 ? formatHeight(finalHeight) : formatMeters(shownMeters),
     screen: getUiScreen(),
     secondsLeft: Math.max(0, (gameEndsAt - performance.now()) / 1000),
@@ -1616,6 +1678,17 @@ function enterFrame(now: number): void {
     }
 
     if (updateWindmill(deltaTime)) renderRequested = true;
+
+    const screen = getUiScreen();
+    const wantsBackdrop = screen === 'title' || screen === 'result' ? 1 : 0;
+    const focused = backdropFocus + (wantsBackdrop - backdropFocus) * (1 - Math.exp(-deltaTime * 5.5));
+    if (Math.abs(focused - backdropFocus) > 0.0005) {
+      backdropFocus = focused;
+      renderRequested = true;
+    } else if (backdropFocus !== wantsBackdrop) {
+      backdropFocus = wantsBackdrop;
+      renderRequested = true;
+    }
 
     const dustIsMoving = dustEmitter.data.particleCount > 0;
     const celebrationIsMoving = celebrationEmitter.data.particleCount > 0;
@@ -1670,6 +1743,8 @@ function initializeRenderer() {
     registerStandardGlTextureResolvers(nextRenderState);
     registerGlStandardPbrMaterial(nextRenderState);
     registerGlVertexColorMaterial(nextRenderState);
+    registerGlBlurEffect(nextRenderState);
+    registerGlVignetteEffect(nextRenderState);
     const nextPipeline = createGlRenderEffectPipeline(nextRenderState, {
       sampleCount: 4,
       format: 'rgba16f',

@@ -103,7 +103,6 @@ export interface UiModel {
   countProgress: number;
   creditsText?: string;
   handsShown: number;
-  handsText: string;
   heightText: string;
   isRecord: boolean;
   now: number;
@@ -116,7 +115,15 @@ export interface UiModel {
   timeUpProgress: number;
 }
 
-const HANDS_PER_EMOJI_COLUMN = 9;
+const HANDS_PER_EMOJI_COLUMN = 7;
+// One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
+// 126-emoji capacity on any decent run — a 10m tower and a 16m tower both showed the same
+// full wall, which is the opposite of what a tally is for. Four per horse fixed the top end
+// and ruined the bottom: a weak run collapsed to a single lonely column. Two per horse with
+// a shorter column keeps the block growing sideways across the whole range — roughly three
+// columns for a poor run, a dozen for a good one — and does not saturate until about 26m,
+// which nothing has reached.
+const HANDS_PER_EMOJI = 2;
 const GOLD = 0xffd166;
 
 // The DOM original eased each of these with CSS keyframes; recreated here on Flight's
@@ -195,7 +202,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   registerGlStandardMaterial(state);
 
   const root = createDisplayObject();
-  const scrim = createShape();
   // Same treatment as TIME UP and the result height: big gold serif, so the three
   // screens read as one family. Upright rather than tilted — the tilt is TIME UP's.
   const titleText = label('Horse Stacker', 96, GOLD, SERIF, true);
@@ -206,7 +212,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const timerValue = label('30', 34, INK, SERIF);
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
-  const tallyRule = createShape();
   // One label per hand, like the DOM original's one span per hand: it is what lets each
   // horse pop in as the count reaches it. A column could be a single multiline node —
   // that is what RichText is for, and the credits copy below uses it — but then the
@@ -217,9 +222,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     tallyHorses.push(label('🐴', 15, INK, SANS));
   }
   const horseAppearedAt = new Float64Array(TALLY_CAPACITY);
-  const handsCaption = label('HANDS HIGH', 10, 0xd8e0d2, SANS, true);
   const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
-  const resultHands = label('0', 22, GOLD, SERIF);
   // The badge is a container so the pill and its text tilt and pulse as one piece. The
   // alternative — transforming both nodes about matching pivots — has to reconcile the
   // pill's box with the text's own line box, and drifts apart the moment either changes.
@@ -228,7 +231,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const recordText = label('NEW RECORD!', 12, 0x3a2c07, SANS, true);
   addNodeChild(recordBadge, recordPill);
   addNodeChild(recordBadge, recordText);
-  const bestLabel = label('', 11, 0xd8e0d2, SANS, true);
+  const bestLabel = label('', 11, GOLD, SANS, true);
   const againPill = createShape();
   const againText = label('PLAY AGAIN', 13, 0x252420, SANS, true);
   const creditsPill = createShape();
@@ -244,9 +247,9 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const fullscreenText = label('⛶', 15, INK, SANS);
 
   for (const node of [
-    scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
+    titleText, playPill, playText, timerPill, timerCaption, timerValue,
     timeUpScrim, timeUpText,
-    ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight,
+    ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
   ]) {
@@ -301,13 +304,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     const onResult = model.screen === 'result';
     const onTimeUp = model.screen === 'timeup';
     const playing = model.screen === 'playing';
-    const dim = onTitle || onResult;
-
-    show(scrim, dim);
-    if (dim) {
-      fill(scrim, 0x1c2a1b, onTitle ? 0.72 : 0.78, 0, 0, width, height, 0);
-      place(scrim, 0, 0);
-    }
+    // No wash over the scene on these screens: main.ts defocuses the 3D with a blur and a
+    // vignette instead, which separates the UI from the background without hiding it.
 
     show(titleText, onTitle);
     show(playPill, onTitle);
@@ -350,9 +348,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
 
     const showAgain = onResult && model.countProgress >= 1;
     show(resultHeight, onResult);
-    show(resultHands, onResult);
-    show(handsCaption, onResult);
-    show(tallyRule, onResult);
     // The record furniture arrives on the same beat as the height's pop, so the result
     // lands as one moment instead of trickling in a piece at a time.
     const showRecord = onResult && model.countProgress >= 0.86;
@@ -368,7 +363,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       const ruleY = height * 0.5 - 42;
       const cell = 17;
       const columnWidth = 19;
-      const shown = Math.min(model.handsShown, TALLY_CAPACITY);
+      const shown = Math.min(Math.floor(model.handsShown / HANDS_PER_EMOJI), TALLY_CAPACITY);
       const columns = Math.max(1, Math.ceil(shown / HANDS_PER_EMOJI_COLUMN));
       const startX = width / 2 - (columns * columnWidth) / 2;
       for (let index = 0; index < TALLY_CAPACITY; index += 1) {
@@ -399,25 +394,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         );
         invalidateNodeAppearance(horse);
       }
-      // The rule wipes out from the centre rather than appearing whole.
-      const ruleWidth = Math.min(430, width - 48) * clamp01(intro * 1.4);
-      fill(tallyRule, GOLD, 0.42, 0, 0, Math.max(1, ruleWidth), 1, 0);
-      place(tallyRule, width / 2 - ruleWidth / 2, ruleY);
-
-      // The gold count and its caption sit on one line, as in the DOM original:
-      // a right-aligned number butted against a left-aligned label.
-      setTextLabelFormat(resultHands, {
-        align: 'right', color: GOLD, font: SERIF, size: 22,
-      });
-      setTextLabelWidth(resultHands, width / 2 - 34);
-      setText(resultHands, model.handsText);
-      place(resultHands, 0, ruleY + 10);
-      setTextLabelFormat(handsCaption, {
-        align: 'left', bold: true, color: 0xd8e0d2, font: SANS, size: 10,
-      });
-      setTextLabelWidth(handsCaption, width / 2);
-      place(handsCaption, width / 2 - 28, ruleY + 22);
-
       // The count runs at rest scale so the number stays readable, then the height itself
       // pops on the beat the points used to arrive on.
       const settle = clamp01((model.countProgress - 0.86) / 0.14);
@@ -429,13 +405,13 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       resultHeight.pivotX = width / 2;
       resultHeight.pivotY = 40;
       // pivot is the anchor, so x/y address the pivot rather than the top-left corner
-      place(resultHeight, width / 2, ruleY + 52 + 40);
+      place(resultHeight, width / 2, ruleY + 12 + 40);
 
       // Narrower and shorter than PLAY AGAIN below it, so it reads as a chip rather than a
       // second button competing for the click.
       const badgeWidth = 152;
       const badgeHeight = 26;
-      const badgeY = ruleY + 138;
+      const badgeY = ruleY + 98;
       const badgeShowing = showRecord && model.isRecord;
       if (badgeShowing) {
         const swagger = Math.sin(model.now * 0.005);
@@ -460,9 +436,9 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       if (showRecord && model.bestText !== '') {
         setTextLabelWidth(bestLabel, width);
         setText(bestLabel, model.bestText);
-        // Deliberately quiet: the standing record is context for the number above it, not
-        // a second headline.
-        bestLabel.alpha = clamp01(settle * 1.6) * 0.8;
+        // Quiet, but not invisible: it sits over the blurred scene rather than a dark wash
+        // now, so it cannot afford to give away opacity as well as size and colour.
+        bestLabel.alpha = clamp01(settle * 1.6);
         place(bestLabel, 0, badgeY + 8 + (1 - easeOutCubic(settle)) * 10);
         invalidateNodeAppearance(bestLabel);
       }
@@ -470,7 +446,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       // The badge inserts a row, so the button drops to keep clear of it.
       pill(
         againPill, againText, 'again',
-        width / 2 - 96, ruleY + (badgeShowing ? 200 : 190) + (1 - easeOutBack(settle)) * 16,
+        width / 2 - 96, ruleY + (badgeShowing ? 160 : 150) + (1 - easeOutBack(settle)) * 16,
         192, 44, INK, settle,
       );
     }
@@ -507,12 +483,20 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       setText(timerValue, String(Math.max(0, Math.ceil(model.secondsLeft))));
     }
 
-    pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);
+    // Attribution belongs on the screen you land on when the round is over, not over the
+    // title art and not over the game. Skipping the pill() call also keeps 'credits' out of
+    // the hit-test list, so the corner is not quietly clickable while it is invisible.
+    show(creditsPill, onResult);
+    show(creditsText, onResult);
+    if (onResult) {
+      pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);
+    }
     pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1d, 0.42);
 
-    show(creditsBody, model.creditsOpen);
-    show(creditsCopy, model.creditsOpen);
-    if (model.creditsOpen) {
+    const creditsShowing = onResult && model.creditsOpen;
+    show(creditsBody, creditsShowing);
+    show(creditsCopy, creditsShowing);
+    if (creditsShowing) {
       const w = Math.min(420, width - 48);
       fill(creditsBody, 0x182217, 0.9, 0, 0, w, 82, 16);
       place(creditsBody, 24, height - 148);

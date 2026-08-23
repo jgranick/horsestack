@@ -1150,10 +1150,6 @@ function updateIndicatorTeeter(now: number): void {
   );
 }
 
-function getScore(height: number): number {
-  return Math.round(getStackHeightMeters(height) * 1000);
-}
-
 function bindGameControls(): void {
   // Window-level, not canvas-level: aiming and placing follow the pointer anywhere on
   // the page while a run is live. setAimFromClientX clamps against the canvas bounds, so
@@ -1399,7 +1395,6 @@ function renderFrame(): void {
     pointerY,
     handsText: String(resultHandsShown),
     heightText: countProgress >= 1 ? formatHeight(finalHeight) : formatMeters(shownMeters),
-    pointsText: countProgress >= 1 ? `${getScore(finalHeight).toLocaleString()} points` : '',
     screen: getUiScreen(),
     secondsLeft: Math.max(0, (gameEndsAt - performance.now()) / 1000),
     timeUpProgress: finishAt === 0

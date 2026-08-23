@@ -81,7 +81,6 @@ export interface UiModel {
   handsShown: number;
   handsText: string;
   heightText: string;
-  pointsText: string;
   now: number;
   pointerDown: boolean;
   pointerX: number;
@@ -204,7 +203,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   }
   const horseAppearedAt = new Float64Array(TALLY_CAPACITY);
   const handsCaption = label('HANDS HIGH', 10, 0xd8e0d2, SANS, true);
-  const pointsText = label('', 12, 0xd8e0d2, SERIF);
   const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
   const resultHands = label('0', 22, GOLD, SERIF);
   const againPill = createShape();
@@ -224,7 +222,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   for (const node of [
     scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
     timeUpScrim, timeUpText,
-    ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight, pointsText,
+    ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight,
     againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
   ]) {
@@ -242,11 +240,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
 
   function hovering(x: number, y: number, w: number, h: number): boolean {
     return pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-  }
-
-  function centreLabel(node: TextLabel, y: number): void {
-    setTextLabelWidth(node, width);
-    place(node, 0, y);
   }
 
   function pill(shape: Shape, text: TextLabel, id: UiButton['id'], x: number, y: number, w: number, h: number, colour: number, alpha: number): void {
@@ -335,7 +328,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(resultHeight, onResult);
     show(resultHands, onResult);
     show(handsCaption, onResult);
-    show(pointsText, showAgain);
     show(tallyRule, onResult);
     show(againPill, showAgain);
     show(againText, showAgain);
@@ -397,7 +389,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       setTextLabelWidth(handsCaption, width / 2);
       place(handsCaption, width / 2 - 28, ruleY + 22);
 
-      const slam = slamScale(Math.min(1, model.countProgress * 1.02));
+      // The count runs at rest scale so the number stays readable, then the height itself
+      // pops on the beat the points used to arrive on.
+      const settle = clamp01((model.countProgress - 0.86) / 0.14);
+      const slam = slamScale(settle);
       setTextLabelWidth(resultHeight, width);
       setText(resultHeight, model.heightText);
       resultHeight.scaleX = slam;
@@ -407,12 +402,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       // pivot is the anchor, so x/y address the pivot rather than the top-left corner
       place(resultHeight, width / 2, ruleY + 52 + 40);
 
-      // Points and the button arrive after the count lands, so the score is the last beat.
-      const settle = clamp01((model.countProgress - 0.86) / 0.14);
-      centreLabel(pointsText, ruleY + 150 + (1 - settle) * 8);
-      setText(pointsText, model.pointsText);
-      pointsText.alpha = settle;
-      invalidateNodeAppearance(pointsText);
       pill(
         againPill, againText, 'again',
         width / 2 - 96, ruleY + 186 + (1 - easeOutBack(settle)) * 16, 192, 44, INK, settle,

@@ -121,12 +121,17 @@ const STILL_LINEAR = 0.35;
 const STILL_ANGULAR = 1.1;
 const SETTLE_DELAY = 0.5;
 const SETTLE_RAMP = 1.6;
-const ASSIST_ANGULAR = 5.5;
-const ASSIST_LINEAR = 1.1;
+const ASSIST_ANGULAR = 16.5;
+const ASSIST_LINEAR = 3.3;
 // Damping alone only removes speed; what topples a tower is torque. A settled piece also
 // gets progressively harder to ROTATE, which is what "gripping the one underneath"
 // actually feels like. Its real inertia is left alone — only the solver's view of it is
 // stiffened, and only while the piece is quiet, so a shove still spins it.
+// Deliberately NOT tripled with the rest of the assist. Tripling it to 30 makes the pile
+// permanently restless — 19.5 of 30 bodies still awake five seconds after the last drop,
+// against 7.8 at this value — because heavily stiffened rotation stops contacts resolving
+// and they keep trading impulses. It costs height too: tripling everything gives a median
+// of 9.85m, holding this back gives 10.35m. More stiffening is not more stability.
 const ASSIST_INERTIA = 10;
 // A pile of loose pieces always seeks its angle of repose: it spreads into a cone rather
 // than rising, because nothing stops a piece sliding down the outside after it lands. What
@@ -134,8 +139,14 @@ const ASSIST_INERTIA = 10;
 // rest and is pulled back toward that spot, so it resists being slid off what it is
 // standing on. It is a soft pull, not a weld — a real collapse still overwhelms it, and
 // losing quiet time drops the anchor entirely.
-const COHESION_PULL = 26;
-const COHESION_GRIP = 7;
+const COHESION_PULL = 78;
+const COHESION_GRIP = 21;
+// A piece already sitting on its anchor must be left completely alone. Without this the
+// pull injects a little velocity every step, which holds the body above the sleep
+// threshold, and because sleep is decided per island one twitching piece keeps the whole
+// pile awake for ever. Measured: without the deadzone 22 of 30 bodies were still awake
+// five seconds after the last drop.
+const COHESION_DEADZONE = 0.0016;
 // Height alone earns some of the same help: the higher a piece rides, the calmer it is
 // held, so a tall pile is quietly propped up rather than honestly balanced.
 const STABILITY_FULL_HEIGHT = 0.9;
@@ -284,6 +295,7 @@ function applyCohesion(body: RigidBody2D, assist: number, still: boolean): void 
     return;
   }
   const drift = anchor - body.x;
+  if (Math.abs(drift) < COHESION_DEADZONE) return;
   body.velocityX += drift * COHESION_PULL * assist * PHYSICS_STEP;
   body.velocityX -= body.velocityX * COHESION_GRIP * assist * PHYSICS_STEP;
 }

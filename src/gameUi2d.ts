@@ -4,18 +4,33 @@
 // state over the SAME GL context, then composited onto the finished 3D frame as a single
 // blended quad.
 //
-// Three things make that work, each of which broke an earlier attempt:
+// WHY THE COMPOSITE IS NOT FLIGHT-ONLY. Everything here except the final blend is public
+// SDK: beginGlRenderPass/endGlRenderPass own the target, its clear, and the save/restore of
+// enclosing state. The last step — lay a finished sRGB target over the canvas with alpha —
+// has no public equivalent, and the alternatives were tried and measured, not assumed:
+//   - rendering 2D straight at the canvas after the pipeline presents draws nothing;
+//   - rendering it into the pipeline's own target, nested pass or not, destroys the 3D;
+//   - handing the UI target to the pipeline as a DestinationOver CompositeEffect backdrop
+//     DOES work and is entirely public API — but the pipeline composites in linear while
+//     Flight's 2D tower composites in the encoded domain by policy
+//     (render/SCENE2D_WORKING_COLOR_SPACE = 'srgb', whose own note says flipping it is not
+//     sufficient because the premultiply would have to move off upload too). Our own
+//     colours can be converted on the way in; sRGB texture content cannot, so the emoji
+//     tally came out washed. Correctness beat purity.
+// presentGlRenderTarget exists for this and is not exported (and copies rather than
+// blends); destroyGlRenderTarget is not exported either, which is why releaseTarget below
+// frees the GL objects by hand.
+//
+// Two more things make this work, each of which broke an earlier attempt:
 //   - the second state comes from createGlOffscreenRenderState, so its renderer/material
 //     registrations and per-frame batch state are its own. Sharing one state with the 3D
 //     pipeline corrupts the 3D — props lose their textures.
-//   - the 2D pass targets its OWN framebuffer, so it cannot disturb the frame the 3D
-//     pipeline just composited. Drawing 2D straight into the default framebuffer after the
-//     pipeline drew nothing at all; drawing it inside the pipeline corrupted the 3D.
-//   - the composite saves and restores every piece of GL state it touches, so nothing
-//     leaks into the next frame's 3D pass.
+//   - the composite restores the blend state and bindings it touches, so nothing leaks
+//     into the next frame's 3D pass.
 import type { DisplayObject, GlRenderState, GlRenderTarget, RichText, Shape, TextLabel } from '@flighthq/sdk';
 import {
   addNodeChild,
+  beginGlRenderPass,
   appendShapeBeginFill,
   appendShapeRoundRectangle,
   clearShapeCommands,
@@ -24,6 +39,7 @@ import {
   createDisplayObject,
   createGlOffscreenRenderState,
   createGlRenderTarget,
+  endGlRenderPass,
   createRichText,
   createMatrix,
   createShape,
@@ -41,6 +57,7 @@ import {
   registerGlStandardMaterial,
   registerRenderer,
   renderGlScene2D,
+  setGlRenderTransform2D,
   RichTextKind,
   setRichTextDefaultTextFormat,
   setRichTextMultiline,
@@ -174,6 +191,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const gl = screenState.gl;
   const state: GlRenderState = createGlOffscreenRenderState(screenState);
   let target: GlRenderTarget | null = null;
+  let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
   const composite = createCompositor(gl);
   registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
   registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
@@ -181,7 +199,6 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   registerGlShapeCommands(state, defaultGlShapeCommands);
   registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers()));
   registerGlStandardMaterial(state);
-  state.renderTransform2D = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
   const root = createDisplayObject();
   const scrim = createShape();
@@ -531,7 +548,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     width = Math.max(1, Math.round(nextWidth));
     height = Math.max(1, Math.round(nextHeight));
     state.pixelRatio = nextPixelRatio;
-    state.renderTransform2D = createMatrix(nextPixelRatio, 0, 0, nextPixelRatio, 0, 0);
+    deviceTransform = createMatrix(nextPixelRatio, 0, 0, nextPixelRatio, 0, 0);
     // The target matches the drawing buffer exactly, so UI text lands on whole device
     // pixels and stays crisp rather than being resampled by the composite. Resizing
     // allocates a new one, so the old one has to go back or every resize leaks a
@@ -548,38 +565,25 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     const surface = target;
     if (surface === null || !prepareScene2DRender(state, root)) return;
 
-    const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
-    const previousViewport = gl.getParameter(gl.VIEWPORT) as Int32Array;
+    // 1. Draw the UI into its own target. begin binds and clears it, end resolves and puts
+    //    the enclosing binding and viewport back, so the frame the 3D pipeline just
+    //    presented is untouched. The transform is set after begin: a pass carries none.
+    beginGlRenderPass(state, surface);
+    setGlRenderTransform2D(state, deviceTransform);
+    renderGlScene2D(state, root);
+    endGlRenderPass(state);
+
+    // 2. Lay it over that frame. This is the one step with no public equivalent; see the
+    //    note at the top of the file. Only the state this draw touches is saved.
     const previousVertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
-    const previousActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
     const blendWasOn = gl.isEnabled(gl.BLEND);
     const depthWasOn = gl.isEnabled(gl.DEPTH_TEST);
-    const cullWasOn = gl.isEnabled(gl.CULL_FACE);
-    const scissorWasOn = gl.isEnabled(gl.SCISSOR_TEST);
-
-    // 1. Draw the UI into its own target.
-    gl.bindFramebuffer(gl.FRAMEBUFFER, surface.framebuffer);
-    gl.viewport(0, 0, surface.width, surface.height);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.disable(gl.DEPTH_TEST);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    renderGlScene2D(state, root);
-
-    // 2. Lay it over the frame the 3D pipeline already composited.
-    gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
-    gl.viewport(previousViewport[0] ?? 0, previousViewport[1] ?? 0, previousViewport[2] ?? 1, previousViewport[3] ?? 1);
     composite.draw(surface.textures[0] ?? null);
-
-    // 3. Hand the context back exactly as it was found.
     gl.bindVertexArray(previousVertexArray);
     gl.useProgram(previousProgram);
-    gl.activeTexture(previousActiveTexture);
     if (blendWasOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
     if (depthWasOn) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
-    if (cullWasOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
-    if (scissorWasOn) gl.enable(gl.SCISSOR_TEST); else gl.disable(gl.SCISSOR_TEST);
   }
 
   return { buttons, render, resize, update };

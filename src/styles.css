@@ -28,10 +28,10 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at 8% 8%, rgba(255, 255, 255, 0.86), transparent 25rem),
-    radial-gradient(circle at 92% 90%, rgba(215, 182, 112, 0.12), transparent 28rem),
-    var(--paper);
+  /* The game fills the page, so the only time this is visible is a sub-pixel seam at the
+     edge. It used to be paper with a near-white radial in the top-left corner, which is
+     what a hairline seam showed as: a white stripe. Sky means a seam cannot be seen. */
+  background: #6cb8ee;
 }
 
 button,

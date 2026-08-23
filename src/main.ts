@@ -1455,8 +1455,12 @@ function resizeCanvas(): void {
     renderState.pixelRatio = nextPixelRatio;
     canvas.width = backingWidth;
     canvas.height = backingHeight;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+    // Deliberately NOT setting canvas.style.width/height. The backing store has to be a
+    // whole number of device pixels, but pinning the CSS size to that rounded value leaves
+    // the canvas a fraction of a pixel short of a viewer whose own width is fractional —
+    // which happens with browser zoom or a HiDPI window — and the page shows through as a
+    // hairline stripe along the edge. The `.viewer canvas` rule sizes it at 100%/100%
+    // instead, so it always covers exactly, and the slight sampling stretch is invisible.
     gameUi.resize(width, height, nextPixelRatio);
     if (camera.projection.kind === 'perspective') camera.projection.aspect = width / height;
     renderRequested = true;
@@ -1569,6 +1573,11 @@ function initializeRenderer() {
     'Farm Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place the next random farm object.',
   );
   nextCanvas.tabIndex = 0;
+  // createGlCanvasElement writes an inline pixel size, which would beat the stylesheet's
+  // 100%/100%. Set it to fill once, here, so resizeCanvas never has to touch the CSS size
+  // and can never round it a fraction short of the viewer (see the note there).
+  nextCanvas.style.width = '100%';
+  nextCanvas.style.height = '100%';
   viewer.prepend(nextCanvas);
 
   try {

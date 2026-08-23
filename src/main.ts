@@ -180,7 +180,6 @@ const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
 // short enough that a player who reacts to the first preview never notices it.
 const START_INPUT_GUARD_MS = 400;
 const GAME_DURATION_MS = 30_000;
-const HANDS_PER_EMOJI_COLUMN = 9;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 const RESULT_TICK_INTERVAL_MS = 32;
@@ -217,29 +216,7 @@ const loadingPanel = requireElement<HTMLDivElement>('loading-panel');
 const loadingCopy = requireElement<HTMLParagraphElement>('loading-copy');
 const errorPanel = requireElement<HTMLDivElement>('error-panel');
 const retryButton = requireElement<HTMLButtonElement>('retry-button');
-const sceneStatus = requireElement<HTMLDivElement>('scene-status');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
-const startPanel = requireElement<HTMLDivElement>('start-panel');
-const startButton = requireElement<HTMLButtonElement>('start-button');
-const timeUpPanel = requireElement<HTMLDivElement>('time-up-panel');
-const resultPanel = requireElement<HTMLDivElement>('result-panel');
-const resultHorseStack = requireElement<HTMLDivElement>('result-horse-stack');
-const resultHandCount = requireElement<HTMLElement>('result-hand-count');
-const resultScore = requireElement<HTMLSpanElement>('result-score');
-const resultCopy = requireElement<HTMLParagraphElement>('result-copy');
-const replayButton = requireElement<HTMLButtonElement>('replay-button');
-const restartButton = requireElement<HTMLButtonElement>('restart-game');
-const dropButton = requireElement<HTMLButtonElement>('drop-horse');
-const fullscreenToggle = requireElement<HTMLButtonElement>('fullscreen-toggle');
-const creditsToggle = requireElement<HTMLButtonElement>('credits-toggle');
-const creditsPanel = requireElement<HTMLDivElement>('credits-panel');
-const horsesLeftCopy = requireElement<HTMLSpanElement>('horses-left');
-const timerCopy = requireElement<HTMLSpanElement>('drop-timer');
-const timerFill = requireElement<HTMLSpanElement>('timer-fill');
-const heightCopy = requireElement<HTMLSpanElement>('stack-height');
-const paceCopy = requireElement<HTMLSpanElement>('pace-copy');
-const heroTimer = requireElement<HTMLDivElement>('hero-timer');
-const heroTimerCopy = requireElement<HTMLElement>('hero-timer-copy');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 // Keep these paths indirect so Vite leaves the runtime module-relative URLs untouched
 // without warning. Both directories are served straight out of public/.
@@ -462,9 +439,7 @@ let physicsAccumulator = 0;
 let previousTime = performance.now();
 let isViewerVisible = true;
 let renderRequested = true;
-let impactFlashUntil = 0;
 let lastImpactAt = 0;
-let hudDirty = true;
 const measurementBodies: RigidBody2D[] = [];
 const inputBounds = { left: 0, width: 1 };
 
@@ -490,11 +465,7 @@ async function start(): Promise<void> {
     updateCamera(1, cachedStackHeight);
     renderFrame();
     loadingPanel.classList.add('is-hidden');
-    startPanel.hidden = false;
-    startButton.disabled = false;
-    sceneStatus.classList.add('is-ready');
     statusCopy.textContent = 'Stable enough';
-    updateHud(performance.now());
   } catch (error) {
     showSceneError('Unable to load Horse Stacker.', error);
   }
@@ -775,7 +746,6 @@ function startGame(startedFrom?: Event): void {
   resultAnimationDuration = 0;
   resultHands = 0;
   resultHandsShown = 0;
-  impactFlashUntil = 0;
   lastImpactAt = 0;
   removeNodeChildren(stackLayer);
   landingGhost = createNode3D(Node3DKind, { name: 'landing-preview' });
@@ -796,21 +766,6 @@ function startGame(startedFrom?: Event): void {
   phase = 'playing';
   cameraStackHeight = 0;
   placementArmedAt = (startedFrom?.timeStamp ?? now) + START_INPUT_GUARD_MS;
-  startPanel.hidden = true;
-  timeUpPanel.hidden = true;
-  resultPanel.hidden = true;
-  resultPanel.classList.remove('is-total-revealed');
-  resultHorseStack.replaceChildren();
-  resultHandCount.textContent = '0';
-  resultScore.textContent = '0.00 m';
-  replayButton.hidden = true;
-  restartButton.hidden = false;
-  dropButton.disabled = true;
-  dropButton.hidden = false;
-  viewer.classList.add('is-playing');
-  viewer.classList.remove('is-finished', 'is-time-up', 'is-bumping', 'is-panicking');
-  sceneStatus.classList.add('is-ready');
-  hudDirty = true;
   spawnObject(now);
   renderRequested = true;
 }
@@ -833,7 +788,6 @@ function spawnObject(now: number): void {
   setLandingGhostKind(kind, variantIndex);
   if (landingGhost !== null) landingGhost.enabled = true;
   if (landingRadiance !== null) landingRadiance.enabled = true;
-  dropButton.disabled = false;
   const profile = STACK_OBJECT_PROFILES[kind];
   statusCopy.textContent = `${profile.emoji} ${getStackObjectVisualLabel(kind, variantIndex)}`;
   updateActiveStackObject(now);
@@ -872,9 +826,7 @@ function commitObjectPlacement(now: number): void {
   addNodeChild(stackLayer, node);
   stackedObjects.push({ body, kind: current.kind, lost: false, node });
   activeObject = null;
-  dropButton.disabled = true;
   // The prompt has served its purpose once the player has placed something.
-  dropButton.hidden = true;
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
@@ -882,7 +834,6 @@ function commitObjectPlacement(now: number): void {
   restartAudioTrack(horseThud, 'Stack thud');
 
   nextObjectAt = now + getNextObjectDelay(objectsDropped);
-  hudDirty = true;
   renderRequested = true;
 }
 
@@ -913,14 +864,9 @@ function beginSettling(now: number): void {
   restartAudioTrack(countFanfare, 'Count fanfare');
   activeObject = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
-  dropButton.disabled = true;
   if (landingGhost !== null) landingGhost.enabled = false;
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
-  timeUpPanel.hidden = false;
-  viewer.classList.remove('is-playing', 'is-panicking');
-  viewer.classList.add('is-time-up');
-  hudDirty = true;
   renderRequested = true;
 }
 
@@ -940,17 +886,7 @@ function finishGame(now: number): void {
         MIN_RESULT_COUNT_DURATION_MS,
         MAX_RESULT_COUNT_DURATION_MS,
       );
-  resultHorseStack.replaceChildren();
-  resultHandCount.textContent = '0';
-  resultScore.textContent = '0.00 m';
-  replayButton.hidden = true;
-  resultPanel.classList.remove('is-total-revealed');
-  timeUpPanel.hidden = true;
-  resultPanel.hidden = false;
-  viewer.classList.remove('is-playing', 'is-time-up', 'is-panicking', 'is-bumping');
-  viewer.classList.add('is-finished');
   indicatorLight.intensity = 0;
-  hudDirty = true;
   renderRequested = true;
 }
 
@@ -959,29 +895,16 @@ function updateResultAnimation(now: number): void {
   const progress = clamp((now - resultAnimationStart) / resultAnimationDuration, 0, 1);
   const easedProgress = 1 - Math.pow(1 - progress, 3);
   const handsToShow = Math.min(resultHands, Math.floor(resultHands * easedProgress));
-  if (appendHorseHands(handsToShow)) playResultTick(now);
-  resultHandCount.textContent = String(handsToShow);
-  resultScore.textContent = formatMeters(getStackHeightMeters(finalHeight) * easedProgress);
+  if (advanceHorseHands(handsToShow)) playResultTick(now);
 
   if (progress >= 1) completeResultAnimation();
 }
 
-function appendHorseHands(targetCount: number): boolean {
+// The tally itself is drawn by the 2D layer straight from resultHandsShown; this only
+// advances the count and reports whether it moved, which is what drives the tick sound.
+function advanceHorseHands(targetCount: number): boolean {
   const previousCount = resultHandsShown;
-  while (resultHandsShown < targetCount) {
-    const columnIndex = Math.floor(resultHandsShown / HANDS_PER_EMOJI_COLUMN);
-    let column = resultHorseStack.children.item(columnIndex);
-    if (!(column instanceof HTMLElement)) {
-      column = document.createElement('span');
-      column.className = 'horse-hand-column';
-      resultHorseStack.append(column);
-    }
-    const horse = document.createElement('span');
-    horse.className = 'horse-hand';
-    horse.textContent = '🐴';
-    column.append(horse);
-    resultHandsShown++;
-  }
+  resultHandsShown = Math.max(resultHandsShown, Math.min(targetCount, resultHands));
   return resultHandsShown > previousCount;
 }
 
@@ -989,12 +912,7 @@ function completeResultAnimation(): void {
   resultAnimationStart = 0;
   restartAudioTrack(resultTada, 'Result fanfare');
   maybePlayCelebrationWhinny();
-  appendHorseHands(resultHands);
-  resultHandCount.textContent = String(resultHands);
-  resultScore.textContent = formatHeight(finalHeight);
-  resultCopy.textContent = `${getScore(finalHeight).toLocaleString()} points`;
-  replayButton.hidden = false;
-  resultPanel.classList.add('is-total-revealed');
+  advanceHorseHands(resultHands);
 
   celebrateFinalHeight();
 }
@@ -1036,7 +954,6 @@ function handlePhysicsContacts(now: number): void {
   if (point === undefined) return;
 
   lastImpactAt = now;
-  impactFlashUntil = now + 130;
   emitParticleBurst3D(
     dustEmitter,
     dustState,
@@ -1207,32 +1124,6 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
-function updateHud(now: number, stackHeight = cachedStackHeight): void {
-  setTextIfChanged(horsesLeftCopy, String(objectsDropped));
-  setTextIfChanged(heightCopy, formatHeight(stackHeight));
-  setTextIfChanged(paceCopy, `${getScore(stackHeight).toLocaleString()} pts`);
-
-  if (phase !== 'playing') {
-    setTextIfChanged(timerCopy, phase === 'settling' ? 'TIME UP' : '—');
-    setTextIfChanged(heroTimerCopy, '0');
-    setStyleTransformIfChanged(timerFill, 'scaleX(0)');
-    timerFill.classList.remove('is-urgent');
-    heroTimer.classList.remove('is-urgent');
-  } else {
-    const remainingMs = Math.max(0, gameEndsAt - now);
-    const remaining = remainingMs / 1000;
-    setTextIfChanged(timerCopy, `${remaining.toFixed(1)}s`);
-    setTextIfChanged(heroTimerCopy, String(Math.ceil(remaining)));
-    setStyleTransformIfChanged(timerFill, `scaleX(${clamp(remainingMs / GAME_DURATION_MS, 0, 1)})`);
-    timerFill.classList.toggle('is-urgent', remaining <= 10);
-    heroTimer.classList.toggle('is-urgent', remaining <= 10);
-    viewer.classList.toggle('is-panicking', remaining <= 10);
-  }
-
-  viewer.classList.toggle('is-bumping', now < impactFlashUntil && !reducedMotion.matches);
-  hudDirty = false;
-}
-
 function getCurrentStackHeight(): number {
   measurementBodies.length = 0;
   for (const object of stackedObjects) {
@@ -1319,17 +1210,7 @@ function bindGameControls(): void {
     event.preventDefault();
   });
 
-  dropButton.addEventListener('click', (event: MouseEvent) =>
-    placeActiveStackObject(performance.now(), event.timeStamp),
-  );
   bindFullscreenToggle();
-  creditsToggle.addEventListener('click', () => {
-    creditsPanel.hidden = !creditsPanel.hidden;
-    creditsToggle.setAttribute('aria-expanded', String(!creditsPanel.hidden));
-  });
-  startButton.addEventListener('click', startGame);
-  replayButton.addEventListener('click', startGame);
-  restartButton.addEventListener('click', startGame);
 }
 
 function trackPointer(event: PointerEvent): void {
@@ -1388,10 +1269,8 @@ function isInteractiveEventTarget(target: EventTarget | null): boolean {
 // hidden rather than left to fail when the user presses it.
 function bindFullscreenToggle(): void {
   if (typeof viewer.requestFullscreen !== 'function' || document.fullscreenEnabled !== true) {
-    fullscreenToggle.hidden = true;
     return;
   }
-  fullscreenToggle.addEventListener('click', () => toggleFullscreen());
   document.addEventListener('fullscreenchange', () => {
     syncFullscreenToggle();
     // The viewer's box changes before a resize event necessarily arrives, and
@@ -1414,8 +1293,6 @@ function toggleFullscreen(): void {
 function syncFullscreenToggle(): void {
   const active = document.fullscreenElement === viewer;
   viewer.classList.toggle('is-fullscreen', active);
-  fullscreenToggle.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
-  fullscreenToggle.title = active ? 'Exit fullscreen' : 'Fullscreen';
 }
 
 function placeActiveStackObject(now: number, inputAt = now): void {
@@ -1579,7 +1456,6 @@ function enterFrame(now: number): void {
 
     const displayedHeight = phase === 'finished' ? finalHeight : cachedStackHeight;
     updateCamera(deltaTime, displayedHeight);
-    if (gameIsMoving || hudDirty) updateHud(now, displayedHeight);
     const cameraIsMoving =
       Math.abs(cameraController.distance - cameraController.goalDistance) > 0.001 ||
       Math.abs(cameraController.polar - cameraController.goalPolar) > 0.0001 ||
@@ -1773,21 +1649,7 @@ function showSceneError(message: string, error: unknown): void {
   console.error(message, error);
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;
-  startPanel.hidden = true;
-  timeUpPanel.hidden = true;
-  resultPanel.hidden = true;
-  dropButton.disabled = true;
-  sceneStatus.classList.remove('is-ready');
-  sceneStatus.classList.add('is-error');
   statusCopy.textContent = 'Game unavailable';
-}
-
-function setTextIfChanged(element: HTMLElement, value: string): void {
-  if (element.textContent !== value) element.textContent = value;
-}
-
-function setStyleTransformIfChanged(element: HTMLElement, value: string): void {
-  if (element.style.transform !== value) element.style.transform = value;
 }
 
 function formatHeight(height: number): string {
@@ -1800,6 +1662,23 @@ function formatMeters(meters: number): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+// The HUD used to double as a test surface — harnesses read the placed count and height
+// out of the DOM. Those elements are gone, so dev builds expose the same few numbers
+// directly. Not shipped: production has no reason to carry it.
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__game = {
+    get height() {
+      return getStackHeightMeters(phase === 'finished' ? finalHeight : cachedStackHeight);
+    },
+    get phase() {
+      return phase;
+    },
+    get placed() {
+      return objectsDropped;
+    },
+  };
 }
 
 function requireElement<T extends HTMLElement>(id: string): T {

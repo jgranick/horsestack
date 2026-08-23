@@ -2,169 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       name="description"
-      content="A chaotic low-poly horse stacking game powered by Flight 2D physics."
+      content="A chaotic low-poly farm stacking game powered by Flight."
     />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f3c84b'/%3E%3Cpath d='M14 45V17h9v10h18V17h9v28h-9V35H23v10z' fill='%23252420'/%3E%3C/svg%3E"
     />
-    <title>Horse Stacker — An Unstable Pasture</title>
+    <title>Horse Stacker</title>
   </head>
   <body>
-    <div class="site-shell">
-      <header class="site-header" hidden>
-        <a class="brand" href="./" aria-label="Horse Stacker home">
-          <span class="brand-mark" aria-hidden="true"><span></span></span>
-          <span>Horse Stacker</span>
-        </a>
+    <!--
+      The game is the page. Everything the player sees during a run is drawn by Flight —
+      the farm on the 3D canvas, the whole UI on a second 2D canvas above it (src/gameUi2d.ts).
+      Only three things stay in the DOM, and each has to: the two canvases are created by
+      main.ts, the loading and error panels must be able to show before WebGL exists or when
+      it fails, and the status line is the screen-reader's only view of a canvas game.
+    -->
+    <div class="viewer" id="viewer">
+      <div class="panel" id="loading-panel">
+        <div class="loader" aria-hidden="true"></div>
+        <p id="loading-copy">Rounding up the farm…</p>
+      </div>
 
-        <div class="scene-status" id="scene-status" role="status">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="status-copy">Preparing pasture</span>
-        </div>
-      </header>
+      <div class="panel" id="error-panel" hidden>
+        <p>We couldn’t open the pasture.</p>
+        <button type="button" id="retry-button">Try again</button>
+      </div>
 
-      <main class="experience">
-        <section class="intro" aria-labelledby="page-title" hidden>
-          <p class="eyebrow"><span>01</span> Experimental agriculture</p>
-          <h1 id="page-title">Stack.<br />Those.<br /><em>Horses.</em></h1>
-          <p class="lede">
-            Horses, hay, cows, or chickens. Sixty frantic seconds. Stack whatever the farm gives you.
-          </p>
-
-          <div class="scoreboard" aria-label="Game status" hidden>
-            <div class="score-cell">
-              <span class="score-label">Objects placed</span>
-              <strong id="horses-left">0</strong>
-            </div>
-            <div class="score-cell timer-cell">
-              <span class="score-label">Time left</span>
-              <strong id="drop-timer">—</strong>
-              <span class="timer-track" aria-hidden="true"><span id="timer-fill"></span></span>
-            </div>
-            <div class="score-cell">
-              <span class="score-label">Height</span>
-              <strong id="stack-height">0.00 m</strong>
-            </div>
-            <div class="score-cell pace-cell">
-              <span class="score-label">Score</span>
-              <strong id="pace-copy">0 pts</strong>
-            </div>
-          </div>
-
-          <div class="interaction-note">
-            <span class="interaction-icon" aria-hidden="true"><span></span></span>
-            <span>
-              <strong>Balance the radiant marker</strong>
-              Every piece is random · Move gently to stay level · Click, tap, Space or Enter to place
-            </span>
-          </div>
-        </section>
-
-        <section class="viewer-wrap" aria-label="Horse Stacker game">
-          <div class="viewer" id="viewer">
-            <div class="loading-panel" id="loading-panel">
-              <div class="loader-mark" aria-hidden="true"><span></span></div>
-              <p id="loading-copy">Rounding up the farm…</p>
-            </div>
-
-            <div class="game-panel start-panel" id="start-panel" hidden>
-              <h2>Horse<br />Stacker</h2>
-              <button type="button" id="start-button" disabled>Play</button>
-            </div>
-
-            <div class="game-panel time-up-panel" id="time-up-panel" hidden role="status" aria-live="assertive">
-              <h2>TIME<br />UP!</h2>
-            </div>
-
-            <div class="game-panel result-panel" id="result-panel" hidden aria-live="polite">
-              <div class="horse-tally" aria-hidden="true">
-                <div class="horse-hand-stack" id="result-horse-stack"></div>
-              </div>
-              <p class="result-hand-line"><strong id="result-hand-count">0</strong> hands high</p>
-              <h2><span id="result-score">0.00 m</span></h2>
-              <p id="result-copy"></p>
-              <button type="button" id="replay-button" hidden>Play again</button>
-            </div>
-
-            <div class="error-panel" id="error-panel" hidden>
-              <p>We couldn’t open the pasture.</p>
-              <button type="button" id="retry-button">Try again</button>
-            </div>
-
-            <div class="hero-timer" id="hero-timer" aria-hidden="true">
-              <span>Time left</span>
-              <strong id="hero-timer-copy">60</strong>
-            </div>
-
-            <button class="restart-game" id="restart-game" type="button" hidden>
-              <span aria-hidden="true">↺</span>
-              Start over
-            </button>
-
-            <button class="drop-horse" id="drop-horse" type="button" disabled>
-              Place object
-              <span aria-hidden="true">↓</span>
-            </button>
-
-            <button class="credits-toggle" id="credits-toggle" type="button" aria-label="Credits" title="Credits">
-              <span aria-hidden="true">i</span>
-            </button>
-
-            <div class="credits-panel" id="credits-panel" hidden>
-              <p>
-                Built with <a href="https://github.com/flighthq" target="_blank" rel="noreferrer">Flight</a>.
-                Models by <a href="https://sketchfab.com/Edwin3D" target="_blank" rel="noreferrer">EdwinRC</a>
-                and <a href="https://sketchfab.com/SleepyPineapple" target="_blank" rel="noreferrer">SleepyPineapple</a>, CC BY 4.0.
-                Music “The Mountain's Happy Song” by Elijah_K via
-                <a href="https://freemusicarchive.org/" target="_blank" rel="noreferrer">Free Music Archive</a>, CC BY.
-                Ambience and effects via
-                <a href="https://free-sound-effects.net/" target="_blank" rel="noreferrer">Free Sound Effects</a>.
-              </p>
-            </div>
-
-            <button
-              class="fullscreen-toggle"
-              id="fullscreen-toggle"
-              type="button"
-              title="Fullscreen"
-              aria-label="Enter fullscreen"
-            >
-              <svg class="fullscreen-icon is-enter" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-              </svg>
-              <svg class="fullscreen-icon is-exit" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
-              </svg>
-            </button>
-
-            <!-- <div class="viewer-label" aria-hidden="true">
-              <span>Flight Physics 2D</span>
-              <span>60-second pile protocol</span>
-            </div> -->
-          </div>
-        </section>
-      </main>
-
-      <footer class="site-footer" hidden>
-        <a href="https://github.com/flighthq" target="_blank" rel="noreferrer">Built with Flight</a>
-        <span class="footer-rule" aria-hidden="true"></span>
-        <span>
-          Models by
-          <a href="https://sketchfab.com/Edwin3D" target="_blank" rel="noreferrer">EdwinRC</a>
-          &amp;
-          <a href="https://sketchfab.com/SleepyPineapple" target="_blank" rel="noreferrer">SleepyPineapple</a>
-          · CC BY 4.0
-          · Music “The Mountain's Happy Song” by Elijah_K via
-          <a href="https://freemusicarchive.org/" target="_blank" rel="noreferrer">Free Music Archive</a>
-          · CC BY
-          · Ambience &amp; sound effects via
-          <a href="https://free-sound-effects.net/" target="_blank" rel="noreferrer">Free Sound Effects</a>
-        </span>
-      </footer>
+      <p class="visually-hidden" id="status-copy" role="status">Preparing pasture</p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

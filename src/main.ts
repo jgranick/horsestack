@@ -17,6 +17,7 @@ import type {
 import {
   addNodeChild,
   addNodeChildAt,
+  beginGlRenderPass,
   beginGlRenderEffectPipeline,
   clearParticleEmitter3D,
   cloneMeshGeometry,
@@ -53,6 +54,7 @@ import {
   convertMeshGeometryLayout,
   easeOutCubic,
   emitParticleBurst3D,
+  endGlRenderPass,
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
   getCamera3DWorldToScreen,
@@ -1544,10 +1546,16 @@ function renderFrame(): void {
   if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
   beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
   renderGlBackground(renderState);
-  renderState.gl.depthMask(true);
-  renderState.gl.clearDepth(1);
-  renderState.gl.clear(renderState.gl.DEPTH_BUFFER_BIT);
-  drawGlScene3D(renderState, scene, camera, lights);
+  // The pipeline opens its pass preserving BOTH aspects, so last frame's depth is still in
+  // the target and the scene has to start from a cleared one. A nested pass that spares
+  // only the colour does exactly that, using the target's own clear values — the same job
+  // three raw depthMask/clearDepth/clear calls used to do by hand.
+  const sceneTarget = pipeline.sceneTarget;
+  if (sceneTarget !== null) {
+    beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
+    drawGlScene3D(renderState, scene, camera, lights);
+    endGlRenderPass(renderState);
+  }
   endGlRenderEffectPipeline(renderState, pipeline, []);
   const countProgress =
     resultAnimationStart === 0

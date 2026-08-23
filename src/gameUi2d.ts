@@ -63,7 +63,8 @@ export interface UiState {
   canvas: HTMLCanvasElement;
   render: () => void;
   resize: (width: number, height: number, pixelRatio: number) => void;
-  update: (model: UiModel) => void;
+  /** Returns true while the UI still has something to animate, so the host keeps drawing. */
+  update: (model: UiModel) => boolean;
 }
 
 export interface UiModel {
@@ -76,6 +77,9 @@ export interface UiModel {
   heightText: string;
   pointsText: string;
   now: number;
+  pointerDown: boolean;
+  pointerX: number;
+  pointerY: number;
   screen: UiScreen;
   secondsLeft: number;
   // 0..1 over the TIME UP arrival, driving its overshoot.
@@ -89,6 +93,18 @@ const GOLD = 0xffd166;
 // survive the move to Flight 2D. See docs/result-screen-reference.png.
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+// Overshoots past 1 then settles, so a screen arrives with a bit of bounce instead of
+// simply appearing.
+function easeOutBack(t: number): number {
+  const c = 1.7;
+  const u = t - 1;
+  return 1 + (c + 1) * u * u * u + c * u * u;
 }
 
 // time-up-arrive: 1.18 -> 0.97 at 55% -> 1.0, with the panel fading in.
@@ -225,6 +241,15 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   let width = 1;
   let height = 1;
   const buttons: UiButton[] = [];
+  // When the current screen appeared, so each one animates in rather than cutting in.
+  let screenShownAt = 0;
+  let lastScreen: UiScreen | null = null;
+  let pointer = { down: false, x: -1, y: -1 };
+  let hoveringAnything = false;
+
+  function hovering(x: number, y: number, w: number, h: number): boolean {
+    return pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
+  }
 
   function centreLabel(node: TextLabel, y: number): void {
     setTextLabelWidth(node, width);
@@ -232,14 +257,35 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   }
 
   function pill(shape: Shape, text: TextLabel, id: UiButton['id'], x: number, y: number, w: number, h: number, colour: number, alpha: number): void {
-    fill(shape, colour, alpha, 0, 0, w, h, h / 2);
-    place(shape, x, y);
+    // A control that does nothing until you click it feels dead. Hovering swells it and
+    // brightens the fill; pressing sinks it. The rounded rect is redrawn every frame
+    // anyway, so this needs no pivot juggling — just draw it a size bigger.
+    const hovered = hovering(x, y, w, h);
+    if (hovered) hoveringAnything = true;
+    const pressed = hovered && pointer.down;
+    const grow = pressed ? -1.5 : hovered ? 2.5 : 0;
+    const sink = pressed ? 1.5 : 0;
+    fill(
+      shape, colour, Math.min(1, alpha + (hovered ? 0.14 : 0)),
+      -grow, -grow, w + grow * 2, h + grow * 2, (h + grow * 2) / 2,
+    );
+    place(shape, x, y + sink);
     setTextLabelWidth(text, w);
-    place(text, x, y + (h - (text.data.textFormat.size ?? 12) * 1.35) / 2);
+    place(text, x, y + sink + (h - (text.data.textFormat.size ?? 12) * 1.35) / 2);
     buttons.push({ height: h, id, width: w, x, y });
   }
 
-  function update(model: UiModel): void {
+  function update(model: UiModel): boolean {
+    const wasHovering = hoveringAnything;
+    hoveringAnything = false;
+    pointer = { down: model.pointerDown, x: model.pointerX, y: model.pointerY };
+    if (model.screen !== lastScreen) {
+      lastScreen = model.screen;
+      screenShownAt = model.now;
+    }
+    // 0..1 as the current screen arrives; `pop` overshoots so things land with a bounce.
+    const intro = clamp01((model.now - screenShownAt) / 380);
+    const pop = easeOutBack(intro);
     buttons.length = 0;
     const onTitle = model.screen === 'title';
     const onResult = model.screen === 'result';
@@ -257,8 +303,21 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
     show(playPill, onTitle);
     show(playText, onTitle);
     if (onTitle) {
-      centreLabel(titleText, height * 0.5 - 120);
-      pill(playPill, playText, 'play', width / 2 - 84, height * 0.5 + 30, 168, 44, INK, 1);
+      // Drops in with an overshoot, then breathes so the screen is never quite still.
+      const breathe = Math.sin(model.now * 0.0016) * 4;
+      setTextLabelWidth(titleText, width);
+      titleText.alpha = intro;
+      titleText.scaleX = 0.86 + 0.14 * pop;
+      titleText.scaleY = titleText.scaleX;
+      titleText.pivotX = width / 2;
+      titleText.pivotY = 60;
+      place(titleText, width / 2, height * 0.5 - 120 + 60 + (1 - pop) * 26 + breathe);
+      invalidateNodeAppearance(titleText);
+      const nudge = Math.sin(model.now * 0.0016 + 1.1) * 2;
+      pill(
+        playPill, playText, 'play',
+        width / 2 - 84, height * 0.5 + 30 + (1 - intro) * 20 + nudge, 168, 44, INK, intro,
+      );
     }
 
     show(timeUpScrim, onTimeUp);
@@ -326,8 +385,10 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
         );
         invalidateNodeAppearance(horse);
       }
-      fill(tallyRule, GOLD, 0.42, 0, 0, Math.min(430, width - 48), 1, 0);
-      place(tallyRule, width / 2 - Math.min(430, width - 48) / 2, ruleY);
+      // The rule wipes out from the centre rather than appearing whole.
+      const ruleWidth = Math.min(430, width - 48) * clamp01(intro * 1.4);
+      fill(tallyRule, GOLD, 0.42, 0, 0, Math.max(1, ruleWidth), 1, 0);
+      place(tallyRule, width / 2 - ruleWidth / 2, ruleY);
 
       // The gold count and its caption sit on one line, as in the DOM original:
       // a right-aligned number butted against a left-aligned label.
@@ -353,9 +414,16 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
       // pivot is the anchor, so x/y address the pivot rather than the top-left corner
       place(resultHeight, width / 2, ruleY + 52 + 40);
 
-      centreLabel(pointsText, ruleY + 150);
+      // Points and the button arrive after the count lands, so the score is the last beat.
+      const settle = clamp01((model.countProgress - 0.86) / 0.14);
+      centreLabel(pointsText, ruleY + 150 + (1 - settle) * 8);
       setText(pointsText, model.pointsText);
-      pill(againPill, againText, 'again', width / 2 - 96, ruleY + 186, 192, 44, INK, 1);
+      pointsText.alpha = settle;
+      invalidateNodeAppearance(pointsText);
+      pill(
+        againPill, againText, 'again',
+        width / 2 - 96, ruleY + 186 + (1 - easeOutBack(settle)) * 16, 192, 44, INK, settle,
+      );
     }
 
     show(timerPill, playing);
@@ -366,14 +434,31 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
     if (playing) {
       const w = 104;
       const x = width - w - 24;
-      fill(timerPill, 0x1f2d1d, 0.72, 0, 0, w, 62, 18);
-      place(timerPill, x, 18);
+      const drop = (1 - pop) * 40;
+      // Under ten seconds the pill turns hot and jitters; each new second gives the number
+      // a kick, so the clock reads as running rather than just counting.
+      const urgent = clamp01((10 - model.secondsLeft) / 4);
+      const fraction = model.secondsLeft - Math.floor(model.secondsLeft);
+      const kick = Math.max(0, 1 - (1 - fraction) * 7);
+      const shake = urgent * Math.sin(model.now * 0.045) * 2.5;
+      fill(
+        timerPill,
+        urgent > 0 ? 0x8c3a24 : 0x1f2d1d,
+        0.72 + urgent * 0.14,
+        0, 0, w, 62, 18,
+      );
+      place(timerPill, x + shake, 18 - drop);
       setTextLabelWidth(timerCaption, w);
-      place(timerCaption, x, 26);
+      place(timerCaption, x + shake, 26 - drop);
       setTextLabelWidth(timerValue, w);
-      place(timerValue, x, 38);
+      const beat = 1 + kick * (0.14 + urgent * 0.12);
+      timerValue.scaleX = beat;
+      timerValue.scaleY = beat;
+      timerValue.pivotX = w / 2;
+      timerValue.pivotY = 20;
+      place(timerValue, x + shake + w / 2, 38 - drop + 20);
       setText(timerValue, String(Math.max(0, Math.ceil(model.secondsLeft))));
-      pill(restartPill, restartText, 'restart', width - 128, 92, 104, 30, 0x1f2d1d, 0.5);
+      pill(restartPill, restartText, 'restart', width - 128, 92 - drop, 104, 30, 0x1f2d1d, 0.5);
     }
 
     pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);
@@ -394,6 +479,13 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
       );
       place(creditsCopy, 40, height - 134);
     }
+
+    // The host only draws on demand, so the UI has to ask for the next frame or anything
+    // that breathes, ticks or counts would freeze after one.
+    const settling = model.screen === 'result' && model.countProgress < 1;
+    const arriving = intro < 1;
+    const idleMotion = model.screen === 'title' || model.screen === 'playing';
+    return arriving || settling || idleMotion || hoveringAnything || wasHovering;
   }
 
   function resize(nextWidth: number, nextHeight: number, nextPixelRatio: number): void {

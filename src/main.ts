@@ -264,6 +264,10 @@ retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
 const gameUi = createGameUi2D(viewer, renderState.pixelRatio);
 let creditsOpen = false;
+// Where the pointer is and whether it is held, so 2D controls can light up and press in.
+let pointerX = -1;
+let pointerY = -1;
+let pointerDown = false;
 
 const scene = createNode3D(Node3DKind);
 const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
@@ -1264,12 +1268,26 @@ function bindGameControls(): void {
   // the page while a run is live. setAimFromClientX clamps against the canvas bounds, so
   // a click out in the margin simply aims at that edge.
   window.addEventListener('pointermove', (event: PointerEvent) => {
+    trackPointer(event);
+    renderRequested = true;
     if (phase !== 'playing' || activeObject === null) return;
     setAimFromClientX(event.clientX, performance.now());
+  });
+  window.addEventListener('pointerup', () => {
+    pointerDown = false;
+    renderRequested = true;
+  });
+  window.addEventListener('pointerleave', () => {
+    pointerX = -1;
+    pointerY = -1;
+    pointerDown = false;
   });
 
   window.addEventListener('pointerdown', (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0) return;
+    trackPointer(event);
+    pointerDown = true;
+    renderRequested = true;
     if (handleUiPress(event)) {
       event.preventDefault();
       return;
@@ -1312,6 +1330,12 @@ function bindGameControls(): void {
   startButton.addEventListener('click', startGame);
   replayButton.addEventListener('click', startGame);
   restartButton.addEventListener('click', startGame);
+}
+
+function trackPointer(event: PointerEvent): void {
+  const bounds = canvas.getBoundingClientRect();
+  pointerX = event.clientX - bounds.left;
+  pointerY = event.clientY - bounds.top;
 }
 
 function handleUiPress(event: PointerEvent): boolean {
@@ -1492,11 +1516,14 @@ function renderFrame(): void {
       ? phase === 'finished' ? 1 : 0
       : clamp((performance.now() - resultAnimationStart) / resultAnimationDuration, 0, 1);
   const shownMeters = getStackHeightMeters(finalHeight) * (1 - Math.pow(1 - countProgress, 3));
-  gameUi.update({
+  const uiWantsAnotherFrame = gameUi.update({
     countProgress,
     creditsOpen,
     handsShown: resultHandsShown,
     now: performance.now(),
+    pointerDown,
+    pointerX,
+    pointerY,
     handsText: String(resultHandsShown),
     heightText: countProgress >= 1 ? formatHeight(finalHeight) : formatMeters(shownMeters),
     pointsText: countProgress >= 1 ? `${getScore(finalHeight).toLocaleString()} points` : '',
@@ -1507,6 +1534,7 @@ function renderFrame(): void {
       : clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6,
   });
   gameUi.render();
+  if (uiWantsAnotherFrame) renderRequested = true;
 }
 
 function getUiScreen(): UiScreen {

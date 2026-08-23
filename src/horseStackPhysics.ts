@@ -85,18 +85,51 @@ export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
 const PHYSICS_GRID_CELL_SIZE = 0.2;
+// The pile is meant to be improbable, not fair. Restitution is effectively nil so nothing
+// keeps bouncing after it lands, and friction is generous so a piece shifts and leans
+// rather than sliding straight off.
 const STACK_MATERIALS: Readonly<Record<StackObjectKind, Physics2DMaterial>> = {
-  horse: { density: 1, friction: 0.56, restitution: 0.13 },
-  hay: { density: 0.72, friction: 0.78, restitution: 0.035 },
-  cow: { density: 1.15, friction: 0.6, restitution: 0.08 },
-  chickens: { density: 0.48, friction: 0.44, restitution: 0.2 },
+  horse: { density: 1, friction: 0.82, restitution: 0.01 },
+  hay: { density: 0.72, friction: 0.9, restitution: 0 },
+  cow: { density: 1.15, friction: 0.84, restitution: 0.01 },
+  chickens: { density: 0.48, friction: 0.72, restitution: 0.02 },
 };
+
+// Damping a piece starts with, before any assist is layered on.
+const STACK_DAMPING: Readonly<Record<StackObjectKind, { angular: number; linear: number }>> = {
+  horse: { angular: 0.5, linear: 0.16 },
+  hay: { angular: 0.6, linear: 0.18 },
+  cow: { angular: 0.5, linear: 0.16 },
+  chickens: { angular: 0.45, linear: 0.12 },
+};
+
+// A piece that has been near-still for SETTLE_DELAY starts behaving as though it were
+// gripping whatever is under it, reaching full assist SETTLE_RAMP later. It is never
+// welded — it can still be shoved loose — but it stops drifting out from under the pile.
+const STILL_LINEAR = 0.35;
+const STILL_ANGULAR = 1.1;
+const SETTLE_DELAY = 0.5;
+const SETTLE_RAMP = 1.6;
+const ASSIST_ANGULAR = 5.5;
+const ASSIST_LINEAR = 1.1;
+// Damping alone only removes speed; what topples a tower is torque. A settled piece also
+// gets progressively harder to ROTATE, which is what "gripping the one underneath"
+// actually feels like. Its real inertia is left alone — only the solver's view of it is
+// stiffened, and only while the piece is quiet, so a shove still spins it.
+const ASSIST_INERTIA = 10;
+// Height alone earns some of the same help: the higher a piece rides, the calmer it is
+// held, so a tall pile is quietly propped up rather than honestly balanced.
+const STABILITY_FULL_HEIGHT = 0.9;
 const PASTURE_MATERIAL: Physics2DMaterial = {
   density: 0,
   friction: 0.38,
   restitution: 0.035,
 };
 const stackBodyKinds = new WeakMap<RigidBody2D, StackObjectKind>();
+const stackBodyQuiet = new WeakMap<RigidBody2D, number>();
+// The solver-computed inertia, kept so the assist always stiffens from the true value
+// rather than compounding on its own previous output.
+const stackBodyInertia = new WeakMap<RigidBody2D, number>();
 
 export function createHorseStackWorld(): Physics2DWorld {
   const world = createPhysics2DWorld(
@@ -104,9 +137,9 @@ export function createHorseStackWorld(): Physics2DWorld {
     -PHYSICS_GRAVITY,
     createUniformGridSpatialBackend(PHYSICS_GRID_CELL_SIZE),
   );
-  world.config.velocityIterations = 12;
-  world.config.positionIterations = 6;
-  world.config.timeToSleep = 0.65;
+  world.config.velocityIterations = 18;
+  world.config.positionIterations = 9;
+  world.config.timeToSleep = 0.3;
   // Flight's default sleepLinearThreshold is Box2D's 0.01, which is tuned for a world
   // measured in metres. Ours is measured in ~8.44 m units, so the metre default is about
   // 8x too tight for the speeds it is judging, and a pile that has visually stopped keeps
@@ -119,6 +152,11 @@ export function createHorseStackWorld(): Physics2DWorld {
   // dimensionless, so its default is already correct at any world scale.
   world.config.sleepLinearThreshold = 0.01 * METERS_PER_WORLD_UNIT;
 
+  // Softer, better-converged contacts: pieces are allowed to sink into one another a
+  // little and settle instead of being shoved apart every step.
+  world.config.penetrationSlop = 0.009;
+  world.config.positionCorrection = 0.28;
+  world.config.restitutionThreshold = 2.5;
   const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
   pasture.colliders.push(
     createPhysics2DCollider(
@@ -144,8 +182,8 @@ export function addStackObjectBody(
   angle: number,
 ): RigidBody2D {
   const body = createRigidBody2D('dynamic', x, y, angle);
-  body.linearDamping = kind === 'chickens' ? 0.04 : 0.08;
-  body.angularDamping = kind === 'hay' ? 0.12 : 0.06;
+  body.linearDamping = STACK_DAMPING[kind].linear;
+  body.angularDamping = STACK_DAMPING[kind].angular;
   body.bullet = false;
   if (kind === 'chickens') {
     body.colliders.push(
@@ -169,7 +207,58 @@ export function addStackObjectBody(
 }
 
 export function stepHorseStack(world: Physics2DWorld): void {
+  applyStackAssist(world);
   stepPhysics2D(world, PHYSICS_STEP);
+}
+
+// The thumb on the scale. Runs before every step and only ever raises damping, so it can
+// calm a piece but never move it: no teleporting, no joints, nothing that would read as
+// the pile snapping rigid.
+function applyStackAssist(world: Physics2DWorld): void {
+  for (const body of world.bodies) {
+    if (body.type !== 'dynamic') continue;
+    const kind = stackBodyKinds.get(body);
+    if (kind === undefined) continue;
+    const base = STACK_DAMPING[kind];
+    if (body.sleeping) {
+      body.linearDamping = base.linear + ASSIST_LINEAR;
+      body.angularDamping = base.angular + ASSIST_ANGULAR;
+      applyAssistInertia(body, 1);
+      continue;
+    }
+    const still =
+      Math.hypot(body.velocityX, body.velocityY) < STILL_LINEAR &&
+      Math.abs(body.angularVelocity) < STILL_ANGULAR;
+    // Quiet time accrues at real time but is spent three times as fast when a piece is
+    // knocked about again, so a genuine disturbance loses the assist quickly.
+    const quiet = Math.max(
+      0,
+      Math.min(
+        SETTLE_DELAY + SETTLE_RAMP,
+        (stackBodyQuiet.get(body) ?? 0) + (still ? PHYSICS_STEP : -PHYSICS_STEP * 3),
+      ),
+    );
+    stackBodyQuiet.set(body, quiet);
+    const settled = clamp01((quiet - SETTLE_DELAY) / SETTLE_RAMP);
+    const carried = clamp01((body.y - PASTURE_TOP_Y) / STABILITY_FULL_HEIGHT) * 0.75;
+    const assist = Math.max(settled, carried);
+    body.linearDamping = base.linear + assist * ASSIST_LINEAR;
+    body.angularDamping = base.angular + assist * ASSIST_ANGULAR;
+    applyAssistInertia(body, assist);
+  }
+}
+
+function applyAssistInertia(body: RigidBody2D, assist: number): void {
+  const solved = stackBodyInertia.get(body) ?? body.inertia;
+  stackBodyInertia.set(body, solved);
+  if (solved <= 0) return;
+  const stiffened = solved * (1 + assist * ASSIST_INERTIA);
+  body.inertia = stiffened;
+  body.inverseInertia = 1 / stiffened;
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
 export function getRandomStackObjectKind(random = Math.random): StackObjectKind {

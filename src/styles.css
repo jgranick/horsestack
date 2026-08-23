@@ -360,7 +360,9 @@ h1 em {
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #c9dbea;
+  /* The sky. The 3D canvas clears to transparent so this shows through behind the farm,
+     which is why it is a gradient rather than the render state's flat clear colour. */
+  background: linear-gradient(180deg, #6cb8ee 0%, #a8d8f5 45%, #dff0fb 78%, #f3f7e9 100%);
 }
 
 .viewer::before {

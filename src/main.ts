@@ -420,6 +420,7 @@ let phase: GamePhase = 'loading';
 // guard. Comparing input to input keeps the window honest whatever the frame costs.
 let placementArmedAt = 0;
 let cameraStackHeight = 0;
+let swayClock = 0;
 let horseTemplate: Scene3D | null = null;
 const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
 // The farm's sail assembly, spun in place each frame. Null until the farm mounts.
@@ -1059,7 +1060,19 @@ function synchronizeStackVisuals(): void {
       continue;
     }
 
-    setStackObjectVisualTransform(object.node, body.x, body.y, body.angle);
+    // A sway that exists only in the render transform. The physics never sees it, so it
+    // costs the player nothing, but the pile is visibly never quite at rest — which is the
+    // read we want from something this tall. Amplitude grows with how high the piece rides
+    // and is nil at the pasture, so the base looks planted and the top looks precarious.
+    const carried = clamp((body.y - PASTURE_TOP_Y) / 0.9, 0, 1);
+    const sway = reducedMotion.matches ? 0 : carried * carried;
+    const phase = swayClock + body.index * 0.7;
+    setStackObjectVisualTransform(
+      object.node,
+      body.x + Math.sin(phase) * 0.0016 * sway,
+      body.y,
+      body.angle + Math.sin(phase * 0.77 + 1.3) * 0.010 * sway,
+    );
     stackedObjects[retainedCount++] = object;
   }
   // Fallen objects have already left the physics world and score calculation;
@@ -1508,6 +1521,7 @@ function enterFrame(now: number): void {
     const gameIsMoving = phase === 'playing' || phase === 'settling';
     if (gameIsMoving) {
       updateGame(now);
+      swayClock += deltaTime * 1.6;
       stepGamePhysics(now, deltaTime);
       synchronizeStackVisuals();
       cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
@@ -1560,8 +1574,8 @@ function initializeRenderer() {
   try {
     const nextRenderState = createGlRenderState(nextCanvas, {
       pixelRatio: initialPixelRatio,
-      backgroundColor: 0xc9dbeaff,
-      contextAttributes: { alpha: false, antialias: false },
+      backgroundColor: 0x00000000,
+      contextAttributes: { alpha: true, antialias: false },
       powerPreference: 'high-performance',
     });
     if (import.meta.env.DEV) enableFlightDiagnostics(nextRenderState);

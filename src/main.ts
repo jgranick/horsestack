@@ -15,6 +15,7 @@ import type {
 } from '@flighthq/sdk';
 import {
   addNodeChild,
+  addNodeChildAt,
   beginGlRenderEffectPipeline,
   clearParticleEmitter3D,
   cloneMeshGeometry,
@@ -44,6 +45,7 @@ import {
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
   getCamera3DWorldToScreen,
+  getNodeParent,
   getNodeChildren,
   getNodeLocalMatrix4,
   invalidateNodeLocalTransform,
@@ -54,6 +56,7 @@ import {
   registerGlStandardPbrMaterial,
   registerStandardGlTextureResolvers,
   refreshMeshGeometryBounds,
+  removeNodeChild,
   removeNodeChildren,
   removePhysics2DBody,
   renderGlBackground,
@@ -264,6 +267,12 @@ let pointerDown = false;
 const scene = createNode3D(Node3DKind);
 const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
 addNodeChild(scene, stackLayer);
+// The hovering preview and its halo ring share one parent so a single detach keeps both
+// out of the shadow pass. They must LEAVE the graph to be excluded: drawGlScene3DShadowMap
+// walks every descendant carrying geometry and never consults `enabled`, `visible`, or the
+// material's alpha mode, so hiding a node does not stop it casting. That is why the halo
+// used to lay a ring of shadow across the pasture despite being switched off for the pass.
+const previewLayer = createNode3D(Node3DKind, { name: 'landing-preview-layer' });
 const landingGhostMaterial = createStandardPbrMaterial({
   alphaMode: 'opaque',
   baseColor: 0xe2b83fff,
@@ -765,15 +774,17 @@ function startGame(startedFrom?: Event): void {
   resultHandsShown = 0;
   lastImpactAt = 0;
   removeNodeChildren(stackLayer);
+  removeNodeChildren(previewLayer);
+  addNodeChild(stackLayer, previewLayer);
   landingGhost = createNode3D(Node3DKind, { name: 'landing-preview' });
   // A solid silhouette keeps the small chicken readable and prevents the
   // horse's back-facing surfaces from showing through the preview. The halo,
   // beam, emissive material, and point light retain the golden placement cue.
   landingGhost.alpha = 1;
   landingGhost.name = 'landing-preview';
-  addNodeChild(stackLayer, landingGhost);
+  addNodeChild(previewLayer, landingGhost);
   landingRadiance = createLandingRadiance();
-  addNodeChild(stackLayer, landingRadiance);
+  addNodeChild(previewLayer, landingRadiance);
   indicatorLight.intensity = 0;
   clearParticleEmitter3D(dustEmitter);
   clearParticleEmitter3D(celebrationEmitter);
@@ -1385,13 +1396,13 @@ function setLoadingState(copy: string): void {
 }
 
 function renderFrame(): void {
-  const ghostEnabled = landingGhost?.enabled ?? false;
-  const radianceEnabled = landingRadiance?.enabled ?? false;
-  if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
+  // Lift the preview and its halo out of the graph for the depth pass, then put them back
+  // at the index they held so forward draw order is untouched. See previewLayer above for
+  // why switching them off is not enough.
+  const previewParent = getNodeParent(previewLayer);
+  if (previewParent !== null) removeNodeChild(previewParent, previewLayer);
   drawGlScene3DShadowMap(renderState, scene, shadowCamera, directionalLight);
-  if (landingGhost !== null) landingGhost.enabled = ghostEnabled;
-  if (landingRadiance !== null) landingRadiance.enabled = radianceEnabled;
+  if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
   beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
   renderGlBackground(renderState);
   renderState.gl.depthMask(true);

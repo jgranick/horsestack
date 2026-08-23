@@ -772,6 +772,8 @@ function startGame(startedFrom?: Event): void {
   resultAnimationDuration = 0;
   resultHands = 0;
   resultHandsShown = 0;
+  beatTheRecord = false;
+  recordBeforeRound = null;
   lastImpactAt = 0;
   removeNodeChildren(stackLayer);
   removeNodeChildren(previewLayer);
@@ -902,6 +904,7 @@ function finishGame(now: number): void {
   phase = 'finished';
   finalHeight = getCurrentStackHeight();
   cachedStackHeight = finalHeight;
+  recordFinalHeight(getStackHeightMeters(finalHeight));
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
   resultTickIndex = 0;
@@ -943,6 +946,45 @@ function completeResultAnimation(): void {
   advanceHorseHands(resultHands);
 
   celebrateFinalHeight();
+}
+
+// The best height ever reached on this machine, in metres, or null before a first round
+// has ever been finished here. Kept in localStorage so it survives a reload, and read
+// through try/catch because storage throws outright in some private-browsing modes.
+const BEST_HEIGHT_KEY = 'horse-stacker.best-height';
+let bestMeters: number | null = readBestMeters();
+// The record as it stood when the round began, which is what the result screen reports.
+// Reading bestMeters there would be wrong: by then this round has already been folded in,
+// so a first ever round would echo its own height back at the player as "BEST".
+let recordBeforeRound: number | null = null;
+let beatTheRecord = false;
+
+function readBestMeters(): number | null {
+  try {
+    const stored = window.localStorage.getItem(BEST_HEIGHT_KEY);
+    if (stored === null) return null;
+    const value = Number.parseFloat(stored);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Compares against the previous best, then adopts the new one. The margin is a whole
+// centimetre because the result screen shows two decimals: a win by less than that would
+// raise a NEW RECORD! badge over a number identical to the record it supposedly beat.
+// A first ever round sets the record without claiming to have broken one.
+function recordFinalHeight(meters: number): void {
+  const previous = bestMeters;
+  recordBeforeRound = previous;
+  beatTheRecord = previous !== null && meters >= previous + 0.01;
+  if (previous !== null && meters <= previous) return;
+  bestMeters = meters;
+  try {
+    window.localStorage.setItem(BEST_HEIGHT_KEY, meters.toFixed(4));
+  } catch {
+    // A best height that cannot be persisted still stands for the rest of the session.
+  }
 }
 
 function celebrateFinalHeight(): void {
@@ -1416,8 +1458,15 @@ function renderFrame(): void {
       : clamp((performance.now() - resultAnimationStart) / resultAnimationDuration, 0, 1);
   const shownMeters = getStackHeightMeters(finalHeight) * (1 - Math.pow(1 - countProgress, 3));
   const uiWantsAnotherFrame = gameUi.update({
+    // Blank on a first ever round: there is no previous best to measure this one against,
+    // and echoing the number already on screen back as "BEST" says nothing.
+    bestText:
+      recordBeforeRound === null || beatTheRecord
+        ? ''
+        : `BEST ${formatMeters(recordBeforeRound)}`,
     countProgress,
     creditsOpen,
+    isRecord: beatTheRecord,
     handsShown: resultHandsShown,
     now: performance.now(),
     pointerDown,

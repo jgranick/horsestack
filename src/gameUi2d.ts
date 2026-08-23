@@ -74,6 +74,9 @@ export interface UiState {
 }
 
 export interface UiModel {
+  // Empty when there is nothing worth showing: a first ever round, or one that set a new
+  // record (where the height on screen already IS the record).
+  bestText: string;
   creditsOpen: boolean;
   // 0..1 across the result count-up, used for the score slam on arrival.
   countProgress: number;
@@ -81,6 +84,7 @@ export interface UiModel {
   handsShown: number;
   handsText: string;
   heightText: string;
+  isRecord: boolean;
   now: number;
   pointerDown: boolean;
   pointerX: number;
@@ -205,6 +209,15 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const handsCaption = label('HANDS HIGH', 10, 0xd8e0d2, SANS, true);
   const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
   const resultHands = label('0', 22, GOLD, SERIF);
+  // The badge is a container so the pill and its text tilt and pulse as one piece. The
+  // alternative — transforming both nodes about matching pivots — has to reconcile the
+  // pill's box with the text's own line box, and drifts apart the moment either changes.
+  const recordBadge = createDisplayObject();
+  const recordPill = createShape();
+  const recordText = label('NEW RECORD!', 12, 0x3a2c07, SANS, true);
+  addNodeChild(recordBadge, recordPill);
+  addNodeChild(recordBadge, recordText);
+  const bestLabel = label('', 11, 0xd8e0d2, SANS, true);
   const againPill = createShape();
   const againText = label('PLAY AGAIN', 13, 0x252420, SANS, true);
   const creditsPill = createShape();
@@ -223,7 +236,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
     timeUpScrim, timeUpText,
     ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight,
-    againPill, againText,
+    recordBadge, bestLabel, againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
   ]) {
     addNodeChild(root, node);
@@ -329,6 +342,11 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(resultHands, onResult);
     show(handsCaption, onResult);
     show(tallyRule, onResult);
+    // The record furniture arrives on the same beat as the height's pop, so the result
+    // lands as one moment instead of trickling in a piece at a time.
+    const showRecord = onResult && model.countProgress >= 0.86;
+    show(recordBadge, showRecord && model.isRecord);
+    show(bestLabel, showRecord && model.bestText !== '');
     show(againPill, showAgain);
     show(againText, showAgain);
     if (!onResult) {
@@ -402,9 +420,47 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       // pivot is the anchor, so x/y address the pivot rather than the top-left corner
       place(resultHeight, width / 2, ruleY + 52 + 40);
 
+      // Narrower and shorter than PLAY AGAIN below it, so it reads as a chip rather than a
+      // second button competing for the click.
+      const badgeWidth = 152;
+      const badgeHeight = 26;
+      const badgeY = ruleY + 138;
+      const badgeShowing = showRecord && model.isRecord;
+      if (badgeShowing) {
+        const swagger = Math.sin(model.now * 0.005);
+        // The pill shimmers and the badge bobs, but its SCALE settles to exactly 1 and it
+        // is never tilted. Both would resample the glyph raster every frame, and at 12px
+        // that shows up as colour fringing on the letters — the tilt TIME UP wears is only
+        // free because it is nine times the size.
+        fill(recordPill, GOLD, 0.9 + swagger * 0.1, 0, 0, badgeWidth, badgeHeight, badgeHeight / 2);
+        place(recordPill, 0, 0);
+        setTextLabelWidth(recordText, badgeWidth);
+        place(recordText, 0, (badgeHeight - 12 * 1.35) / 2);
+        const arrive = easeOutBack(settle);
+        recordBadge.scaleX = arrive;
+        recordBadge.scaleY = arrive;
+        recordBadge.pivotX = badgeWidth / 2;
+        recordBadge.pivotY = badgeHeight / 2;
+        recordBadge.alpha = clamp01(settle * 2.2);
+        // Rounded so the bob lands on whole pixels and the text stays crisp through it.
+        place(recordBadge, width / 2, badgeY + badgeHeight / 2 + Math.round(swagger * 2));
+        invalidateNodeAppearance(recordBadge);
+      }
+      if (showRecord && model.bestText !== '') {
+        setTextLabelWidth(bestLabel, width);
+        setText(bestLabel, model.bestText);
+        // Deliberately quiet: the standing record is context for the number above it, not
+        // a second headline.
+        bestLabel.alpha = clamp01(settle * 1.6) * 0.8;
+        place(bestLabel, 0, badgeY + 8 + (1 - easeOutCubic(settle)) * 10);
+        invalidateNodeAppearance(bestLabel);
+      }
+
+      // The badge inserts a row, so the button drops to keep clear of it.
       pill(
         againPill, againText, 'again',
-        width / 2 - 96, ruleY + 186 + (1 - easeOutBack(settle)) * 16, 192, 44, INK, settle,
+        width / 2 - 96, ruleY + (badgeShowing ? 200 : 190) + (1 - easeOutBack(settle)) * 16,
+        192, 44, INK, settle,
       );
     }
 
@@ -463,7 +519,11 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     // that breathes, ticks or counts would freeze after one.
     const settling = model.screen === 'result' && model.countProgress < 1;
     const arriving = intro < 1;
-    const idleMotion = model.screen === 'title' || model.screen === 'playing';
+    // The record badge keeps swaggering after the count finishes, so the result screen
+    // stays live for as long as one is on it — the title screen breathes for the same reason.
+    const idleMotion =
+      model.screen === 'title' || model.screen === 'playing' ||
+      (model.screen === 'result' && model.isRecord);
     return arriving || settling || idleMotion || hoveringAnything || wasHovering;
   }
 

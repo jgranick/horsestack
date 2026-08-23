@@ -43,6 +43,7 @@ import {
   emitParticleBurst3D,
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
+  getCamera3DWorldToScreen,
   getNodeChildren,
   getNodeLocalMatrix4,
   invalidateNodeLocalTransform,
@@ -160,7 +161,14 @@ const CAMERA_PILE_FILL = 0.8;
 const CAMERA_PILE_FILL_AT_HEIGHT = 0.56;
 const CAMERA_TOP_BIAS = 0.16;
 const CAMERA_MIN_DISTANCE = 1.05;
-const CAMERA_MAX_DISTANCE = 3.25;
+// High enough that the fit is never the thing that binds in real play. It used to be
+// 3.25, which the fit reached at a 12m pile — from there the camera stopped backing off
+// and the tower simply climbed the frame instead. Measured over played runs at the old
+// limit, the pile top sat 91% of the way to the top edge above 20m and the piece waiting
+// to drop was off screen in every sample. Piles now reach past 20m routinely, so the
+// ceiling has to clear that with room. GAME_VIEW.maxDistance below must stay above this:
+// the controller clamps again on its own, and that second clamp is the easier one to miss.
+const CAMERA_MAX_DISTANCE = 7.5;
 // The camera frames the measured stack top, but that measurement is a max over the
 // qualifying bodies: when a piece settles, the top can change by centimetres in a single
 // step while nothing visibly moves much. Feeding that straight to the camera is what made
@@ -173,6 +181,13 @@ const CAMERA_MAX_DISTANCE = 3.25;
 const CAMERA_HEIGHT_DEADBAND = 0.008;
 const CAMERA_HEIGHT_RISE_RATE = 1.1;
 const CAMERA_HEIGHT_FALL_RATE = 0.14;
+// A flat fall rate treats losing a couple of centimetres and losing the whole tower as the
+// same event. At 0.14 a unit-and-a-half collapse takes twelve seconds to walk back down,
+// which is most of a round spent framed for a pile that is no longer there. So the fall
+// gets a term proportional to how far behind the camera is: a settling wobble still
+// crawls, while a genuine collapse is chased down in a second or two and eases as it
+// closes, since the term shrinks with the gap it is closing.
+const CAMERA_HEIGHT_COLLAPSE_RATE = 1.6;
 // One lazy turn every fourteen seconds. The sails are ambient scenery, so this is
 // slow enough to read as idling wind rather than as something demanding attention.
 const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
@@ -203,7 +218,7 @@ const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
   distance: 0.82,
-  maxDistance: 3.4,
+  maxDistance: 7.8,
   minDistance: 0.68,
   minPolar: 0.02,
   polar: 0.08,
@@ -426,6 +441,8 @@ let gameEndsAt = 0;
 let finishAt = 0;
 let finalHeight = 0;
 let cachedStackHeight = 0;
+// Top of the hovering drop preview, in physics Y. Only the dev framing probe reads it.
+let previewTopY = 0;
 let resultAnimationStart = 0;
 let resultAnimationDuration = 0;
 let resultHands = 0;
@@ -1018,6 +1035,7 @@ function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): 
   // The halo and its light ride up with the object so the ring surrounds whatever is
   // about to drop, rather than marking the landing pose it will fall to.
   const previewY = landingY + LANDING_PREVIEW_LIFT;
+  previewTopY = previewY + getStackObjectVerticalExtent(current.kind, current.angle);
   setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);
   updateLandingRadiance(previewX, previewY, now);
 }
@@ -1074,7 +1092,8 @@ function setStackObjectVisualTransform(node: Node3D, x: number, physicsY: number
 function followStackHeight(measured: number, deltaTime: number): number {
   const difference = measured - cameraStackHeight;
   if (Math.abs(difference) <= CAMERA_HEIGHT_DEADBAND) return cameraStackHeight;
-  const limit = (difference > 0 ? CAMERA_HEIGHT_RISE_RATE : CAMERA_HEIGHT_FALL_RATE) * deltaTime;
+  const fallRate = CAMERA_HEIGHT_FALL_RATE + Math.abs(difference) * CAMERA_HEIGHT_COLLAPSE_RATE;
+  const limit = (difference > 0 ? CAMERA_HEIGHT_RISE_RATE : fallRate) * deltaTime;
   cameraStackHeight += difference > 0 ? Math.min(difference, limit) : Math.max(difference, -limit);
   return cameraStackHeight;
 }
@@ -1668,6 +1687,27 @@ if (import.meta.env.DEV) {
     },
     get placed() {
       return objectsDropped;
+    },
+    // Where the pile top and the hovering preview actually land in the frame. NDC y, so
+    // +1 is the top edge and anything past it is off screen. Camera framing is easy to
+    // reason about wrongly on paper (the top bias scales with distance, which flatters
+    // a clamped camera), so read it off the real view-projection instead.
+    get frame() {
+      const aspect =
+        camera.projection.kind === 'perspective' ? camera.projection.aspect : 1;
+      const probe = createVector3(0, 0, 0);
+      const ndcY = (physicsY: number): number => {
+        const point = createVector3(STACK_X, STACK_BASE_Y + physicsY, STACK_Z);
+        return getCamera3DWorldToScreen(probe, camera, point, aspect) ? probe.y : NaN;
+      };
+      return {
+        distance: cameraController.distance,
+        followed: cameraStackHeight,
+        measured: cachedStackHeight,
+        preview: ndcY(previewTopY),
+        targetY: cameraController.target.y,
+        top: ndcY(cachedStackHeight),
+      };
     },
   };
 }

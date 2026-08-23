@@ -541,13 +541,18 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
 
   function render(): void {
     const surface = target;
-    if (surface === null || !prepareScene2DRender(state, root)) return;
-
-    // 1. Draw the UI into its own target. begin binds and clears it, end resolves and puts
-    //    the enclosing binding and viewport back, so the frame the 3D pipeline just
-    //    presented is untouched. The transform is set after begin: a pass carries none.
-    beginGlRenderPass(state, surface);
+    if (surface === null) return;
+    // The device transform must be set BEFORE prepare, not after begin: it is an input to
+    // every prepared proxy transform, so setting it later leaves the frame laid out at 1:1
+    // in a target sized in device pixels — on a 2x display the whole UI drew into the
+    // top-left quarter, and the buttons stopped being where their hit boxes were.
     setGlRenderTransform2D(state, deviceTransform);
+    if (!prepareScene2DRender(state, root)) return;
+
+    // Draw the UI into its own target. begin binds and clears it, end resolves and puts the
+    // enclosing binding and viewport back, so the frame the 3D pipeline just presented is
+    // untouched. The bracket also saves and restores the transform set above.
+    beginGlRenderPass(state, surface);
     renderGlScene2D(state, root);
     endGlRenderPass(state);
 

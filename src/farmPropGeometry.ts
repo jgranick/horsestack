@@ -2,6 +2,9 @@ import type { MeshGeometry } from '@flighthq/sdk';
 
 export type FarmPropKind = 'hay' | 'cow' | 'chickens';
 export const FARM_PROP_SCENE_SCALE = 0.018;
+// The hens were true to life at roughly 0.44m and read as specks beside a 2m horse. Both
+// variants take the same bump so their sizes stay relative to each other.
+const CHICKEN_SCALE = 1.45;
 
 export interface FarmPropPoint {
   x: number;
@@ -87,6 +90,9 @@ export const FARM_PROP_VARIANTS: Readonly<Record<FarmPropKind, readonly FarmProp
       { filter: FRONT_COW_FILTER, materialName: 'Cow1', nodeName: 'Object_41' },
       { filter: FRONT_COW_FILTER, materialName: 'Cow2', nodeName: 'Object_42' },
     ],
+    // The cow read as the biggest thing in the stack next to a horse that is calibrated to
+    // a real 1.55m withers. Taking it down a notch lines the three animals up as a family.
+    scaleMultiplier: 0.88,
   }],
   chickens: [
     {
@@ -102,6 +108,7 @@ export const FARM_PROP_VARIANTS: Readonly<Record<FarmPropKind, readonly FarmProp
         { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
         { filter: WHITE_CHICKEN_FILTER, materialName: 'Hen_2', nodeName: 'Object_40' },
       ],
+      scaleMultiplier: CHICKEN_SCALE,
     },
     {
       centerX: -7.42,
@@ -116,7 +123,10 @@ export const FARM_PROP_VARIANTS: Readonly<Record<FarmPropKind, readonly FarmProp
         { filter: BROWN_CHICKEN_FILTER, materialName: 'Hen3', nodeName: 'Object_33' },
         { filter: BROWN_CHICKEN_FILTER, materialName: 'Hen2', nodeName: 'Object_38' },
       ],
-      scaleMultiplier: 0.73,
+      // Both hens share one 2D body, so this brings the brown hen's projected size onto
+      // the white hen's. The old 0.73 favoured height; at the larger scale that left the
+      // width outside the validator's tolerance.
+      scaleMultiplier: 0.756 * CHICKEN_SCALE,
     },
   ],
 };

@@ -65,16 +65,18 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
     supportHalfHeight: 0.046,
   },
   cow: {
-    halfHeight: 0.097,
-    halfWidth: 0.074,
+    halfHeight: 0.0851,
+    halfWidth: 0.0649,
     label: 'Cow',
-    supportHalfHeight: 0.097,
+    supportHalfHeight: 0.0851,
   },
   chickens: {
-    halfHeight: 0.021,
-    halfWidth: 0.021,
+    // Circular on purpose — validate:game enforces it, so the two hens share one round
+    // body sized between their projected width and height.
+    halfHeight: 0.0309,
+    halfWidth: 0.0309,
     label: 'Chicken',
-    supportHalfHeight: 0.021,
+    supportHalfHeight: 0.0309,
   },
 };
 

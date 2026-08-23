@@ -32,10 +32,6 @@ import {
   createGlCanvasElement,
   createGlRenderEffectPipeline,
   createBlurEffect,
-  createBrightnessContrastAdjustment,
-  createColorMatrixAdjustment,
-  createColorMatrixFromTint,
-  createSaturationColorMatrix,
   createGlRenderState,
   createVignetteEffect,
   createMesh,
@@ -227,23 +223,15 @@ const START_INPUT_GUARD_MS = 400;
 const BACKDROP_BLUR_MAX = 13;
 const backdropBlurEffect = createBlurEffect({ blurX: 0, blurY: 0 });
 const backdropVignetteEffect = createVignetteEffect({
-  color: 0x2a1608,
+  color: 0x0d1622,
   intensity: 0,
   radius: 0.5,
   softness: 0.85,
 });
-// Blur alone was not enough: gold serif over a bright farm is hard to read even when the
-// farm is out of focus, because the problem is chroma and value, not sharpness. Rather than
-// simply draining the colour, the backdrop is pushed toward a warm amber — dusk over the
-// pasture — which separates it from the cool blue sky and the gold type without the scene
-// reading as merely dimmed. A little desaturation first stops the barn's red fighting the
-// tint, and the exposure drop is what buys the type its contrast. All three are MATRIX-tier
-// adjustments, so the pipeline fuses them into a single pass; a hue/saturation adjustment
-// would be LUT-tier and would rebake its table on every frame of the ramp.
-const BACKDROP_TINT = 0xc4611aff;
-const BACKDROP_TINT_AMOUNT = 0.62;
-const BACKDROP_SATURATION = 0.62;
-const BACKDROP_BRIGHTNESS = -0.36;
+// Just defocus, and nothing else. A colour grade behind the blur — desaturation, an
+// exposure drop, a warm tint — all read as a filter laid over the game rather than as depth
+// of field, so the scene keeps its own colour and the vignette alone does the separating.
+// It buys the type less contrast than a grade would; the scene staying itself is worth it.
 const NO_EFFECTS: readonly RenderEffect[] = [];
 // Rebuilt only while the ramp is moving: brightness/contrast bake their matrix at
 // construction, so a mutated field would not take.
@@ -258,13 +246,7 @@ function getBackdropEffects(focus: number): readonly RenderEffect[] {
   backdropBlurEffect.blurX = BACKDROP_BLUR_MAX * amount;
   backdropBlurEffect.blurY = BACKDROP_BLUR_MAX * amount;
   backdropVignetteEffect.intensity = 0.7 * amount;
-  backdropEffects = [
-    backdropBlurEffect,
-    createColorMatrixAdjustment(createSaturationColorMatrix(1 + (BACKDROP_SATURATION - 1) * amount)),
-    createColorMatrixAdjustment(createColorMatrixFromTint(BACKDROP_TINT, BACKDROP_TINT_AMOUNT * amount)),
-    createBrightnessContrastAdjustment({ brightness: BACKDROP_BRIGHTNESS * amount }),
-    backdropVignetteEffect,
-  ];
+  backdropEffects = [backdropBlurEffect, backdropVignetteEffect];
   return backdropEffects;
 }
 
@@ -362,10 +344,10 @@ const SKY_LAYOUT = {
 // actually sees: mapping it pole to pole spent almost all of it below the island, and the
 // visible sliver above the horizon came out as one flat blue.
 const SKY_STOPS = [
-  { at: 0, color: [0x3f9be4] },
-  { at: 0.42, color: [0x6cb8ee] },
-  { at: 0.74, color: [0xa8d8f5] },
-  { at: 1, color: [0xe4f2fb] },
+  { at: 0, color: [0x2b8ce0] },
+  { at: 0.42, color: [0x49a6ea] },
+  { at: 0.74, color: [0x74c1f1] },
+  { at: 1, color: [0xa6dbf8] },
 ] as const;
 
 function sampleSkyGradient(t: number): readonly [number, number, number] {

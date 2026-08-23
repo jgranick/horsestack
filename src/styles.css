@@ -360,7 +360,7 @@ h1 em {
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #dbe5d1;
+  background: #c9dbea;
 }
 
 .viewer::before {
@@ -414,7 +414,7 @@ h1 em {
 .error-panel {
   gap: 16px;
   color: #53634c;
-  background: #dbe5d1;
+  background: #c9dbea;
   transition: opacity 500ms ease, visibility 500ms ease;
 }
 

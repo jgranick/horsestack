@@ -153,7 +153,11 @@ const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 1.2;
 // to sit. Measured over played runs against the previous top-tracking camera: the tower
 // goes from filling 54% of the frame to about 70%, the pasture stays in frame throughout,
 // and the pile top is inside the frame in roughly nine samples in ten.
+// How much of the frame the tower fills. It EASES OFF with height on purpose: a tall pile
+// framed as tightly as a short one crowds the barn and silo out of shot, and the joke is
+// the pile reaching them. Backing off keeps them behind it.
 const CAMERA_PILE_FILL = 0.8;
+const CAMERA_PILE_FILL_AT_HEIGHT = 0.56;
 const CAMERA_TOP_BIAS = 0.16;
 const CAMERA_MIN_DISTANCE = 1.05;
 const CAMERA_MAX_DISTANCE = 3.25;
@@ -1172,9 +1176,14 @@ function updateCamera(deltaTime: number, measuredHeight: number): void {
   // a pile above 0.5 units, the base of the pile is inside the frame in 26 of 34 samples
   // at this rate against 4 of 27 at the old 0.14, and the pile top stays around a fifth
   // of the way above centre either way. At rest the tilt is unchanged.
-  cameraController.goalPolar = 0.06 + rise * 0.6;
+  // Pitch down through the low and middle heights, where a level camera loses the base of
+  // the pile, then ease back off once the pile is tall — otherwise the view ends up aimed
+  // at the grass with the barn and silo out of frame entirely.
+  cameraController.goalPolar =
+    0.06 + 0.6 * Math.min(rise, 0.45) - 0.34 * Math.max(0, rise - 0.45);
+  const fill = CAMERA_PILE_FILL + (CAMERA_PILE_FILL_AT_HEIGHT - CAMERA_PILE_FILL) * rise;
   cameraController.goalDistance = clamp(
-    pileSpan / (2 * CAMERA_PILE_FILL) / tanHalfFov,
+    pileSpan / (2 * fill) / tanHalfFov,
     CAMERA_MIN_DISTANCE,
     CAMERA_MAX_DISTANCE,
   );
@@ -1551,7 +1560,7 @@ function initializeRenderer() {
   try {
     const nextRenderState = createGlRenderState(nextCanvas, {
       pixelRatio: initialPixelRatio,
-      backgroundColor: 0xdbe5d1ff,
+      backgroundColor: 0xc9dbeaff,
       contextAttributes: { alpha: false, antialias: false },
       powerPreference: 'high-performance',
     });

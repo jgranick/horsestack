@@ -72,9 +72,11 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
   },
 };
 
-// The farm ground spans roughly 3.5 world units across the straight-on view.
-// Keeping the collider inside that silhouette leaves real fall-off edges.
-export const PASTURE_HALF_WIDTH = 1.75;
+// Measured off the farm glTF's Ground/Ground2 triangles along the play line: the modelled
+// ground runs from about -1.61 to +1.71 in physics X at world x=1.55, and closes in to
+// +/-1.60 across the depth a piece actually occupies. At 1.75 the platform hung 0.14 past
+// the left edge of the floating map, so pieces rested on nothing. This sits inside it.
+export const PASTURE_HALF_WIDTH = 1.55;
 // STACK_BASE_Y maps physics space into the rendered scene. Its 0.015 offset
 // puts this surface at world Y -0.02, level with the mounted farm terrain.
 export const PASTURE_TOP_Y = -0.035;

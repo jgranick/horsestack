@@ -239,7 +239,7 @@ const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
 
 retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
-const gameUi = createGameUi2D(viewer, renderState.pixelRatio);
+const gameUi = createGameUi2D(renderState, renderState.pixelRatio);
 let creditsOpen = false;
 // Where the pointer is and whether it is held, so 2D controls can light up and press in.
 let pointerX = -1;

@@ -1,11 +1,19 @@
 // The game's UI, drawn with Flight's 2D renderer instead of DOM and CSS.
 //
-// It lives on its OWN canvas and its OWN GL context, layered over the 3D one. That is not
-// incidental: sharing a GlRenderState with the 3D pipeline corrupts it (props lose their
-// textures) because the two passes fight over renderer registrations and per-frame batch
-// state, and rendering 2D after the 3D pipeline has composited draws nothing at all
-// because no target is bound any more. A separate context sidesteps both.
-import type { DisplayObject, GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
+// One canvas. The UI is drawn into its own offscreen render target using a SECOND render
+// state over the SAME GL context, then composited onto the finished 3D frame as a single
+// blended quad.
+//
+// Three things make that work, each of which broke an earlier attempt:
+//   - the second state comes from createGlOffscreenRenderState, so its renderer/material
+//     registrations and per-frame batch state are its own. Sharing one state with the 3D
+//     pipeline corrupts the 3D — props lose their textures.
+//   - the 2D pass targets its OWN framebuffer, so it cannot disturb the frame the 3D
+//     pipeline just composited. Drawing 2D straight into the default framebuffer after the
+//     pipeline drew nothing at all; drawing it inside the pipeline corrupted the 3D.
+//   - the composite saves and restores every piece of GL state it touches, so nothing
+//     leaks into the next frame's 3D pass.
+import type { DisplayObject, GlRenderState, GlRenderTarget, RichText, Shape, TextLabel } from '@flighthq/sdk';
 import {
   addNodeChild,
   appendShapeBeginFill,
@@ -14,9 +22,9 @@ import {
   createCanvasShapeRasterizer,
   createCanvasTextureResolvers,
   createDisplayObject,
-  createGlCanvasElement,
+  createGlOffscreenRenderState,
+  createGlRenderTarget,
   createRichText,
-  createGlRenderState,
   createMatrix,
   createShape,
   createTextLabel,
@@ -32,7 +40,6 @@ import {
   registerGlShapeRasterizer,
   registerGlStandardMaterial,
   registerRenderer,
-  renderGlBackground,
   renderGlScene2D,
   RichTextKind,
   setRichTextDefaultTextFormat,
@@ -60,7 +67,6 @@ export interface UiButton {
 
 export interface UiState {
   buttons: UiButton[];
-  canvas: HTMLCanvasElement;
   render: () => void;
   resize: (width: number, height: number, pixelRatio: number) => void;
   /** Returns true while the UI still has something to animate, so the host keeps drawing. */
@@ -161,22 +167,11 @@ function fill(shape: Shape, colour: number, alpha: number, x: number, y: number,
   invalidateNodeRender(shape);
 }
 
-export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
-  const canvas = createGlCanvasElement(1, 1, pixelRatio);
-  canvas.style.position = 'absolute';
-  canvas.style.inset = '0';
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = '8';
-  canvas.setAttribute('aria-hidden', 'true');
-  host.appendChild(canvas);
-
-  const state: GlRenderState = createGlRenderState(canvas, {
-    pixelRatio,
-    backgroundColor: 0x00000000,
-    contextAttributes: { alpha: true, antialias: true },
-  });
+export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): UiState {
+  const gl = screenState.gl;
+  const state: GlRenderState = createGlOffscreenRenderState(screenState);
+  let target: GlRenderTarget | null = null;
+  const composite = createCompositor(gl);
   registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
   registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
   registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
@@ -486,17 +481,128 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   function resize(nextWidth: number, nextHeight: number, nextPixelRatio: number): void {
     width = Math.max(1, Math.round(nextWidth));
     height = Math.max(1, Math.round(nextHeight));
-    canvas.width = Math.round(width * nextPixelRatio);
-    canvas.height = Math.round(height * nextPixelRatio);
     state.pixelRatio = nextPixelRatio;
     state.renderTransform2D = createMatrix(nextPixelRatio, 0, 0, nextPixelRatio, 0, 0);
+    // The target matches the drawing buffer exactly, so UI text lands on whole device
+    // pixels and stays crisp rather than being resampled by the composite. Resizing
+    // allocates a new one, so the old one has to go back or every resize leaks a
+    // screen-sized texture.
+    if (target !== null) releaseTarget(gl, target);
+    target = createGlRenderTarget(state, {
+      width: Math.round(width * nextPixelRatio),
+      height: Math.round(height * nextPixelRatio),
+      depth: 'none',
+    });
   }
 
   function render(): void {
-    if (!prepareScene2DRender(state, root)) return;
-    renderGlBackground(state);
+    const surface = target;
+    if (surface === null || !prepareScene2DRender(state, root)) return;
+
+    const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+    const previousViewport = gl.getParameter(gl.VIEWPORT) as Int32Array;
+    const previousVertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
+    const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
+    const previousActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
+    const blendWasOn = gl.isEnabled(gl.BLEND);
+    const depthWasOn = gl.isEnabled(gl.DEPTH_TEST);
+    const cullWasOn = gl.isEnabled(gl.CULL_FACE);
+    const scissorWasOn = gl.isEnabled(gl.SCISSOR_TEST);
+
+    // 1. Draw the UI into its own target.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, surface.framebuffer);
+    gl.viewport(0, 0, surface.width, surface.height);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.DEPTH_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     renderGlScene2D(state, root);
+
+    // 2. Lay it over the frame the 3D pipeline already composited.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
+    gl.viewport(previousViewport[0] ?? 0, previousViewport[1] ?? 0, previousViewport[2] ?? 1, previousViewport[3] ?? 1);
+    composite.draw(surface.textures[0] ?? null);
+
+    // 3. Hand the context back exactly as it was found.
+    gl.bindVertexArray(previousVertexArray);
+    gl.useProgram(previousProgram);
+    gl.activeTexture(previousActiveTexture);
+    if (blendWasOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
+    if (depthWasOn) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
+    if (cullWasOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
+    if (scissorWasOn) gl.enable(gl.SCISSOR_TEST); else gl.disable(gl.SCISSOR_TEST);
   }
 
-  return { buttons, canvas, render, resize, update };
+  return { buttons, render, resize, update };
+}
+
+// destroyGlRenderTarget is not on the SDK's public surface, so the GL objects go back by
+// hand. Without this every resize would strand a screen-sized texture and its framebuffer.
+function releaseTarget(gl: WebGL2RenderingContext, target: GlRenderTarget): void {
+  gl.deleteFramebuffer(target.framebuffer);
+  if (target.resolveFramebuffer !== null) gl.deleteFramebuffer(target.resolveFramebuffer);
+  for (const texture of target.textures) gl.deleteTexture(texture);
+}
+
+// A full-screen triangle sampling the UI target. The UI is drawn into a transparent target
+// with ordinary source-alpha blending, which leaves premultiplied colour, so it composites
+// with ONE / ONE_MINUS_SRC_ALPHA.
+function createCompositor(gl: WebGL2RenderingContext): { draw: (texture: WebGLTexture | null) => void } {
+  const program = gl.createProgram();
+  const attach = (type: number, source: string): void => {
+    const shader = gl.createShader(type);
+    if (shader === null) throw new Error('UI compositor: could not create shader');
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      throw new Error(`UI compositor: ${gl.getShaderInfoLog(shader) ?? 'shader failed to compile'}`);
+    }
+    gl.attachShader(program, shader);
+    gl.deleteShader(shader);
+  };
+  attach(gl.VERTEX_SHADER, `#version 300 es
+layout(location = 0) in vec2 a_position;
+out vec2 v_uv;
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`);
+  attach(gl.FRAGMENT_SHADER, `#version 300 es
+precision mediump float;
+uniform sampler2D u_ui;
+in vec2 v_uv;
+out vec4 fragColor;
+void main() {
+  fragColor = texture(u_ui, v_uv);
+}`);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(`UI compositor: ${gl.getProgramInfoLog(program) ?? 'program failed to link'}`);
+  }
+  const sampler = gl.getUniformLocation(program, 'u_ui');
+  const vertexArray = gl.createVertexArray();
+  const buffer = gl.createBuffer();
+  gl.bindVertexArray(vertexArray);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+  return {
+    draw(texture) {
+      if (texture === null) return;
+      gl.useProgram(program);
+      gl.bindVertexArray(vertexArray);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(sampler, 0);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
 }

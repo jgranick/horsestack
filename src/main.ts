@@ -390,7 +390,13 @@ function createSkyDome(): Mesh {
     const [r, g, b] = sampleSkyGradient(clamp(0.5 - position.y / (SKY_RADIUS * 2), 0, 1));
     setMeshGeometryVertexColor0(geometry, index, r, g, b, 1);
   }
-  const dome = createMesh(geometry, [createVertexColorMaterial({ tint: 0xffffffff })]);
+  // Double-sided because the camera lives INSIDE this sphere: the forward pass culls back
+  // faces, and every face of a dome seen from within is a back face. Without this the mesh
+  // is present, correct and completely invisible — which is what it was, and why the blur
+  // was fringing every silhouette with the transparent background behind it.
+  const dome = createMesh(geometry, [
+    createVertexColorMaterial({ doubleSided: true, tint: 0xffffffff }),
+  ]);
   dome.name = 'sky';
   return dome;
 }

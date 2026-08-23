@@ -5,7 +5,7 @@
 // textures) because the two passes fight over renderer registrations and per-frame batch
 // state, and rendering 2D after the 3D pipeline has composited draws nothing at all
 // because no target is bound any more. A separate context sidesteps both.
-import type { DisplayObject, GlRenderState, Shape, TextLabel } from '@flighthq/sdk';
+import type { DisplayObject, GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
 import {
   addNodeChild,
   appendShapeBeginFill,
@@ -15,11 +15,13 @@ import {
   createCanvasTextureResolvers,
   createDisplayObject,
   createGlCanvasElement,
+  createRichText,
   createGlRenderState,
   createMatrix,
   createShape,
   createTextLabel,
   defaultGlShapeCommands,
+  defaultGlRichTextRenderer,
   defaultGlShapeRenderer,
   defaultGlTextLabelRenderer,
   invalidateNodeAppearance,
@@ -32,6 +34,12 @@ import {
   registerRenderer,
   renderGlBackground,
   renderGlScene2D,
+  RichTextKind,
+  setRichTextDefaultTextFormat,
+  setRichTextMultiline,
+  setRichTextString,
+  setRichTextWidth,
+  setRichTextWordWrap,
   setTextLabelFormat,
   setTextLabelHeight,
   setTextLabelString,
@@ -155,6 +163,7 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   });
   registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
   registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
+  registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
   registerGlShapeCommands(state, defaultGlShapeCommands);
   registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers()));
   registerGlStandardMaterial(state);
@@ -176,8 +185,9 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
   const tallyRule = createShape();
   // One label per hand, like the DOM original's one span per hand: it is what lets each
-  // horse pop in as the count reaches it. TextLabel has no multiline switch on its data,
-  // so a column cannot be one label with newlines.
+  // horse pop in as the count reaches it. A column could be a single multiline node —
+  // that is what RichText is for, and the credits copy below uses it — but then the
+  // whole column would animate as one block instead of horse by horse.
   const TALLY_CAPACITY = 126;
   const tallyHorses: TextLabel[] = [];
   for (let index = 0; index < TALLY_CAPACITY; index += 1) {
@@ -193,7 +203,12 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   const creditsPill = createShape();
   const creditsText = label('i', 15, INK, SERIF);
   const creditsBody = createShape();
-  const creditsCopy = label('', 11, 0xd8e0d2, SANS);
+  const creditsCopy: RichText = createRichText();
+  setRichTextMultiline(creditsCopy, true);
+  setRichTextWordWrap(creditsCopy, true);
+  setRichTextDefaultTextFormat(creditsCopy, {
+    align: 'left', color: 0xd8e0d2, font: SANS, leading: 3, size: 11,
+  });
   const fullscreenPill = createShape();
   const fullscreenText = label('⛶', 15, INK, SANS);
 
@@ -368,18 +383,16 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
     show(creditsCopy, model.creditsOpen);
     if (model.creditsOpen) {
       const w = Math.min(420, width - 48);
-      fill(creditsBody, 0x182217, 0.9, 0, 0, w, 96, 16);
-      place(creditsBody, 24, height - 162);
-      setText(
+      fill(creditsBody, 0x182217, 0.9, 0, 0, w, 82, 16);
+      place(creditsBody, 24, height - 148);
+      setRichTextWidth(creditsCopy, w - 32);
+      setRichTextString(
         creditsCopy,
         'Built with Flight · Models by EdwinRC and SleepyPineapple, CC BY 4.0 · ' +
           'Music “The Mountain’s Happy Song” by Elijah_K via Free Music Archive, CC BY · ' +
           'Ambience and effects via Free Sound Effects',
       );
-      setTextLabelFormat(creditsCopy, { ...creditsCopy.data.textFormat, align: 'left' });
-      setTextLabelWidth(creditsCopy, w - 32);
-      setTextLabelHeight(creditsCopy, 80);
-      place(creditsCopy, 40, height - 146);
+      place(creditsCopy, 40, height - 134);
     }
   }
 

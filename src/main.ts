@@ -1,4 +1,6 @@
 import type {
+  Material,
+  StandardPbrMaterial,
   RenderEffect,
   VertexAttributeLayout,
   Camera3D,
@@ -22,6 +24,7 @@ import {
   beginGlRenderEffectPipeline,
   clearParticleEmitter3D,
   cloneMeshGeometry,
+  cloneMaterial,
   cloneMesh,
   compactMeshGeometryVertices,
   configureDirectionalShadowCamera3DTightFit,
@@ -61,6 +64,7 @@ import {
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
   getCamera3DWorldToScreen,
+  getMaterialOfKind,
   getNodeParent,
   getNodeChildren,
   getNodeLocalMatrix4,
@@ -68,6 +72,7 @@ import {
   isMesh,
   isNodeLocalMatrix4Detached,
   Node3DKind,
+  StandardPbrMaterialKind,
   normalizeVector3,
   registerGlBlurEffect,
   registerGlStandardPbrMaterial,
@@ -724,6 +729,65 @@ function createStackObjectVisual(
   return pivot;
 }
 
+// How far the drop preview is pushed toward the gold "about to land" look. At 1 — which is
+// what it used to be, a single gold material replacing every material on the clone — the
+// preview is a featureless silhouette and you cannot tell a cow from a hay bale until it
+// lands. Blending instead keeps each material's own colour (and its texture, since baseColor
+// multiplies the map) while gilding and lighting it, so the piece stays readable.
+const PREVIEW_TINT_MIX = 0.42;
+// The glow is a SEPARATE, smaller fraction. Emissive does not just tint, it adds light on
+// top of whatever the sun and the marker's own point light are already putting on the
+// piece, so matching it to the tint blew pale materials out to white.
+const PREVIEW_GLOW_MIX = 0.22;
+// Derived materials are cached per source material: a clone is built for every preview, and
+// the same handful of source materials come round again every time.
+const previewMaterials = new WeakMap<Material, Material>();
+
+function mixChannel(from: number, to: number, shift: number, amount: number): number {
+  const a = (from >>> shift) & 0xff;
+  const b = (to >>> shift) & 0xff;
+  return Math.round(a + (b - a) * amount) << shift;
+}
+
+function mixRgba(from: number, to: number, amount: number): number {
+  return (
+    (mixChannel(from, to, 24, amount) |
+      mixChannel(from, to, 16, amount) |
+      mixChannel(from, to, 8, amount) |
+      (from & 0xff)) >>>
+    0
+  );
+}
+
+// The preview's version of one of an object's own materials: its colour pulled halfway to
+// the marker gold, lit by the marker's emissive at the same fraction.
+function toPreviewMaterial(source: Material | null): Material | null {
+  if (source === null) return landingGhostMaterial;
+  const cached = previewMaterials.get(source);
+  if (cached !== undefined) return cached;
+  const pbr = getMaterialOfKind<StandardPbrMaterial>(source, StandardPbrMaterialKind);
+  if (pbr === null) {
+    previewMaterials.set(source, landingGhostMaterial);
+    return landingGhostMaterial;
+  }
+  const blended = cloneMaterial(pbr) as StandardPbrMaterial;
+  blended.baseColor = mixRgba(pbr.baseColor, landingGhostMaterial.baseColor, PREVIEW_TINT_MIX);
+  // Mixed FROM the source's own emissive, not simply taken from the marker: most of these
+  // materials emit nothing, and handing them the marker's glow outright blew pale ones —
+  // a white Holstein especially — out to a featureless white, which is the very thing the
+  // blend exists to avoid.
+  blended.emissive = mixRgba(pbr.emissive, landingGhostMaterial.emissive, PREVIEW_GLOW_MIX);
+  blended.emissiveStrength =
+    pbr.emissiveStrength +
+    (landingGhostMaterial.emissiveStrength - pbr.emissiveStrength) * PREVIEW_GLOW_MIX;
+  blended.metallic = pbr.metallic + (landingGhostMaterial.metallic - pbr.metallic) * PREVIEW_TINT_MIX;
+  blended.roughness = pbr.roughness + (landingGhostMaterial.roughness - pbr.roughness) * PREVIEW_TINT_MIX;
+  // The preview is a lone floating object, so its back faces would otherwise show through.
+  blended.doubleSided = true;
+  previewMaterials.set(source, blended);
+  return blended;
+}
+
 function setLandingGhostKind(kind: StackObjectKind, variantIndex: number): void {
   const ghost = landingGhost;
   if (ghost === null) return;
@@ -853,7 +917,7 @@ function cloneNode3DHierarchy(
   clone.alpha = source.alpha;
   clone.visible = source.visible;
   if (materialOverride !== null && isMesh(clone)) {
-    clone.materials = clone.materials.map(() => materialOverride);
+    clone.materials = clone.materials.map((material) => toPreviewMaterial(material));
   }
   if (!isMesh(source)) {
     setNodeTransform3D(clone, source);
@@ -1261,7 +1325,11 @@ function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   indicatorLight.position.x = STACK_X + 0.1;
   indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.09;
   indicatorLight.position.z = STACK_Z - x;
-  indicatorLight.intensity = 0.8 + Math.sin(now * 0.008) * 0.14;
+  // Down from 0.8: a gold point light this close at that strength lit every preview the
+  // same gold no matter what its material said, which is why blending the material barely
+  // showed. The marker still reads — the halo ring and the tint carry it — and now the
+  // piece's own colour survives underneath.
+  indicatorLight.intensity = 0.34 + Math.sin(now * 0.008) * 0.07;
 }
 
 function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
@@ -1644,15 +1712,22 @@ function renderFrame(): void {
     heightText: countProgress >= 1 ? formatHeight(finalHeight) : formatMeters(shownMeters),
     screen: getUiScreen(),
     secondsLeft: Math.max(0, (gameEndsAt - performance.now()) / 1000),
-    timeUpProgress: finishAt === 0
-      ? 0
-      : clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6,
+    timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup'
+      ? 1
+      : finishAt === 0
+        ? 0
+        : clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6,
   });
   gameUi.render();
   if (uiWantsAnotherFrame) renderRequested = true;
 }
 
+// DEV only: pins the UI to one screen so a short-lived one (TIME UP lasts 2.35s) can be
+// held still and inspected instead of raced with a screenshot.
+let forcedScreen: UiScreen | null = null;
+
 function getUiScreen(): UiScreen {
+  if (import.meta.env.DEV && forcedScreen !== null) return forcedScreen;
   if (phase === 'loading') return 'loading';
   if (phase === 'playing') return 'playing';
   if (phase === 'settling') return 'timeup';
@@ -1929,6 +2004,10 @@ if (import.meta.env.DEV) {
     },
     get placed() {
       return objectsDropped;
+    },
+    set screen(value: UiScreen | null) {
+      forcedScreen = value;
+      renderRequested = true;
     },
     // Where the pile top and the hovering preview actually land in the frame. NDC y, so
     // +1 is the top edge and anything past it is off screen. Camera framing is easy to

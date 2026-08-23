@@ -65,10 +65,13 @@ export const STACK_OBJECT_PROFILES: Readonly<Record<StackObjectKind, StackObject
     supportHalfHeight: 0.046,
   },
   cow: {
-    halfHeight: 0.0851,
-    halfWidth: 0.0649,
+    // Measured from the RIGHTED silhouette: standing the cow up straight makes it taller
+    // than the leaning one it replaced, so the scale came down to keep it a shade under
+    // the horse. validate:assets checks these against the mesh.
+    halfHeight: 0.0886,
+    halfWidth: 0.0591,
     label: 'Cow',
-    supportHalfHeight: 0.0851,
+    supportHalfHeight: 0.0886,
   },
   chickens: {
     // Circular on purpose — validate:game enforces it, so the two hens share one round

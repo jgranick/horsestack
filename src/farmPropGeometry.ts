@@ -90,9 +90,13 @@ export const FARM_PROP_VARIANTS: Readonly<Record<FarmPropKind, readonly FarmProp
       { filter: FRONT_COW_FILTER, materialName: 'Cow1', nodeName: 'Object_41' },
       { filter: FRONT_COW_FILTER, materialName: 'Cow2', nodeName: 'Object_42' },
     ],
+    // The source cow leans; standing it on end is deliberate, the lean is not. This rights
+    // it. Measured by eye against the rendered preview: -12deg still leans, -22deg is
+    // upright.
+    rotationZ: (-22 * Math.PI) / 180,
     // The cow read as the biggest thing in the stack next to a horse that is calibrated to
     // a real 1.55m withers. Taking it down a notch lines the three animals up as a family.
-    scaleMultiplier: 0.88,
+    scaleMultiplier: 0.8,
   }],
   chickens: [
     {

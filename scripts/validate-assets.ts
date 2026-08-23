@@ -82,9 +82,11 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
       const bounds = {
         max: [-Infinity, -Infinity, -Infinity],
         min: [Infinity, Infinity, Infinity],
+        points: [] as number[],
       };
       let triangleCount = 0;
       const materials: string[] = [];
+      bounds.points.length = 0;
 
       for (const part of spec.parts) {
         const node = nodesByName.get(part.nodeName);
@@ -128,9 +130,14 @@ function validateFarmProps(nodesByName: ReadonlyMap<string, Node3D>): void {
       }
 
       const scale = FARM_PROP_SCENE_SCALE * (spec.scaleMultiplier ?? 1);
-      const quarterTurnedAroundZ = Math.abs(Math.sin(spec.rotationZ ?? 0)) > 0.5;
+      // rotationZ spins the prop in source X/Y, so the projected HEIGHT has to be measured
+      // on the rotated points. This used to pick extent X or Y depending on whether the
+      // rotation was past a quarter turn, which is only right for exact quarter turns —
+      // the cow's -22 degrees would have been scored against its unrotated height and let
+      // a body through that was 5% shorter than the mesh it stands for. Width is along
+      // source Z, which a rotation about Z leaves alone.
       const projectedWidth = (extents[2] ?? 0) * scale;
-      const projectedHeight = (extents[quarterTurnedAroundZ ? 0 : 1] ?? 0) * scale;
+      const projectedHeight = measureRotatedHeight(bounds.points, spec.rotationZ ?? 0) * scale;
       const profile = STACK_OBJECT_PROFILES[kind];
       if (
         Math.abs(projectedWidth - profile.halfWidth * 2) > 0.003 ||
@@ -182,8 +189,23 @@ function validateWindmillSails(nodesByName: ReadonlyMap<string, Node3D>): void {
   );
 }
 
+// Height of the X/Y point cloud after spinning it by `rotationZ`, which is what the prop's
+// orientation root does before the prop is scaled into the scene.
+function measureRotatedHeight(points: readonly number[], rotationZ: number): number {
+  const cos = Math.cos(rotationZ);
+  const sin = Math.sin(rotationZ);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let index = 0; index < points.length; index += 2) {
+    const y = (points[index] ?? 0) * sin + (points[index + 1] ?? 0) * cos;
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+  return max - min;
+}
+
 function includeGeometryBounds(
-  bounds: { max: number[]; min: number[] },
+  bounds: { max: number[]; min: number[]; points?: number[] },
   mesh: Readonly<Mesh>,
   indices: readonly number[],
 ): void {
@@ -200,6 +222,12 @@ function includeGeometryBounds(
       if (value === undefined) throw new Error(`${mesh.name ?? 'mesh'} has an invalid vertex index`);
       bounds.min[axis] = Math.min(bounds.min[axis] ?? value, value);
       bounds.max[axis] = Math.max(bounds.max[axis] ?? value, value);
+    }
+    if (bounds.points !== undefined) {
+      bounds.points.push(
+        mesh.geometry.vertices[vertexIndex * stride + positionOffset] ?? 0,
+        mesh.geometry.vertices[vertexIndex * stride + positionOffset + 1] ?? 0,
+      );
     }
   }
 }

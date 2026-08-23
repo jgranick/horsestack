@@ -1249,10 +1249,6 @@ function handleUiPress(event: PointerEvent): boolean {
       startGame(event);
       return true;
     }
-    if (button.id === 'restart' && screen === 'playing') {
-      startGame(event);
-      return true;
-    }
   }
   return false;
 }

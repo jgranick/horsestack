@@ -52,7 +52,7 @@ export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
 
 export interface UiButton {
   height: number;
-  id: 'play' | 'again' | 'restart' | 'fullscreen' | 'credits';
+  id: 'play' | 'again' | 'fullscreen' | 'credits';
   width: number;
   x: number;
   y: number;
@@ -195,8 +195,6 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   const timerPill = createShape();
   const timerCaption = label('TIME LEFT', 9, 0xd8e0d2, SANS, true);
   const timerValue = label('30', 34, INK, SERIF);
-  const restartPill = createShape();
-  const restartText = label('START OVER', 10, INK, SANS, true);
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
   const tallyRule = createShape();
@@ -230,7 +228,7 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
 
   for (const node of [
     scrim, titleText, playPill, playText, timerPill, timerCaption, timerValue,
-    restartPill, restartText, timeUpScrim, timeUpText,
+    timeUpScrim, timeUpText,
     ...tallyHorses, tallyRule, resultHands, handsCaption, resultHeight, pointsText,
     againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
@@ -429,8 +427,6 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
     show(timerPill, playing);
     show(timerCaption, playing);
     show(timerValue, playing);
-    show(restartPill, playing);
-    show(restartText, playing);
     if (playing) {
       const w = 104;
       const x = width - w - 24;
@@ -458,7 +454,6 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
       timerValue.pivotY = 20;
       place(timerValue, x + shake + w / 2, 38 - drop + 20);
       setText(timerValue, String(Math.max(0, Math.ceil(model.secondsLeft))));
-      pill(restartPill, restartText, 'restart', width - 128, 92 - drop, 104, 30, 0x1f2d1d, 0.5);
     }
 
     pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);

@@ -179,7 +179,7 @@ const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
 // Long enough to swallow the second half of a double-click on "Start stacking",
 // short enough that a player who reacts to the first preview never notices it.
 const START_INPUT_GUARD_MS = 400;
-const GAME_DURATION_MS = 60_000;
+const GAME_DURATION_MS = 30_000;
 const HANDS_PER_EMOJI_COLUMN = 9;
 const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 const MAX_RESULT_COUNT_DURATION_MS = 4_000;

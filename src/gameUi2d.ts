@@ -178,7 +178,7 @@ export function createGameUi2D(host: HTMLElement, pixelRatio: number): UiState {
   const playText = label('PLAY', 13, 0x252420, SANS, true);
   const timerPill = createShape();
   const timerCaption = label('TIME LEFT', 9, 0xd8e0d2, SANS, true);
-  const timerValue = label('60', 34, INK, SERIF);
+  const timerValue = label('30', 34, INK, SERIF);
   const restartPill = createShape();
   const restartText = label('START OVER', 10, INK, SANS, true);
   const timeUpScrim = createShape();

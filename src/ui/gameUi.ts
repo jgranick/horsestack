@@ -142,7 +142,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const timePill = createShape();
   const timeText = label('TIME CHALLENGE', 13, 0x252420ff, SANS, true);
   const endlessPill = createShape();
-  const endlessText = label('ENDLESS', 13, INK, SANS, true);
+  const endlessText = label('ENDLESS', 13, 0x252420ff, SANS, true);
   const menuPill = createShape();
   const menuText = label('MENU', 12, INK, SANS, true);
   const timerPill = createShape();
@@ -288,13 +288,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       const menuWidth = Math.min(MODE_PILL_WIDTH, width - SCREEN_GUTTER * 2);
       const menuX = width / 2 - menuWidth / 2;
       const menuY = height * 0.5 + 24 + (1 - intro) * 20 + nudge;
+      // Both wear the same fill. They are two ways to play the same game, not a primary
+      // action and a secondary one, and styling one of them down said otherwise.
       pill(timePill, timeText, 'time', menuX, menuY, menuWidth, 44, INK, intro);
-      // The second option is the quieter one, so it wears the dark fill rather than a
-      // second slab of cream competing with the first for the eye.
-      pill(
-        endlessPill, endlessText, 'endless',
-        menuX, menuY + 56, menuWidth, 44, 0x1f2d1dff, intro * 0.82,
-      );
+      pill(endlessPill, endlessText, 'endless', menuX, menuY + 56, menuWidth, 44, INK, intro);
     }
 
     show(timeUpScrim, onTimeUp);

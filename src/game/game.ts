@@ -66,7 +66,9 @@ import type { StackObjectVisuals } from '../scene/stackObjectVisual';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
-  HORSE_DROP_GRACE_MS,
+  HORSE_REST_ANGULAR,
+  HORSE_REST_LINEAR,
+  HORSE_REST_SECONDS,
   PLACEMENT_LIFT_LIMIT,
   PLACEMENT_LIFT_STEP,
   MAX_RESULT_COUNT_DURATION_MS,
@@ -99,8 +101,10 @@ interface StackedObject {
    * and because the count must happen exactly once however far it goes on to roll.
    */
   dropped: boolean;
-  /** When it was placed, on the game clock. Half of the dropped-horse test; see below. */
-  placedAt: number;
+  /** How long it has been still for, in seconds. Reset the moment it is disturbed. */
+  restSeconds: number;
+  /** Latched once it has ever been still. Half of the dropped-horse test; see below. */
+  hasSettled: boolean;
   /**
    * Set the first time it meets the floor. The test that follows is an EVENT — it asks what
    * the piece had been doing when it arrived — so it must be asked once, on arrival, and
@@ -490,7 +494,8 @@ export function createGame(deps: GameDeps): Game {
       kind: current.kind,
       lost: false,
       node,
-      placedAt: now,
+      restSeconds: 0,
+      hasSettled: false,
       touchedGround: false,
       touchedPiece: false,
     });
@@ -601,31 +606,35 @@ export function createGame(deps: GameDeps): Game {
     }
   }
 
-  function synchronizeStackVisuals(now: number): void {
+  function synchronizeStackVisuals(deltaTime: number): void {
     let retainedCount = 0;
     for (const object of stackedObjects) {
       if (object.lost) continue;
       const body = object.body;
 
-      // THE RULE: a horse that had been resting on something and then reaches the floor
+      // THE RULE: a horse that had come to rest on something, and then reaches the floor,
       // has been dropped.
       //
-      // Two conditions, and it needs both. It must have touched ANOTHER PIECE at some
-      // point — that is what says it was part of the pile rather than standing on the grass
-      // — and it must not have arrived at the floor in the same breath as being placed.
+      // Both halves are needed and neither is enough alone. It must have touched ANOTHER
+      // PIECE — that says it was part of the pile rather than standing on the grass — and it
+      // must have been STILL at some point before it came down.
       //
-      // The collision is what does the real work here. Timing alone was tried and it was
-      // far too blunt: it had to allow a whole second, because that was the only way to be
-      // sure a horse set down on the grass was not counted, and a second is an age. Put
-      // half a horse on a bale and let its other end swing down and it is on the ground in
-      // a third of that, plainly dropped and plainly not counted. With the collision doing
-      // the discriminating, the window only has to outlast the frame a piece is placed in,
-      // so it can be short enough to catch those short falls.
+      // The stillness is what the two previous versions were missing, and it is what makes
+      // an ordinary placement safe. Put a horse's front hooves on a chicken with its back
+      // end hanging off and it swings down onto the grass over a few hundred milliseconds:
+      // it touched a piece, it reached the floor, and by any test based on elapsed time it
+      // is a dropped horse. But it never stopped moving between being let go and lying
+      // where it ended up. A horse that is really dropped stood on the pile first.
       //
-      // Two earlier rules for the record. "Must stay on the map" never fired at all — 34
-      // placements aimed at the rim over two runs, piles of 5.09m and 9.03m, no horse ever
-      // left. "Ends up on bare grass, if placed above the ground" fired constantly, because
-      // placement follows the cursor and setting a horse down leaves it a centimetre up.
+      // Latched, because by the time it lands the stillness is long gone.
+      const speed = Math.hypot(body.velocityX, body.velocityY);
+      if (speed < HORSE_REST_LINEAR && Math.abs(body.angularVelocity) < HORSE_REST_ANGULAR) {
+        object.restSeconds += deltaTime;
+        if (object.restSeconds >= HORSE_REST_SECONDS) object.hasSettled = true;
+      } else {
+        object.restSeconds = 0;
+      }
+
       const contacts = getStackBodyContacts(physicsWorld, body);
       if ((contacts & STACK_CONTACT_PIECE) !== 0) object.touchedPiece = true;
       if (!object.touchedGround && (contacts & STACK_CONTACT_GROUND) !== 0) {
@@ -634,7 +643,7 @@ export function createGame(deps: GameDeps): Game {
           object.kind === 'horse' &&
           !object.dropped &&
           object.touchedPiece &&
-          now - object.placedAt > HORSE_DROP_GRACE_MS
+          object.hasSettled
         ) {
           object.dropped = true;
           horsesDropped++;
@@ -841,7 +850,7 @@ export function createGame(deps: GameDeps): Game {
         updateGame(now);
         swayClock += deltaTime * 1.6;
         stepGamePhysics(now, deltaTime);
-        synchronizeStackVisuals(now);
+        synchronizeStackVisuals(deltaTime);
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
         peakHeight = Math.max(peakHeight, cachedStackHeight);
       }

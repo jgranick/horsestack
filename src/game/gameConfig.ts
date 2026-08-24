@@ -129,17 +129,22 @@ export const INDICATOR_MAX_SPIN = 5.5;
 export const FIXED_STEP_LIMIT = 6;
 
 
-// How long after being placed a piece may reach the floor and still count as having been
-// PUT there rather than having fallen there. See the dropped-horse rule in game.ts.
+// What counts as a horse having COME TO REST, for the dropped-horse rule in game.ts.
 //
-// Short, because it is no longer carrying the whole test. What separates a dropped horse
-// from a placed one is whether it had touched another piece first; this only has to outlast
-// the frame a piece is set down in, so that a horse placed leaning on something — touching
-// that thing and the grass at once — is not read as having fallen off it. Anything slower
-// than this really did come down afterwards: a horse balanced half on a bale swings its
-// other end to the ground in two or three times this and is unmistakably a dropped horse.
-export const HORSE_DROP_GRACE_MS = 200;
-
+// This is the idea that makes the rule work, and the two before it both lacked it. A horse
+// that is placed and then settles into its pose — front hooves on a chicken, back end
+// swinging down to the grass — was never at rest at any point: it went straight from being
+// let go to lying where it ended up, in one continuous movement. A horse that is DROPPED
+// stood still on the pile first, and then came down. Time since placement cannot tell those
+// apart, because both take a few hundred milliseconds; whether the piece was ever still can.
+//
+// Deliberately much stricter than the STILL_LINEAR/STILL_ANGULAR pair in stackPhysics, which
+// exists to fade in a damping assist and is loose enough that a horse pivoting slowly onto
+// the grass reads as "still". At these thresholds that pivot does not: one step of gravity
+// alone puts a falling piece at 0.18 units/s.
+export const HORSE_REST_LINEAR = 0.05;
+export const HORSE_REST_ANGULAR = 0.2;
+export const HORSE_REST_SECONDS = 0.25;
 // The clearance left above a piece the preview has had to lift, and the step it lifts by
 // when searching. Small enough that the lift is never further than it needs to be, large
 // enough that "resting exactly on" does not read as an overlap to the solver.

@@ -51,6 +51,7 @@ import {
   addStackObjectBody,
   createHorseStackWorld,
   doesStackPlacementOverlap,
+  getSettledStackHeight,
   getSupportedStackHeight,
   STACK_CONTACT_GROUND,
   STACK_CONTACT_PIECE,
@@ -934,7 +935,14 @@ export function createGame(deps: GameDeps): Game {
         stepGamePhysics(now, deltaTime);
         synchronizeStackVisuals(now, deltaTime);
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
-        peakHeight = Math.max(peakHeight, cachedStackHeight);
+        // The peak is what STEADY HANDS scores, so it may only record a height the tower held.
+        // It used to take the live measurement, which is the height standing at this instant —
+        // and a column dropped faster than it falls is standing at every instant on the way
+        // down. Reading it off the settled bodies instead asks the solver whether the pile ever
+        // came to rest that high. getCurrentStackHeight has just refreshed measurementBodies.
+        if (phase !== 'finished') {
+          peakHeight = Math.max(peakHeight, getSettledStackHeight(measurementBodies, groundProfile));
+        }
       }
       if (phase === 'finished' && resultAnimationStart !== 0) {
         updateResultAnimation(now);

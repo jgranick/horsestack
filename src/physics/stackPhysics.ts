@@ -477,15 +477,50 @@ export function getSupportedStackHeight(
   let height = 0;
   for (const body of objects) {
     const onStack = body.sleeping || touchingBodies.has(body.index);
-    if (
-      !onStack ||
-      !isStackBodyWithinPasture(body) ||
-      body.y < getFallenBelowFloorY(body, ground) ||
-      Math.abs(body.velocityY) > 1.2
-    ) {
-      continue;
-    }
+    if (!onStack || !isStackBodyOnTheStack(body, ground)) continue;
     height = Math.max(height, body.y + getStackBodyVerticalExtent(body));
   }
   return height;
+}
+
+/**
+ * The tallest a piece has come to REST at, which is a different question from the one above
+ * and answers it with the solver's own verdict rather than an inference from contacts.
+ *
+ * getSupportedStackHeight asks what is standing NOW, and takes "in contact with something and
+ * not falling fast" as its evidence. That is right for a live readout and wrong as a record of
+ * how high a tower got: a column placed faster than it can fall — keyboard auto-repeat drops a
+ * piece the moment it is drawn — is in contact from the first frame and needs about seven of
+ * them to exceed the velocity gate, so the whole column counts before gravity has taken it
+ * apart. Over 40 spammed pieces that read 45m against a settled 10m.
+ *
+ * Sleep cannot be produced that way. A body sleeps only after its whole island has stayed
+ * under the world's linear and angular thresholds for timeToSleep, so a body that is asleep
+ * is one the pile actually HELD. Nothing here is inferred and nothing needs tuning: the
+ * thresholds are already set where the pile settles (see createHorseStackWorld).
+ */
+export function getSettledStackHeight(
+  objects: readonly Readonly<RigidBody2D>[],
+  ground?: GroundProfile,
+): number {
+  let height = 0;
+  for (const body of objects) {
+    if (!body.sleeping || !isStackBodyOnTheStack(body, ground)) continue;
+    height = Math.max(height, body.y + getStackBodyVerticalExtent(body));
+  }
+  return height;
+}
+
+// The shared part of both measurements: in the pasture, not fallen through the floor, and not
+// travelling. A sleeping body passes the velocity test trivially — it is kept for both callers
+// so the two heights are the same measurement asked at different moments.
+function isStackBodyOnTheStack(
+  body: Readonly<RigidBody2D>,
+  ground: GroundProfile | undefined,
+): boolean {
+  return (
+    isStackBodyWithinPasture(body) &&
+    body.y >= getFallenBelowFloorY(body, ground) &&
+    Math.abs(body.velocityY) <= 1.2
+  );
 }

@@ -12,6 +12,7 @@ import {
 import type { StackObjectKind } from '../src/physics/stackObjectKind';
 import {
   HORSE_HALF_HEIGHT,
+  METERS_PER_WORLD_UNIT,
   HORSE_SIZE_MULTIPLIER,
   HORSE_WITHERS_HEIGHT,
   STACK_OBJECT_PROFILES,
@@ -28,6 +29,7 @@ import {
   PHYSICS_STEP,
   addStackObjectBody,
   createHorseStackWorld,
+  getSettledStackHeight,
   getSupportedStackHeight,
   isStackBodyWithinPasture,
   stepHorseStack,
@@ -57,6 +59,7 @@ validateRandomObjectSelection();
 validateObjectProfiles();
 validateHeightCalibration();
 validateFarmEdgeFalloff();
+validateSettledHeightRejectsFallingColumns();
 
 console.log(
   `gameplay: ${scenarios
@@ -326,6 +329,63 @@ function validateFarmEdgeFalloff(): void {
   stepForDuration(world, [object], 1);
   if (object.y >= -0.1) {
     throw new Error(`farm edge: expected a hay bale to fall into the void, received y=${object.y}`);
+  }
+}
+
+// Guards what STEADY HANDS scores. The peak may only record a height the tower HELD, and the
+// live measurement cannot tell it: a column dropped faster than it falls — which is what
+// keyboard auto-repeat does, a piece placed the moment it is drawn — is in contact from its
+// first frame and takes about seven more to exceed the velocity gate, so every piece in it
+// counts on the way down. This drops 30 bales at 100ms into one column and asserts the two
+// measurements disagree in the direction they must: the contact height believes the phantom
+// column, the settled height does not, and the settled height never claims materially more
+// than what is standing when the dust clears.
+function validateSettledHeightRejectsFallingColumns(): void {
+  const world = createHorseStackWorld();
+  const objects: RigidBody2D[] = [];
+  const hay = STACK_OBJECT_PROFILES.hay;
+  const extent = getStackObjectVerticalExtent('hay', 0);
+  const stepsBetweenDrops = Math.round(0.1 / PHYSICS_STEP);
+  let contactPeak = 0;
+  let settledPeak = 0;
+
+  for (let drop = 0; drop < 30; drop++) {
+    // On top of whatever is in the column already, exactly as the placement resolver would.
+    let top = PASTURE_TOP_Y;
+    for (const object of objects) {
+      if (Math.abs(object.x) >= hay.halfWidth + getStackBodyHalfWidth(object)) continue;
+      top = Math.max(top, object.y + getStackObjectVerticalExtent('hay', object.angle));
+    }
+    objects.push(addStackObjectBody(world, 'hay', 0, top + extent + 0.002, 0));
+    for (let step = 0; step < stepsBetweenDrops; step++) {
+      stepHorseStack(world);
+      contactPeak = Math.max(contactPeak, getSupportedStackHeight(world, objects));
+      settledPeak = Math.max(settledPeak, getSettledStackHeight(objects));
+    }
+  }
+  stepForDuration(world, objects, FINAL_SETTLE_SECONDS);
+  contactPeak = Math.max(contactPeak, getSupportedStackHeight(world, objects));
+  settledPeak = Math.max(settledPeak, getSettledStackHeight(objects));
+  const standing = getStackHeightMeters(getSupportedStackHeight(world, objects));
+  const contactMeters = getStackHeightMeters(contactPeak);
+  const settledMeters = getStackHeightMeters(settledPeak);
+
+  // The check is only meaningful while the naive measurement still overstates a spammed
+  // column. If this ever stops being true the guard below is passing for the wrong reason.
+  if (contactMeters < standing * 1.5) {
+    throw new Error(
+      `settled height: expected the contact measurement to overstate a dropped column, received ` +
+        `${contactMeters.toFixed(2)}m against ${standing.toFixed(2)}m standing`,
+    );
+  }
+  // One bale of slack: the pile may legitimately have stood a little higher before it lost
+  // its top, which is exactly the height STEADY HANDS means to keep.
+  const allowance = extent * 2 * METERS_PER_WORLD_UNIT;
+  if (settledMeters > standing + allowance) {
+    throw new Error(
+      `settled height: expected the settled peak to stay near what stands (${standing.toFixed(2)}m ` +
+        `+${allowance.toFixed(2)}m), received ${settledMeters.toFixed(2)}m`,
+    );
   }
 }
 

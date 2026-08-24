@@ -73,7 +73,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   const canvas = createGlCanvasElement(1, 1, initialPixelRatio);
   canvas.setAttribute(
     'aria-label',
-    'Farm Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place the next random farm object.',
+    'Horse Stacker game. Position the next farm object with the pointer or the arrow keys — placement is free, so you choose the height as well as the side — then click, tap, Space, or Enter to place it.',
   );
   canvas.tabIndex = 0;
   // createGlCanvasElement writes an inline pixel size, which would beat the stylesheet's

@@ -33,7 +33,6 @@ import {
   INDICATOR_MAX_ANGLE,
   INDICATOR_MAX_SPIN,
   INDICATOR_SPRING,
-  LANDING_PREVIEW_LIFT,
   STACK_BASE_Y,
   STACK_X,
   STACK_Z,
@@ -60,14 +59,20 @@ export interface LandingIndicator {
   /** Advance the teeter spring for this frame. */
   stepTeeter: (now: number) => void;
   /**
-   * Position the ghost, halo and light for this frame. `landingSurfaceY` is where the piece
-   * would come to rest, which only the game knows; the lift above it is this module's.
+   * Position the ghost, halo and light at the pose the piece is being held in. Placement is
+   * free within the plane now, so the caller gives the exact point rather than a landing
+   * surface for this module to lift off — the marker shows where the piece IS, not where it
+   * would fall to.
+   *
+   * `blocked` means the pose overlaps something already placed and cannot be committed; the
+   * marker says so by going pale and dropping its halo.
    */
   update: (
     kind: StackObjectKind,
     x: number,
+    y: number,
     angle: number,
-    landingSurfaceY: number,
+    blocked: boolean,
     now: number,
   ) => void;
   /** Switch the whole marker off — between rounds, and while the pile settles. */
@@ -84,6 +89,9 @@ const PREVIEW_TINT_MIX = 0.42;
 // top of whatever the sun and the marker's own point light are already putting on the
 // piece, so matching it to the tint blew pale materials out to white.
 const PREVIEW_GLOW_MIX = 0.22;
+// How solid a piece looks where it cannot be put down. Faint enough to read as unavailable,
+// solid enough to still show what it is and how it is turned.
+const BLOCKED_GHOST_ALPHA = 0.3;
 
 export function createLandingIndicator(
   visuals: StackObjectVisuals,
@@ -238,7 +246,7 @@ export function createLandingIndicator(
       angle = clamp(angle + angularVelocity * deltaTime, -INDICATOR_MAX_ANGLE, INDICATOR_MAX_ANGLE);
     },
 
-    update(kind, x, pieceAngle, landingSurfaceY, now) {
+    update(kind, x, y, pieceAngle, blocked, now) {
       if (ghost === null) return;
       ghost.enabled = Math.abs(x) <= PASTURE_HALF_WIDTH;
       if (!ghost.enabled) {
@@ -246,13 +254,17 @@ export function createLandingIndicator(
         indicatorLight.intensity = 0;
         return;
       }
-      const landingY = landingSurfaceY + getStackObjectVerticalExtent(kind, pieceAngle);
-      // The halo and its light ride up with the object so the ring surrounds whatever is
-      // about to drop, rather than marking the landing pose it will fall to.
-      const previewY = landingY + LANDING_PREVIEW_LIFT;
-      previewTopY = previewY + getStackObjectVerticalExtent(kind, pieceAngle);
-      visuals.setTransform(ghost, x, previewY, pieceAngle);
-      updateRadiance(x, previewY, now);
+      previewTopY = y + getStackObjectVerticalExtent(kind, pieceAngle);
+      visuals.setTransform(ghost, x, y, pieceAngle);
+      // Blocked reads as "this is not a real option": the piece goes ghostly and the marker
+      // furniture — halo and light, which say "here" — switches off entirely.
+      setNode3DAlpha(ghost, blocked ? BLOCKED_GHOST_ALPHA : 1);
+      if (blocked) {
+        if (radiance !== null) radiance.enabled = false;
+        indicatorLight.intensity = 0;
+        return;
+      }
+      updateRadiance(x, y, now);
     },
 
     hide() {

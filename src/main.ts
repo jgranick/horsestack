@@ -18,6 +18,8 @@ import { createLandingIndicator } from './scene/landingIndicator';
 import { extractFarmPropTemplates, loadGltfScene, mountFarm } from './scene/modelLoader';
 import { createParticleEffects } from './scene/particleEffects';
 import { createSceneGraph } from './scene/sceneGraph';
+import type { PlayPlanePoint } from './scene/playPlane';
+import { unprojectToPlayPlane } from './scene/playPlane';
 import { createSceneRenderer } from './scene/sceneRenderer';
 import { createStackObjectVisuals } from './scene/stackObjectVisual';
 import { createWindmill } from './scene/windmill';
@@ -68,6 +70,9 @@ const game = createGame({
   visuals,
 });
 
+// How far one arrow-key press moves the held piece, in world units.
+const KEYBOARD_NUDGE = 0.05;
+
 let windmill: Windmill | null = null;
 let creditsOpen = false;
 // Where the pointer is and whether it is held, so 2D controls can light up and press in.
@@ -80,8 +85,11 @@ let previousTime = performance.now();
 let isViewerVisible = true;
 let renderRequested = true;
 // The viewer's box in client coordinates, which pointer aiming maps against. Refreshed by
-// resizeCanvas rather than measured per event.
-const inputBounds = { left: 0, width: 1 };
+// resizeCanvas rather than measured per event: getBoundingClientRect in a pointermove handler
+// is a layout read on every move.
+const inputBounds = { height: 1, left: 0, top: 0, width: 1 };
+// Scratch for the pointer unprojection, reused so aiming allocates nothing per move.
+const aimPoint: PlayPlanePoint = { x: 0, y: 0 };
 
 bindGameControls();
 bindRenderingLifecycle();
@@ -133,7 +141,7 @@ function bindGameControls(): void {
     trackPointer(event);
     renderRequested = true;
     if (game.phase !== 'playing') return;
-    aimFromClientX(event.clientX, performance.now());
+    aimFromClient(event.clientX, event.clientY, performance.now());
   });
   window.addEventListener('pointerup', () => {
     pointerDown = false;
@@ -160,7 +168,7 @@ function bindGameControls(): void {
     if (isInteractiveEventTarget(event.target)) return;
     canvas.focus({ preventScroll: true });
     const now = performance.now();
-    aimFromClientX(event.clientX, now);
+    aimFromClient(event.clientX, event.clientY, now);
     game.place(now, event.timeStamp);
     renderRequested = true;
   });
@@ -175,11 +183,17 @@ function bindGameControls(): void {
     }
     if (game.phase !== 'playing') return;
     const now = performance.now();
+    // Placement is free in the plane, so the arrows steer in both axes and dropping moved off
+    // ArrowDown onto Space/Enter. Without this a keyboard player could not set a height at all.
     if (event.key === 'ArrowLeft') {
-      game.nudgeAim(-0.08, now);
+      game.nudgeAim(-KEYBOARD_NUDGE, 0, now);
     } else if (event.key === 'ArrowRight') {
-      game.nudgeAim(0.08, now);
-    } else if (event.key === ' ' || event.key === 'Enter' || event.key === 'ArrowDown') {
+      game.nudgeAim(KEYBOARD_NUDGE, 0, now);
+    } else if (event.key === 'ArrowUp') {
+      game.nudgeAim(0, KEYBOARD_NUDGE, now);
+    } else if (event.key === 'ArrowDown') {
+      game.nudgeAim(0, -KEYBOARD_NUDGE, now);
+    } else if (event.key === ' ' || event.key === 'Enter') {
       game.place(now, event.timeStamp);
     } else {
       return;
@@ -191,10 +205,22 @@ function bindGameControls(): void {
   bindFullscreenToggle();
 }
 
-// Pointer x across the viewer, mapped to the -1..1 the game aims in.
-function aimFromClientX(clientX: number, now: number): void {
-  const normalized = Math.min(Math.max((clientX - inputBounds.left) / inputBounds.width, 0), 1);
-  game.aimAt(normalized * 2 - 1, now);
+/**
+ * Put the held piece under the pointer.
+ *
+ * The pointer is unprojected onto the play plane rather than mapped across the viewer as a
+ * fraction. A fraction is a linear map onto what is really a projective one, so the piece
+ * drifted from the cursor toward the screen edges and drifted further the more the camera
+ * pulled back — see scene/playPlane.ts.
+ */
+function aimFromClient(clientX: number, clientY: number, now: number): void {
+  const aspect = camera.projection.kind === 'perspective' ? camera.projection.aspect : 1;
+  // Normalized device coordinates: -1..1 with +Y up, which is the convention the SDK's
+  // camera ray and world-to-screen calls both use.
+  const ndcX = ((clientX - inputBounds.left) / inputBounds.width) * 2 - 1;
+  const ndcY = 1 - ((clientY - inputBounds.top) / inputBounds.height) * 2;
+  if (!unprojectToPlayPlane(aimPoint, camera, ndcX, ndcY, aspect)) return;
+  game.aimAt(aimPoint.x, aimPoint.y, now);
 }
 
 function trackPointer(event: PointerEvent): void {
@@ -290,7 +316,9 @@ function resizeCanvas(): void {
   const width = Math.max(1, Math.round(bounds.width));
   const height = Math.max(1, Math.round(bounds.height));
   inputBounds.left = bounds.left;
+  inputBounds.top = bounds.top;
   inputBounds.width = Math.max(bounds.width, 1);
+  inputBounds.height = Math.max(bounds.height, 1);
 
   if (sceneRenderer.resize(width, height, nextPixelRatio)) {
     gameUi.resize(width, height, nextPixelRatio);

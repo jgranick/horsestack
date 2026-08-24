@@ -36,6 +36,7 @@ import type { StackObjectKind } from '../physics/stackObjectKind';
 import {
   STACK_OBJECT_PROFILES,
   getStackBodyHalfWidth,
+  getStackBodyVerticalExtent,
   getStackBodySupportExtent,
   getStackHeightHands,
   getStackHeightMeters,
@@ -73,6 +74,8 @@ interface ActiveStackObject {
   kind: StackObjectKind;
   variantIndex: number;
   x: number;
+  /** Height in the play plane. The player sets this now; it is not derived from the pile. */
+  y: number;
 }
 
 /** A piece that has been dropped: its body, its node, and whether it has fallen off. */
@@ -142,10 +145,14 @@ export interface Game {
   resetStepAccumulator: () => void;
   /** Drop the queued piece. `inputAt` is on the input clock, for the start guard. */
   place: (now: number, inputAt?: number) => void;
-  /** Aim at a position across the play area, -1 (far side) to 1 (near side). */
-  aimAt: (normalized: number, now: number) => void;
-  /** Shift the aim by a delta in world units — the keyboard's arrow keys. */
-  nudgeAim: (delta: number, now: number) => void;
+  /**
+   * Hold the piece at this point in the physics plane. The caller unprojects the pointer onto
+   * the play plane (scene/playPlane.ts) rather than passing a screen fraction — see the note
+   * there for why a screen fraction was wrong.
+   */
+  aimAt: (physicsX: number, physicsY: number, now: number) => void;
+  /** Shift the held piece by a delta in world units — the keyboard's arrow keys. */
+  nudgeAim: (deltaX: number, deltaY: number, now: number) => void;
 }
 
 // The best height ever reached on this machine, in metres, or null before a first round has
@@ -165,7 +172,7 @@ const BEST_HEIGHT_KEYS: Readonly<Record<GameMode, string>> = {
 
 export function createGame(deps: GameDeps): Game {
   const { announce, audio, cameraRig, indicator, particles, sceneGraph, visuals } = deps;
-  const { camera, indicatorLight, previewLayer, stackLayer } = sceneGraph;
+  const { indicatorLight, previewLayer, stackLayer } = sceneGraph;
 
   let phase: GamePhase = 'loading';
   // Placement input is refused until this moment, measured on the INPUT clock
@@ -178,7 +185,12 @@ export function createGame(deps: GameDeps): Game {
   let activeObject: ActiveStackObject | null = null;
   let stackedObjects: StackedObject[] = [];
   let objectsDropped = 0;
-  let aimOffset = 0;
+  // Where the piece is being held, in physics coordinates. Both axes now: placement is free
+  // within the plane rather than a horizontal aim over a top-down drop.
+  let aimX = 0;
+  let aimY = 0;
+  // True when the held piece overlaps something already placed, so it cannot be put down.
+  let aimBlocked = false;
   let lastAimAt = performance.now();
   let nextObjectAt = 0;
   let gameEndsAt = 0;
@@ -212,25 +224,57 @@ export function createGame(deps: GameDeps): Game {
   // Reused between measurements so the height scan allocates nothing per frame.
   const measurementBodies: RigidBody2D[] = [];
 
+  // How far from the middle a piece of this kind may be held. Only the pasture constrains it
+  // now: the pointer is unprojected onto the play plane (scene/playPlane.ts), so the piece is
+  // wherever the cursor is, and anything on screen is reachable by definition. The old
+  // "visible half width" term existed to stop a LINEAR screen-to-world map running the piece
+  // off the edge, and that map is gone.
   function getAimHalfWidth(): number {
-    if (camera.projection.kind !== 'perspective') return 0.36;
-    const visibleHalfWidth =
-      cameraRig.controller.distance *
-      Math.tan(camera.projection.fovY / 2) *
-      camera.projection.aspect;
     const activeHalfWidth =
       activeObject === null
         ? STACK_OBJECT_PROFILES.horse.halfWidth
         : STACK_OBJECT_PROFILES[activeObject.kind].halfWidth;
-    return Math.min(PASTURE_HALF_WIDTH - activeHalfWidth * 1.2, visibleHalfWidth * 0.88);
+    return PASTURE_HALF_WIDTH - activeHalfWidth * 1.2;
   }
 
-  function setAimOffset(targetX: number, horizontalLimit: number, now: number): void {
-    const nextAim = clamp(targetX, -horizontalLimit, horizontalLimit);
+  /** The lowest a piece of this kind can be held: resting on the bare pasture. */
+  function getFloorY(kind: StackObjectKind, angle: number): number {
+    return PASTURE_TOP_Y + getStackObjectVerticalExtent(kind, angle);
+  }
+
+  /**
+   * Does a piece held here overlap something already placed? Extents are the same ones the
+   * colliders and the landing scan use, so "roughly where it would fit" means the same thing
+   * to the preview as it will to the solver a moment later.
+   */
+  function isPlacementBlocked(kind: StackObjectKind, x: number, y: number, angle: number): boolean {
+    const halfWidth = STACK_OBJECT_PROFILES[kind].halfWidth;
+    const vertical = getStackObjectVerticalExtent(kind, angle);
+    for (const object of stackedObjects) {
+      if (object.lost) continue;
+      const body = object.body;
+      if (Math.abs(body.x - x) >= halfWidth + getStackBodyHalfWidth(body)) continue;
+      if (Math.abs(body.y - y) >= vertical + getStackBodyVerticalExtent(body)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function setAim(targetX: number, targetY: number, now: number): void {
+    const current = activeObject;
+    const kind = current === null ? 'horse' : current.kind;
+    const angle = current === null ? 0 : current.angle;
+    const horizontalLimit = getAimHalfWidth();
+    const nextX = clamp(targetX, -horizontalLimit, horizontalLimit);
+    // No ceiling: holding a piece high and letting it fall is a legitimate (and destructive)
+    // choice. The floor is real though — nothing may be placed inside the pasture.
+    const nextY = Math.max(targetY, getFloorY(kind, angle));
+    // The teeter reads horizontal speed only. Raising and lowering a piece is a deliberate,
+    // careful motion and should not set it swinging.
     const elapsed = clamp((now - lastAimAt) / 1000, 0.008, 0.08);
-    const pointerVelocity = (nextAim - aimOffset) / elapsed;
-    indicator.nudge(pointerVelocity);
-    aimOffset = nextAim;
+    indicator.nudge((nextX - aimX) / elapsed);
+    aimX = nextX;
+    aimY = nextY;
     lastAimAt = now;
   }
 
@@ -269,15 +313,14 @@ export function createGame(deps: GameDeps): Game {
 
     indicator.stepTeeter(now);
     const horizontalLimit = getAimHalfWidth();
-    current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
+    current.x = clamp(aimX, -horizontalLimit, horizontalLimit);
     current.angle = indicator.angle();
-    indicator.update(
-      current.kind,
-      current.x,
-      current.angle,
-      getLandingSurfaceY(current.x, current.kind),
-      now,
-    );
+    // Re-clamp against the floor here as well as in setAim: the teeter keeps turning the
+    // piece after the pointer stops, and a rotating piece's vertical extent grows, so a pose
+    // that cleared the grass a moment ago may not now.
+    current.y = Math.max(aimY, getFloorY(current.kind, current.angle));
+    aimBlocked = isPlacementBlocked(current.kind, current.x, current.y, current.angle);
+    indicator.update(current.kind, current.x, current.y, current.angle, aimBlocked, now);
   }
 
   function spawnObject(now: number): void {
@@ -287,7 +330,12 @@ export function createGame(deps: GameDeps): Game {
     lastAimAt = now;
     const kind = getRandomStackObjectKind();
     const variantIndex = kind === 'horse' ? 0 : getRandomFarmPropVariantIndex(kind);
-    activeObject = { angle: 0, kind, variantIndex, x: 0 };
+    // Opens resting on whatever is under the middle of the pasture, so the first frame shows
+    // a plausible pose before the pointer has said anything.
+    aimX = 0;
+    aimY = getLandingSurfaceY(0, kind) + getStackObjectVerticalExtent(kind, 0);
+    aimBlocked = false;
+    activeObject = { angle: 0, kind, variantIndex, x: aimX, y: aimY };
     indicator.setKind(kind, variantIndex);
     // Announced to screen readers only. The label alone: an emoji here is read aloud as its
     // own name before the word it duplicates.
@@ -298,10 +346,13 @@ export function createGame(deps: GameDeps): Game {
   function commitObjectPlacement(now: number): void {
     const current = activeObject;
     if (current === null || phase !== 'playing') return;
+    // A pose that overlaps something already placed is refused rather than resolved. Letting
+    // the solver push the two apart would fire pieces out of the pile at speed.
+    if (isPlacementBlocked(current.kind, current.x, current.y, current.angle)) return;
 
-    const landingY =
-      getLandingSurfaceY(current.x, current.kind) +
-      getStackObjectVerticalExtent(current.kind, current.angle);
+    // Exactly where it was being held. It is not dropped onto a surface any more, so it may
+    // well be unsupported — and then it falls, which is the player's problem.
+    const landingY = current.y;
     const body = addStackObjectBody(physicsWorld, current.kind, current.x, landingY, current.angle);
     body.velocityX = 0;
     body.velocityY = 0;
@@ -556,7 +607,9 @@ export function createGame(deps: GameDeps): Game {
       activeObject = null;
       stackedObjects = [];
       objectsDropped = 0;
-      aimOffset = 0;
+      aimX = 0;
+      aimY = 0;
+      aimBlocked = false;
       indicator.resetTeeter(now);
       lastAimAt = now;
       nextObjectAt = 0;
@@ -643,14 +696,13 @@ export function createGame(deps: GameDeps): Game {
       commitObjectPlacement(now);
     },
 
-    aimAt(normalized, now) {
+    aimAt(physicsX, physicsY, now) {
       if (activeObject === null) return;
-      const horizontalLimit = getAimHalfWidth();
-      setAimOffset(normalized * horizontalLimit, horizontalLimit, now);
+      setAim(physicsX, physicsY, now);
     },
 
-    nudgeAim(delta, now) {
-      setAimOffset(aimOffset + delta, getAimHalfWidth(), now);
+    nudgeAim(deltaX, deltaY, now) {
+      setAim(aimX + deltaX, aimY + deltaY, now);
     },
   };
 }

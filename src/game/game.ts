@@ -66,6 +66,7 @@ import type { StackObjectVisuals } from '../scene/stackObjectVisual';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
+  HORSE_DROP_ELAPSED_MS,
   HORSE_REST_ANGULAR,
   HORSE_REST_LINEAR,
   HORSE_REST_SECONDS,
@@ -111,8 +112,12 @@ interface StackedObject {
    * grass would trip the rule a moment later.
    */
   touchedGround: boolean;
-  /** Set once it has touched another piece. Half of the dropped-horse test; see below. */
-  touchedPiece: boolean;
+  /**
+   * When it first touched another piece, on the game clock; 0 until it has. Both the fact
+   * and the moment matter to the dropped-horse rule, and the moment is the START of its
+   * clock — see below for why that is not the moment it was placed.
+   */
+  collidedAt: number;
   node: Node3D;
 }
 
@@ -517,7 +522,7 @@ export function createGame(deps: GameDeps): Game {
       restSeconds: 0,
       hasSettled: false,
       touchedGround: false,
-      touchedPiece: false,
+      collidedAt: 0,
     });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
@@ -626,27 +631,36 @@ export function createGame(deps: GameDeps): Game {
     }
   }
 
-  function synchronizeStackVisuals(deltaTime: number): void {
+  function synchronizeStackVisuals(now: number, deltaTime: number): void {
     let retainedCount = 0;
     for (const object of stackedObjects) {
       if (object.lost) continue;
       const body = object.body;
 
-      // THE RULE: a horse that had come to rest on something, and then reaches the floor,
-      // has been dropped.
+      // THE RULE: a horse that touched something, and then took a while to reach the
+      // floor, has been dropped.
       //
-      // Both halves are needed and neither is enough alone. It must have touched ANOTHER
-      // PIECE — that says it was part of the pile rather than standing on the grass — and it
-      // must have been STILL at some point before it came down.
+      // Three parts, and the third is timed FROM THE FIRST COLLISION rather than from
+      // placement, which is the detail that makes the whole thing work:
       //
-      // The stillness is what the two previous versions were missing, and it is what makes
-      // an ordinary placement safe. Put a horse's front hooves on a chicken with its back
-      // end hanging off and it swings down onto the grass over a few hundred milliseconds:
-      // it touched a piece, it reached the floor, and by any test based on elapsed time it
-      // is a dropped horse. But it never stopped moving between being let go and lying
-      // where it ended up. A horse that is really dropped stood on the pile first.
+      //   touched another piece   it was involved with the pile, not standing in a field.
+      //                           Let one go from the sky onto open grass and it never
+      //                           touches anything, so it is not a dropped horse.
+      //   reached the floor       or left the map, which is handled below.
+      //   and took its time       measured from that first touch. A horse that clips a
+      //                           chicken on its way down and lands a moment later was
+      //                           never held by anything; a horse that tips off a stack
+      //                           spends much longer between touching it and landing.
       //
-      // Latched, because by the time it lands the stillness is long gone.
+      // Timing from placement could not tell those apart, because both start when you let
+      // go. Timing from the collision does: the clock only starts once something has caught
+      // the horse, so it measures how long it stayed caught.
+      //
+      // The rest test is a shortcut past the clock, not a replacement for it: a horse that
+      // was standing still on the pile has plainly been dropped the moment it comes down,
+      // however fast the fall. On its own it was too strict — a horse put half onto a tall
+      // stack touches, tips and falls without ever being still, and that is a dropped horse
+      // by any reading.
       const speed = Math.hypot(body.velocityX, body.velocityY);
       if (speed < HORSE_REST_LINEAR && Math.abs(body.angularVelocity) < HORSE_REST_ANGULAR) {
         object.restSeconds += deltaTime;
@@ -656,14 +670,16 @@ export function createGame(deps: GameDeps): Game {
       }
 
       const contacts = getStackBodyContacts(physicsWorld, body);
-      if ((contacts & STACK_CONTACT_PIECE) !== 0) object.touchedPiece = true;
+      if ((contacts & STACK_CONTACT_PIECE) !== 0 && object.collidedAt === 0) {
+        object.collidedAt = now;
+      }
       if (!object.touchedGround && (contacts & STACK_CONTACT_GROUND) !== 0) {
         object.touchedGround = true;
         if (
           object.kind === 'horse' &&
           !object.dropped &&
-          object.touchedPiece &&
-          object.hasSettled
+          object.collidedAt !== 0 &&
+          (object.hasSettled || now - object.collidedAt > HORSE_DROP_ELAPSED_MS)
         ) {
           object.dropped = true;
           horsesDropped++;
@@ -870,7 +886,7 @@ export function createGame(deps: GameDeps): Game {
         updateGame(now);
         swayClock += deltaTime * 1.6;
         stepGamePhysics(now, deltaTime);
-        synchronizeStackVisuals(deltaTime);
+        synchronizeStackVisuals(now, deltaTime);
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
         peakHeight = Math.max(peakHeight, cachedStackHeight);
       }

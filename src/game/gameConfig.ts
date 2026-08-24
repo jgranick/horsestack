@@ -154,3 +154,18 @@ export const HORSE_REST_SECONDS = 0.12;
 // when searching. Small enough that the lift is never further than it needs to be, large
 // enough that "resting exactly on" does not read as an overlap to the solver.
 export const PLACEMENT_LIFT_STEP = 0.002;
+
+// How long a horse may spend between first touching another piece and reaching the floor
+// before that counts as having been dropped rather than having settled. See game.ts.
+//
+// Measured from the COLLISION, not from placement, so it is really asking "how long did the
+// pile hold it". Settling into the pose you chose is quick: put a horse's front hooves on a
+// chicken and its back end swings down onto the grass in something like a quarter of a
+// second, because it only has the height of a chicken to travel. Being dropped is slower —
+// a horse tipping off a stack has to come off it first and then fall its whole height, and
+// a fall alone runs to 400-600ms from any pile worth the name.
+//
+// So this sits above the first and below the second. It is the one number here with real
+// slack on both sides rather than a derived value; if drops are being missed, lower it, and
+// if placements start ending rounds, raise it.
+export const HORSE_DROP_ELAPSED_MS = 500;

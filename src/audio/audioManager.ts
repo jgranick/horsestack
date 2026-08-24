@@ -20,6 +20,7 @@ import {
   RESULT_TICK_INTERVAL_MS,
   RESULT_TICK_POOL_SIZE,
 } from '../game/gameConfig';
+import type { GameMode } from '../game/gameMode';
 import { prefersReducedMotion } from '../reducedMotion';
 
 export interface AudioManager {
@@ -39,8 +40,14 @@ export interface AudioManager {
   celebrateResult: () => void;
   /** Two pieces hit hard enough to be worth a whinny — throttled to one every few seconds. */
   maybePlayCollisionWhinny: (now: number) => void;
-  /** A round is starting: re-arm the effects, restart the music and ambience. */
-  startRound: (now: number) => void;
+  /**
+   * A round is starting: re-arm the effects and bring the sound up. The soundtrack is a
+   * TIME CHALLENGE thing — endless runs get the farm's ambience and nothing else, because a
+   * three minute song under an open-ended session turns into a loop you notice.
+   */
+  startRound: (now: number, mode: GameMode) => void;
+  /** The player left a round for the title screen: music out, ambience stays. */
+  leaveRound: () => void;
   /** Everything off, every timer cancelled. Also the error path. */
   stopAll: () => void;
 }
@@ -149,15 +156,27 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
         now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
     },
 
-    startRound(now) {
+    startRound(now, mode) {
       reloadGameEffects();
       nextHorseWhinnyAt =
         now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
       if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
+      if (mode === 'endless') {
+        // Not just "do not start it": the previous round may have been a timed one whose
+        // music is still playing when PLAY AGAIN or MENU lands here.
+        stopAudioTrack(soundtrack);
+        return;
+      }
       restartAudioTrack(soundtrack, 'Background music');
       // The track opens on two seconds of near-silence, which reads as the music failing
       // to start on the very beat the player pressed PLAY.
       soundtrack.currentTime = 2;
+    },
+
+    leaveRound() {
+      stopAudioTrack(soundtrack);
+      stopResultTicks();
+      stopHorseWhinny();
     },
 
     stopAll() {

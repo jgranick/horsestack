@@ -63,6 +63,7 @@ import {
   STACK_BASE_Y,
   START_INPUT_GUARD_MS,
 } from './gameConfig';
+import type { GameMode } from './gameMode';
 import type { GamePhase } from './gamePhase';
 
 /** The piece currently hovering, waiting to be dropped. */
@@ -94,6 +95,8 @@ export interface GameDeps {
 
 export interface Game {
   readonly phase: GamePhase;
+  /** Which game the current (or most recent) round is. */
+  readonly mode: GameMode;
   /** True while the clock is running or the pile is still settling. */
   readonly isRunning: boolean;
   /** True once the models are in and a round can start. */
@@ -117,10 +120,15 @@ export interface Game {
   /** The GL context went away; there is nothing to run until the page reloads. */
   markLost: () => void;
   /**
-   * Begin a round. `startedFrom` is the event that asked for it, whose timeStamp arms the
-   * input guard on the INPUT clock rather than the render clock.
+   * Begin a round in `nextMode`. `startedFrom` is the event that asked for it, whose
+   * timeStamp arms the input guard on the INPUT clock rather than the render clock.
    */
-  startRound: (startedFrom?: Event) => void;
+  startRound: (nextMode: GameMode, startedFrom?: Event) => void;
+  /**
+   * Abandon the round and go back to the title. Endless has no ending of its own to wait
+   * for, so this is how a player who is done with a tower leaves it.
+   */
+  leaveRound: () => void;
   /** Advance the round by one frame. */
   update: (now: number, deltaTime: number) => void;
   /**
@@ -140,7 +148,14 @@ export interface Game {
 // The best height ever reached on this machine, in metres, or null before a first round has
 // ever been finished here. Kept in localStorage so it survives a reload, and read through
 // try/catch because storage throws outright in some private-browsing modes.
-const BEST_HEIGHT_KEY = 'horse-stacker.best-height';
+//
+// One record PER MODE. Endless has no clock, so its heights dwarf a timed round's; a single
+// shared record would mean Time Challenge could never post a BEST again after one long
+// endless run. The timed key is left at its original name so existing records survive.
+const BEST_HEIGHT_KEYS: Readonly<Record<GameMode, string>> = {
+  time: 'horse-stacker.best-height',
+  endless: 'horse-stacker.best-height.endless',
+};
 
 export function createGame(deps: GameDeps): Game {
   const { announce, audio, cameraRig, indicator, particles, sceneGraph, visuals } = deps;
@@ -170,7 +185,15 @@ export function createGame(deps: GameDeps): Game {
   let resultHandsShown = 0;
   let physicsAccumulator = 0;
   let lastImpactAt = 0;
-  let bestMeters: number | null = readBestMeters();
+  let mode: GameMode = 'time';
+  // The tallest the pile reached during the round, which is what an endless run scores: a
+  // collapse leaves the measured height at zero, and the run was still worth what it built.
+  // A timed round finishes with the pile standing, so for it this equals the final height.
+  let peakHeight = 0;
+  const bestMeters: Record<GameMode, number | null> = {
+    time: readBestMeters('time'),
+    endless: readBestMeters('endless'),
+  };
   // The record as it stood when the round began, which is what the result screen reports.
   // Reading bestMeters there would be wrong: by then this round has already been folded in,
   // so a first ever round would echo its own height back at the player as "BEST".
@@ -299,13 +322,13 @@ export function createGame(deps: GameDeps): Game {
   // raise a NEW RECORD! badge over a number identical to the record it supposedly beat.
   // A first ever round sets the record without claiming to have broken one.
   function recordFinalHeight(meters: number): void {
-    const previous = bestMeters;
+    const previous = bestMeters[mode];
     recordBeforeRound = previous;
     beatTheRecord = previous !== null && meters >= previous + 0.01;
     if (previous !== null && meters <= previous) return;
-    bestMeters = meters;
+    bestMeters[mode] = meters;
     try {
-      window.localStorage.setItem(BEST_HEIGHT_KEY, meters.toFixed(4));
+      window.localStorage.setItem(BEST_HEIGHT_KEYS[mode], meters.toFixed(4));
     } catch {
       // A best height that cannot be persisted still stands for the rest of the session.
     }
@@ -313,7 +336,15 @@ export function createGame(deps: GameDeps): Game {
 
   function finishGame(now: number): void {
     phase = 'finished';
-    finalHeight = getCurrentStackHeight();
+    // Put the queued piece away HERE rather than trusting the caller. The timed round comes
+    // in through beginSettling, which already did it; an endless collapse comes straight
+    // here, and without this the hovering ghost and its halo hang over the result screen.
+    activeObject = null;
+    indicator.hide();
+    // The peak, not the height at this instant. They are the same for a timed round, which
+    // ends with the pile standing; an endless run ends BECAUSE the pile fell, and scoring
+    // the rubble at zero would throw away the whole run.
+    finalHeight = Math.max(peakHeight, getCurrentStackHeight());
     cachedStackHeight = finalHeight;
     recordFinalHeight(getStackHeightMeters(finalHeight));
     resultHands = getStackHeightHands(finalHeight);
@@ -410,8 +441,24 @@ export function createGame(deps: GameDeps): Game {
 
   function updateGame(now: number): void {
     if (phase === 'playing') {
+      // gameEndsAt is Infinity in endless, so this never fires there.
       if (now >= gameEndsAt) {
         beginSettling(now);
+        return;
+      }
+      // What ends an endless run: every piece placed has fallen off the pasture, so there is
+      // no tower left to add to.
+      //
+      // `peakHeight > 0` is the part that matters. getSupportedStackHeight returns 0 for a
+      // pile with nothing resting on it, so a non-zero peak means a tower genuinely existed
+      // at some point. Without it, fumbling the very first piece off the edge would end the
+      // run before it started — a collapse you never had is not a collapse.
+      if (mode === 'endless' && stackedObjects.length === 0 && peakHeight > 0) {
+        // Straight to the result. There is nothing left to settle, and the TIME UP beat
+        // would be the wrong words over a collapse that had nothing to do with a clock.
+        // The fanfare still fires, because the count-up is starting either way.
+        audio.beginResultCount();
+        finishGame(now);
         return;
       }
       if (activeObject !== null) {
@@ -427,6 +474,9 @@ export function createGame(deps: GameDeps): Game {
   return {
     get phase() {
       return phase;
+    },
+    get mode() {
+      return mode;
     },
     get isRunning() {
       return phase === 'playing' || phase === 'settling';
@@ -454,6 +504,9 @@ export function createGame(deps: GameDeps): Game {
       return clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6;
     },
     get secondsLeft() {
+      // Endless sets gameEndsAt to Infinity, and an Infinity reaching the UI model would be
+      // formatted and shown. There is no clock to report, so report none.
+      if (!Number.isFinite(gameEndsAt)) return 0;
       return Math.max(0, (gameEndsAt - performance.now()) / 1000);
     },
     get resultHandsShown() {
@@ -474,11 +527,12 @@ export function createGame(deps: GameDeps): Game {
       phase = 'loading';
     },
 
-    startRound(startedFrom) {
+    startRound(nextMode, startedFrom) {
       if (!visuals.isReady() || phase === 'loading') return;
 
+      mode = nextMode;
       const now = performance.now();
-      audio.startRound(now);
+      audio.startRound(now, mode);
       physicsWorld = createHorseStackWorld();
       physicsAccumulator = 0;
       activeObject = null;
@@ -488,10 +542,14 @@ export function createGame(deps: GameDeps): Game {
       indicator.resetTeeter(now);
       lastAimAt = now;
       nextObjectAt = 0;
-      gameEndsAt = now + GAME_DURATION_MS;
+      // Endless has no clock at all rather than a very long one: the timer HUD reads
+      // gameEndsAt, and Infinity keeps every "is the round over" test honest without a
+      // second flag to forget.
+      gameEndsAt = mode === 'endless' ? Infinity : now + GAME_DURATION_MS;
       finishAt = 0;
       finalHeight = 0;
       cachedStackHeight = 0;
+      peakHeight = 0;
       resultAnimationStart = 0;
       resultAnimationDuration = 0;
       resultHands = 0;
@@ -523,6 +581,7 @@ export function createGame(deps: GameDeps): Game {
         stepGamePhysics(now, deltaTime);
         synchronizeStackVisuals();
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
+        peakHeight = Math.max(peakHeight, cachedStackHeight);
       }
       if (phase === 'finished' && resultAnimationStart !== 0) {
         updateResultAnimation(now);
@@ -531,6 +590,24 @@ export function createGame(deps: GameDeps): Game {
 
     resetStepAccumulator() {
       physicsAccumulator = 0;
+    },
+
+    leaveRound() {
+      if (phase === 'loading') return;
+      phase = 'ready';
+      activeObject = null;
+      indicator.hide();
+      audio.leaveRound();
+      removeNodeChildren(stackLayer);
+      removeNodeChildren(previewLayer);
+      particles.reset();
+      // The pile is gone, so the camera must not keep framing where it used to be.
+      cachedStackHeight = 0;
+      peakHeight = 0;
+      objectsDropped = 0;
+      stackedObjects = [];
+      physicsWorld = createHorseStackWorld();
+      cameraRig.resetHeight();
     },
 
     place(now, inputAt = now) {
@@ -558,9 +635,9 @@ export function createGame(deps: GameDeps): Game {
   };
 }
 
-function readBestMeters(): number | null {
+function readBestMeters(mode: GameMode): number | null {
   try {
-    const stored = window.localStorage.getItem(BEST_HEIGHT_KEY);
+    const stored = window.localStorage.getItem(BEST_HEIGHT_KEYS[mode]);
     if (stored === null) return null;
     const value = Number.parseFloat(stored);
     return Number.isFinite(value) && value > 0 ? value : null;

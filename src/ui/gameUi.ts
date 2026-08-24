@@ -8,6 +8,7 @@
 // names, and returns whether anything is still animating. There is no retained widget tree
 // and no diffing — the nodes are built once, and each frame decides afresh what is shown.
 import type { GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
+import type { GameMode } from '../game/gameMode';
 import {
   addNodeChild,
   createDisplayObject,
@@ -27,13 +28,24 @@ import {
   setTextLabelWidth,
 } from '@flighthq/sdk';
 import { createUiRenderer } from './uiRenderer';
-import { fill, GOLD, INK, label, place, SANS, SERIF, setText, show } from './uiElements';
+import {
+  fill,
+  fitLabelToWidth,
+  GOLD,
+  INK,
+  label,
+  place,
+  SANS,
+  SERIF,
+  setText,
+  show,
+} from './uiElements';
 
 export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
 
 export interface UiButton {
   height: number;
-  id: 'play' | 'again' | 'fullscreen' | 'credits';
+  id: 'time' | 'endless' | 'again' | 'menu' | 'fullscreen' | 'credits';
   width: number;
   x: number;
   y: number;
@@ -48,6 +60,10 @@ export interface UiState {
 }
 
 export interface UiModel {
+  /** Which game is being played, which decides the playing screen's HUD. */
+  mode: GameMode;
+  /** The pile's height right now, for the endless readout. Ignored in Time Challenge. */
+  heightNowText: string;
   // Empty when there is nothing worth showing: a first ever round, or one that set a new
   // record (where the height on screen already IS the record).
   bestText: string;
@@ -67,6 +83,23 @@ export interface UiModel {
   // 0..1 over the TIME UP arrival, driving its overshoot.
   timeUpProgress: number;
 }
+
+// Display type is authored at a desktop size and shrunk to fit a narrow window; see
+// fitLabelToWidth in uiElements.ts. The minimums are the point below which the line stops
+// reading as a title and would be better wrapped — no window this game runs in gets there,
+// but a floor beats a one-pixel title if one ever does.
+const SCREEN_GUTTER = 20;
+const TITLE_MAX_SIZE = 96;
+const TITLE_MIN_SIZE = 30;
+const TIME_UP_MAX_SIZE = 112;
+const TIME_UP_MIN_SIZE = 34;
+// Where the line's own centre sits within its box, as a fraction of the font size. The
+// layout used to hard-code 60 against a 96pt line; this is that same ratio, kept honest as
+// the size changes.
+const TITLE_PIVOT_RATIO = 60 / 96;
+// Wide enough for "TIME CHALLENGE" at 13px with room either side; narrowed on a phone by
+// the gutter, which is why the pills read their width rather than carrying a fixed one.
+const MODE_PILL_WIDTH = 216;
 
 const HANDS_PER_EMOJI_COLUMN = 7;
 // One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
@@ -105,14 +138,22 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const root = createDisplayObject();
   // Same treatment as TIME UP and the result height: big gold serif, so the three
   // screens read as one family. Upright rather than tilted — the tilt is TIME UP's.
-  const titleText = label('Horse Stacker', 96, GOLD, SERIF, true);
-  const playPill = createShape();
-  const playText = label('PLAY', 13, 0x252420ff, SANS, true);
+  const titleText = label('Horse Stacker', TITLE_MAX_SIZE, GOLD, SERIF, true);
+  const timePill = createShape();
+  const timeText = label('TIME CHALLENGE', 13, 0x252420ff, SANS, true);
+  const endlessPill = createShape();
+  const endlessText = label('ENDLESS', 13, INK, SANS, true);
+  const menuPill = createShape();
+  const menuText = label('MENU', 12, INK, SANS, true);
   const timerPill = createShape();
   const timerCaption = label('TIME LEFT', 9, 0xd8e0d2ff, SANS, true);
   const timerValue = label('30', 34, INK, SERIF);
+  // Endless replaces the clock with the same pill reading the pile instead.
+  const heightPill = createShape();
+  const heightCaption = label('HEIGHT', 9, 0xd8e0d2ff, SANS, true);
+  const heightValue = label('0.00 m', 22, INK, SERIF);
   const timeUpScrim = createShape();
-  const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
+  const timeUpText = label('TIME UP!', TIME_UP_MAX_SIZE, GOLD, SERIF, true);
   // One label per hand, like the DOM original's one span per hand: it is what lets each
   // horse pop in as the count reaches it. A column could be a single multiline node —
   // that is what RichText is for, and the credits copy below uses it — but then the
@@ -135,6 +176,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const bestLabel = label('', 11, GOLD, SANS, true);
   const againPill = createShape();
   const againText = label('PLAY AGAIN', 13, 0x252420ff, SANS, true);
+  const menuFromResultPill = createShape();
+  const menuFromResultText = label('MENU', 13, INK, SANS, true);
   const creditsPill = createShape();
   const creditsText = label('i', 15, INK, SERIF);
   const creditsBody = createShape();
@@ -148,11 +191,14 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const fullscreenText = label('⛶', 15, INK, SANS);
 
   for (const node of [
-    titleText, playPill, playText, timerPill, timerCaption, timerValue,
+    titleText, timePill, timeText, endlessPill, endlessText,
+    timerPill, timerCaption, timerValue,
+    heightPill, heightCaption, heightValue, menuPill, menuText,
     timeUpScrim, timeUpText,
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
+    menuFromResultPill, menuFromResultText,
   ]) {
     addNodeChild(root, node);
   }
@@ -209,23 +255,45 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     // vignette instead, which separates the UI from the background without hiding it.
 
     show(titleText, onTitle);
-    show(playPill, onTitle);
-    show(playText, onTitle);
+    show(timePill, onTitle);
+    show(timeText, onTitle);
+    show(endlessPill, onTitle);
+    show(endlessText, onTitle);
     if (onTitle) {
       // Drops in with an overshoot, then breathes so the screen is never quite still.
       const breathe = Math.sin(model.now * 0.0016) * 4;
       setTextLabelWidth(titleText, width);
+      // TITLE_MAX_SIZE is a desktop size; on a narrow window the line is re-set smaller so
+      // it fits. The budget allows for the gutter AND for the arrival overshoot — `pop`
+      // peaks a little above 1, so fitting to the full width would still clip on the bounce.
+      const titleSize = fitLabelToWidth(
+        titleText, TITLE_MAX_SIZE, TITLE_MIN_SIZE, (width - SCREEN_GUTTER * 2) / 1.02,
+      );
       titleText.alpha = intro;
       titleText.scaleX = 0.86 + 0.14 * pop;
       titleText.scaleY = titleText.scaleX;
       titleText.pivotX = width / 2;
-      titleText.pivotY = 60;
-      place(titleText, width / 2, height * 0.5 - 120 + 60 + (1 - pop) * 26 + breathe);
+      // Pivot follows the size, so the line stays centred on its own baseline as it shrinks.
+      titleText.pivotY = titleSize * TITLE_PIVOT_RATIO;
+      place(
+        titleText,
+        width / 2,
+        height * 0.5 - 120 + titleSize * TITLE_PIVOT_RATIO + (1 - pop) * 26 + breathe,
+      );
       invalidateNodeAppearance(titleText);
       const nudge = Math.sin(model.now * 0.0016 + 1.1) * 2;
+      // Two modes, stacked rather than side by side: the labels are different lengths, and
+      // a row of two would either be ragged or force the shorter one to a width its word
+      // does not fill. Stacked they share one width and read as a menu.
+      const menuWidth = Math.min(MODE_PILL_WIDTH, width - SCREEN_GUTTER * 2);
+      const menuX = width / 2 - menuWidth / 2;
+      const menuY = height * 0.5 + 24 + (1 - intro) * 20 + nudge;
+      pill(timePill, timeText, 'time', menuX, menuY, menuWidth, 44, INK, intro);
+      // The second option is the quieter one, so it wears the dark fill rather than a
+      // second slab of cream competing with the first for the eye.
       pill(
-        playPill, playText, 'play',
-        width / 2 - 84, height * 0.5 + 30 + (1 - intro) * 20 + nudge, 168, 44, INK, intro,
+        endlessPill, endlessText, 'endless',
+        menuX, menuY + 56, menuWidth, 44, 0x1f2d1dff, intro * 0.82,
       );
     }
 
@@ -237,11 +305,16 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       fill(timeUpScrim, 0x7e311fff, 0.88 * Math.min(1, t * 3), 0, 0, width, height, 0);
       place(timeUpScrim, 0, 0);
       setTextLabelWidth(timeUpText, width);
+      // Same treatment as the title, and with more headroom to find: the arrival curve
+      // overshoots to 1.18 and the line is tilted, so both eat into the usable width.
+      const timeUpSize = fitLabelToWidth(
+        timeUpText, TIME_UP_MAX_SIZE, TIME_UP_MIN_SIZE, (width - SCREEN_GUTTER * 2) / 1.2,
+      );
       timeUpText.scaleX = scale;
       timeUpText.scaleY = scale;
       timeUpText.alpha = Math.min(1, t * 2.4);
       timeUpText.pivotX = width / 2;
-      timeUpText.pivotY = 60;
+      timeUpText.pivotY = timeUpSize * TITLE_PIVOT_RATIO;
       timeUpText.rotation = -0.052;
       place(timeUpText, width / 2, height * 0.5);
       invalidateNodeAppearance(timeUpText);
@@ -256,6 +329,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(bestLabel, showRecord && model.bestText !== '');
     show(againPill, showAgain);
     show(againText, showAgain);
+    show(menuFromResultPill, showAgain);
+    show(menuFromResultText, showAgain);
     if (!onResult) {
       for (const horse of tallyHorses) show(horse, false);
     }
@@ -344,18 +419,28 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         invalidateNodeAppearance(bestLabel);
       }
 
-      // The badge inserts a row, so the button drops to keep clear of it.
+      // The badge inserts a row, so the buttons drop to keep clear of it.
+      const buttonsY = ruleY + (badgeShowing ? 160 : 150) + (1 - easeOutBack(settle)) * 16;
+      // PLAY AGAIN keeps the width and the cream fill it had — it is still what most people
+      // want next. MENU sits beside it, narrower and dark, so the pair reads as one primary
+      // action and one way out rather than two equal choices.
+      const againWidth = Math.min(192, Math.max(120, width - SCREEN_GUTTER * 2 - 108));
+      const menuWidth = 96;
+      const pairWidth = againWidth + 8 + menuWidth;
+      const pairX = width / 2 - pairWidth / 2;
+      pill(againPill, againText, 'again', pairX, buttonsY, againWidth, 44, INK, settle);
       pill(
-        againPill, againText, 'again',
-        width / 2 - 96, ruleY + (badgeShowing ? 160 : 150) + (1 - easeOutBack(settle)) * 16,
-        192, 44, INK, settle,
+        menuFromResultPill, menuFromResultText, 'menu',
+        pairX + againWidth + 8, buttonsY, menuWidth, 44, 0x1f2d1dff, settle * 0.82,
       );
     }
 
-    show(timerPill, playing);
-    show(timerCaption, playing);
-    show(timerValue, playing);
-    if (playing) {
+    const timedPlaying = playing && model.mode === 'time';
+    const endlessPlaying = playing && model.mode === 'endless';
+    show(timerPill, timedPlaying);
+    show(timerCaption, timedPlaying);
+    show(timerValue, timedPlaying);
+    if (timedPlaying) {
       const w = 104;
       const x = width - w - 24;
       const drop = (1 - pop) * 40;
@@ -382,6 +467,27 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       timerValue.pivotY = 20;
       place(timerValue, x + shake + w / 2, 38 - drop + 20);
       setText(timerValue, String(Math.max(0, Math.ceil(model.secondsLeft))));
+    }
+
+    // Endless: the clock's slot holds a live height instead, and the corner carries the way
+    // out — with no clock to end the round, leaving has to be something the player can see.
+    show(heightPill, endlessPlaying);
+    show(heightCaption, endlessPlaying);
+    show(heightValue, endlessPlaying);
+    show(menuPill, endlessPlaying);
+    show(menuText, endlessPlaying);
+    if (endlessPlaying) {
+      const w = 104;
+      const x = width - w - 24;
+      const drop = (1 - pop) * 40;
+      fill(heightPill, 0x1f2d1dff, 0.72, 0, 0, w, 62, 18);
+      place(heightPill, x, 18 - drop);
+      setTextLabelWidth(heightCaption, w);
+      place(heightCaption, x, 26 - drop);
+      setTextLabelWidth(heightValue, w);
+      place(heightValue, x, 44 - drop);
+      setText(heightValue, model.heightNowText);
+      pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);
     }
 
     // Attribution belongs on the screen you land on when the round is over, not over the

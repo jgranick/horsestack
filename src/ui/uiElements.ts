@@ -11,6 +11,7 @@ import {
   appendShapeBeginFill,
   appendShapeRoundRectangle,
   clearShapeCommands,
+  computeTextFormatFontString,
   createTextLabel,
   invalidateNodeAppearance,
   invalidateNodeLocalTransform,
@@ -77,4 +78,54 @@ export function fill(
   appendShapeBeginFill(shape, colour, alpha);
   appendShapeRoundRectangle(shape, x, y, w, h, r, r);
   invalidateNodeRender(shape);
+}
+
+// The display text — the title, TIME UP, the result height — is set at a size chosen for a
+// desktop window, and Flight's TextLabel does not shrink to fit: `align: 'center'` centres
+// the line in the box and lets it overhang both edges. On a phone the title ran off both
+// sides of the screen.
+//
+// So the size is chosen from the width actually available. It is measured with a canvas 2D
+// context because that is the same text engine the shape/label rasterizer uses, so the
+// number agrees with what will be drawn — rather than a ratio-per-character guess that
+// drifts between fonts.
+const measureContext: CanvasRenderingContext2D | null =
+  typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+
+function measureTextWidth(text: string, font: string): number {
+  if (measureContext === null) return 0;
+  measureContext.font = font;
+  return measureContext.measureText(text).width;
+}
+
+/**
+ * Re-sizes `node` so its single line fits inside `maxWidth`, never larger than `maxSize` and
+ * never smaller than `minSize`. Returns the size in use.
+ *
+ * Re-formatting re-rasterizes the glyphs, so the format is only written when the size
+ * actually changes — this is called every frame from the layout pass.
+ */
+export function fitLabelToWidth(
+  node: TextLabel,
+  maxSize: number,
+  minSize: number,
+  maxWidth: number,
+): number {
+  const format = node.data.textFormat;
+  const currentSize = format.size ?? maxSize;
+  const text = node.data.text;
+  if (text === '' || maxWidth <= 0) return currentSize;
+
+  // Advance width is linear in font size, so one measurement gives the ratio outright.
+  const widthAtMax = measureTextWidth(text, computeTextFormatFontString({ ...format, size: maxSize }));
+  const fitted =
+    widthAtMax <= maxWidth || widthAtMax === 0
+      ? maxSize
+      : Math.max(minSize, Math.floor((maxSize * maxWidth) / widthAtMax));
+
+  if (fitted !== currentSize) {
+    setTextLabelFormat(node, { ...format, size: fitted });
+    setTextLabelHeight(node, fitted * 1.6);
+  }
+  return fitted;
 }

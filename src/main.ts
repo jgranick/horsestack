@@ -10,6 +10,7 @@
 import { createVector3, easeOutCubic, getCamera3DWorldToScreen } from '@flighthq/sdk';
 import { createAudioManager } from './audio/audioManager';
 import { createGame } from './game/game';
+import type { GameMode } from './game/gameMode';
 import { STACK_BASE_Y, STACK_X, STACK_Z } from './game/gameConfig';
 import { getStackHeightMeters } from './physics/stackObjectProfile';
 import { createCameraRig } from './scene/cameraRig';
@@ -109,12 +110,18 @@ async function start(): Promise<void> {
   }
 }
 
-function startGame(startedFrom?: Event): void {
+function startGame(mode: GameMode, startedFrom?: Event): void {
   if (!game.isReady || game.phase === 'loading') return;
   // The credits only exist on the score screen now, so a panel left open there must not
   // still be open when the next score screen arrives.
   creditsOpen = false;
-  game.startRound(startedFrom);
+  game.startRound(mode, startedFrom);
+  renderRequested = true;
+}
+
+function returnToMenu(): void {
+  creditsOpen = false;
+  game.leaveRound();
   renderRequested = true;
 }
 
@@ -159,6 +166,13 @@ function bindGameControls(): void {
   });
 
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
+    // Escape is the endless run's other way out, matching the MENU pill. A timed round ends
+    // on its own, so it keeps Escape's browser-default meaning.
+    if (event.key === 'Escape' && game.mode === 'endless' && game.isRunning) {
+      returnToMenu();
+      event.preventDefault();
+      return;
+    }
     if (game.phase !== 'playing') return;
     const now = performance.now();
     if (event.key === 'ArrowLeft') {
@@ -211,12 +225,21 @@ function handleUiPress(event: PointerEvent): boolean {
       toggleFullscreen();
       return true;
     }
-    if (button.id === 'play' && screen === 'title') {
-      startGame(event);
+    if (button.id === 'time' && screen === 'title') {
+      startGame('time', event);
       return true;
     }
+    if (button.id === 'endless' && screen === 'title') {
+      startGame('endless', event);
+      return true;
+    }
+    // PLAY AGAIN replays whatever was just played rather than always the timed game.
     if (button.id === 'again' && screen === 'result') {
-      startGame(event);
+      startGame(game.mode, event);
+      return true;
+    }
+    if (button.id === 'menu') {
+      returnToMenu();
       return true;
     }
   }
@@ -302,6 +325,8 @@ function renderFrame(): void {
     pointerX,
     pointerY,
     heightText: formatMeters(countProgress >= 1 ? finalMeters : shownMeters),
+    heightNowText: formatMeters(getStackHeightMeters(game.displayedHeight)),
+    mode: game.mode,
     screen: getUiScreen(),
     secondsLeft: game.secondsLeft,
     timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup' ? 1 : game.timeUpProgress,

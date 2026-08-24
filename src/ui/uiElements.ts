@@ -9,6 +9,7 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
+  appendShapeCurveTo,
   appendShapeLineStyle,
   appendShapeLineTo,
   appendShapeMoveTo,
@@ -144,14 +145,14 @@ export function fitLabelToWidth(
  * Drawn as an OUTLINE — a line style and no fill — so it reads as line work of the same
  * weight as the ⛶ beside it rather than as a solid blob.
  *
- * WHY THE MARKS ARE UPRIGHT BARS. The shape rasterizer does no coverage blending, so nothing
- * here is antialiased, unlike the neighbouring glyphs, which arrive from the font atlas
- * already smoothed. An earlier version put curved arcs and a diagonal cross beside the
- * speaker, and at this size those are the worst thing you can ask an unantialiased
- * rasterizer for: every one of them is a staircase. A vertical edge lands on whole pixels at
- * any size and cannot alias at all, and two bars beside a speaker read as sound while a bar
- * across them reads as cut off. Multisampling the UI target was tried as a fix and is not
- * one — it left a black border around the frame and did nothing for the arcs.
+ * ANTIALIASING. There is none: the shape rasterizer does no coverage blending, and the
+ * canvas cannot be multisampled either, because the frame is composited with alpha and the
+ * resolve fringes it with a black border (see the note in sceneRenderer). So the curves and
+ * the cross below are the only marks in the UI that can show a staircase, and they are here
+ * on purpose after being drawn both ways: as a heavy filled icon with 1.5px arcs they were
+ * bad enough to be reported, and as flat-sided line work at the same weight they are clean.
+ * If they ever look stepped again, upright bars are the safe fallback — a vertical edge
+ * lands on whole pixels at any size — but they read as a level meter rather than as sound.
  *
  * Centred on the shape's own origin, so the caller places its middle.
  */
@@ -168,10 +169,14 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
     appendShapeMoveTo(shape, 8, -2);
     appendShapeLineTo(shape, 4.5, 2);
   } else {
+    // Two arcs of sound, as strokes. Curves are the one thing here that can show the
+    // rasterizer's lack of antialiasing, which is what put upright bars here for a while;
+    // at this weight and this size they came back clean, and they say "sound" in a way two
+    // bars never quite did.
     appendShapeMoveTo(shape, 4, -3);
-    appendShapeLineTo(shape, 4, 3);
-    appendShapeMoveTo(shape, 7.5, -5.5);
-    appendShapeLineTo(shape, 7.5, 5.5);
+    appendShapeCurveTo(shape, 6.4, 0, 4, 3);
+    appendShapeMoveTo(shape, 7, -5.5);
+    appendShapeCurveTo(shape, 10.2, 0, 7, 5.5);
   }
   invalidateNodeRender(shape);
 }

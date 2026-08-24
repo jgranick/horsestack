@@ -1,36 +1,20 @@
 import type {
-  Material,
-  StandardPbrMaterial,
   Node3D,
   Physics2DWorld,
   RigidBody2D,
-  Scene3D,
 } from '@flighthq/sdk';
 import {
   addNodeChild,
   clamp,
-  cloneMaterial,
-  cloneNode3DSubtree,
-  createMesh,
-  createNode3D,
-  createRingMeshGeometry,
-  createStandardPbrMaterial,
   createVector3,
   easeOutCubic,
   getCamera3DWorldToScreen,
-  getMaterialOfKind,
-  invalidateNodeLocalTransform,
-  Node3DKind,
-  StandardPbrMaterialKind,
   removeNodeChildren,
   removePhysics2DBody,
-  setNode3DAlpha,
-  setQuaternionFromEuler,
 } from '@flighthq/sdk';
 import { createGameUi2D } from './ui/gameUi';
 import type { UiScreen } from './ui/gameUi';
 import {
-  FARM_PROP_VARIANTS,
   getRandomFarmPropVariantIndex,
 } from './data/farmPropGeometry';
 import {
@@ -55,13 +39,6 @@ import type { StackObjectKind } from './physics/horseStackPhysics';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
-  HORSE_SCALE,
-  HORSE_VISUAL_CENTER_Y,
-  INDICATOR_DAMPING,
-  INDICATOR_MAX_ANGLE,
-  INDICATOR_MAX_SPIN,
-  INDICATOR_SPRING,
-  LANDING_PREVIEW_LIFT,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
@@ -71,10 +48,11 @@ import {
 } from './game/gameConfig';
 import { createAudioManager } from './audio/audioManager';
 import { createCameraRig } from './scene/cameraRig';
-import type { FarmPropTemplates } from './scene/modelLoader';
+import { createLandingIndicator } from './scene/landingIndicator';
 import { extractFarmPropTemplates, loadGltfScene, mountFarm } from './scene/modelLoader';
 import type { Windmill } from './scene/windmill';
 import { createWindmill } from './scene/windmill';
+import { createStackObjectVisuals } from './scene/stackObjectVisual';
 import { createParticleEffects } from './scene/particleEffects';
 import { createSceneRenderer } from './scene/sceneRenderer';
 import { createSceneGraph } from './scene/sceneGraph';
@@ -131,24 +109,8 @@ const scene = sceneGraph.root;
 const { camera, indicatorLight, previewLayer, stackLayer } = sceneGraph;
 const particles = createParticleEffects(scene);
 const cameraRig = createCameraRig();
-const landingGhostMaterial = createStandardPbrMaterial({
-  alphaMode: 'opaque',
-  baseColor: 0xe2b83fff,
-  doubleSided: true,
-  emissive: 0x8a5a0bff,
-  emissiveStrength: 0.7,
-  metallic: 0.18,
-  roughness: 0.38,
-});
-const landingHaloMaterial = createStandardPbrMaterial({
-  alphaMode: 'blend',
-  baseColor: 0xf5d36aff,
-  doubleSided: true,
-  emissive: 0xd49a22ff,
-  emissiveStrength: 1.15,
-  metallic: 0.1,
-  roughness: 0.42,
-});
+const visuals = createStackObjectVisuals();
+const indicator = createLandingIndicator(visuals, previewLayer, indicatorLight);
 
 let phase: GamePhase = 'loading';
 // Placement input is refused until this moment, measured on the INPUT clock
@@ -157,20 +119,13 @@ let phase: GamePhase = 'loading';
 // guard. Comparing input to input keeps the window honest whatever the frame costs.
 let placementArmedAt = 0;
 let swayClock = 0;
-let horseTemplate: Scene3D | null = null;
-let farmPropTemplates: FarmPropTemplates = {};
 // Bound once the farm mounts; null until then.
 let windmill: Windmill | null = null;
-let landingGhost: Node3D | null = null;
-let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
 let activeObject: ActiveStackObject | null = null;
 let stackedObjects: StackedObject[] = [];
 let objectsDropped = 0;
 let aimOffset = 0;
-let indicatorAngle = 0;
-let indicatorAngularVelocity = 0;
-let indicatorUpdatedAt = performance.now();
 let lastAimAt = performance.now();
 let nextObjectAt = 0;
 let gameEndsAt = 0;
@@ -178,7 +133,6 @@ let finishAt = 0;
 let finalHeight = 0;
 let cachedStackHeight = 0;
 // Top of the hovering drop preview, in physics Y. Only the dev framing probe reads it.
-let previewTopY = 0;
 let resultAnimationStart = 0;
 let resultAnimationDuration = 0;
 let resultHands = 0;
@@ -205,10 +159,9 @@ async function start(): Promise<void> {
       loadGltfScene(`${modelRoot}/horse`),
     ]);
 
-    farmPropTemplates = extractFarmPropTemplates(farm);
+    visuals.setTemplates(extractFarmPropTemplates(farm), horse);
     windmill = createWindmill(farm);
     mountFarm(farm, scene);
-    horseTemplate = horse;
     phase = 'ready';
     cameraRig.update(camera, 1, cachedStackHeight, objectsDropped);
     renderFrame();
@@ -219,118 +172,9 @@ async function start(): Promise<void> {
   }
 }
 
-function createStackObjectVisual(
-  kind: StackObjectKind,
-  variantIndex = 0,
-  materialOverride: ReturnType<typeof createStandardPbrMaterial> | null = null,
-  alpha = 1,
-): Node3D {
-  const pivot = createNode3D(Node3DKind);
-  pivot.alpha = alpha;
-  if (kind !== 'horse') {
-    const templates = farmPropTemplates[kind];
-    const template = templates?.[variantIndex] ?? templates?.[0];
-    if (template === undefined) throw new Error(`${STACK_OBJECT_PROFILES[kind].label} is not loaded`);
-    addNodeChild(pivot, cloneNode3DSubtree(template, materialOverride === null ? null : toPreviewMaterial));
-    return pivot;
-  }
-
-  if (horseTemplate === null) throw new Error('Horse model is not loaded');
-  const modelTransform = createNode3D(Node3DKind);
-  modelTransform.scale.x = HORSE_SCALE;
-  modelTransform.scale.y = HORSE_SCALE;
-  modelTransform.scale.z = HORSE_SCALE;
-  modelTransform.position.y = -HORSE_VISUAL_CENTER_Y;
-  setQuaternionFromEuler(modelTransform.rotation, 0, 0, 0);
-  invalidateNodeLocalTransform(modelTransform);
-  addNodeChild(
-    modelTransform,
-    cloneNode3DSubtree(horseTemplate.root, materialOverride === null ? null : toPreviewMaterial),
-  );
-  addNodeChild(pivot, modelTransform);
-  return pivot;
-}
-
-// How far the drop preview is pushed toward the gold "about to land" look. At 1 — which is
-// what it used to be, a single gold material replacing every material on the clone — the
-// preview is a featureless silhouette and you cannot tell a cow from a hay bale until it
-// lands. Blending instead keeps each material's own colour (and its texture, since baseColor
-// multiplies the map) while gilding and lighting it, so the piece stays readable.
-const PREVIEW_TINT_MIX = 0.42;
-// The glow is a SEPARATE, smaller fraction. Emissive does not just tint, it adds light on
-// top of whatever the sun and the marker's own point light are already putting on the
-// piece, so matching it to the tint blew pale materials out to white.
-const PREVIEW_GLOW_MIX = 0.22;
-// Derived materials are cached per source material: a clone is built for every preview, and
-// the same handful of source materials come round again every time.
-const previewMaterials = new WeakMap<Material, Material>();
-
-function mixChannel(from: number, to: number, shift: number, amount: number): number {
-  const a = (from >>> shift) & 0xff;
-  const b = (to >>> shift) & 0xff;
-  return Math.round(a + (b - a) * amount) << shift;
-}
-
-function mixRgba(from: number, to: number, amount: number): number {
-  return (
-    (mixChannel(from, to, 24, amount) |
-      mixChannel(from, to, 16, amount) |
-      mixChannel(from, to, 8, amount) |
-      (from & 0xff)) >>>
-    0
-  );
-}
-
-// The preview's version of one of an object's own materials: its colour pulled halfway to
-// the marker gold, lit by the marker's emissive at the same fraction.
-function toPreviewMaterial(source: Material | null): Material | null {
-  if (source === null) return landingGhostMaterial;
-  const cached = previewMaterials.get(source);
-  if (cached !== undefined) return cached;
-  const pbr = getMaterialOfKind<StandardPbrMaterial>(source, StandardPbrMaterialKind);
-  if (pbr === null) {
-    previewMaterials.set(source, landingGhostMaterial);
-    return landingGhostMaterial;
-  }
-  const blended = cloneMaterial(pbr) as StandardPbrMaterial;
-  blended.baseColor = mixRgba(pbr.baseColor, landingGhostMaterial.baseColor, PREVIEW_TINT_MIX);
-  // Mixed FROM the source's own emissive, not simply taken from the marker: most of these
-  // materials emit nothing, and handing them the marker's glow outright blew pale ones —
-  // a white Holstein especially — out to a featureless white, which is the very thing the
-  // blend exists to avoid.
-  blended.emissive = mixRgba(pbr.emissive, landingGhostMaterial.emissive, PREVIEW_GLOW_MIX);
-  blended.emissiveStrength =
-    pbr.emissiveStrength +
-    (landingGhostMaterial.emissiveStrength - pbr.emissiveStrength) * PREVIEW_GLOW_MIX;
-  blended.metallic = pbr.metallic + (landingGhostMaterial.metallic - pbr.metallic) * PREVIEW_TINT_MIX;
-  blended.roughness = pbr.roughness + (landingGhostMaterial.roughness - pbr.roughness) * PREVIEW_TINT_MIX;
-  // The preview is a lone floating object, so its back faces would otherwise show through.
-  blended.doubleSided = true;
-  previewMaterials.set(source, blended);
-  return blended;
-}
-
-function setLandingGhostKind(kind: StackObjectKind, variantIndex: number): void {
-  const ghost = landingGhost;
-  if (ghost === null) return;
-  removeNodeChildren(ghost);
-  addNodeChild(ghost, createStackObjectVisual(kind, variantIndex, landingGhostMaterial));
-  ghost.name = `${kind}-landing-preview`;
-}
-
-function createLandingRadiance(): Node3D {
-  const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
-  const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
-  halo.alpha = 0.24;
-  halo.position.x = 0.012;
-  setQuaternionFromEuler(halo.rotation, 0, 0, Math.PI / 2);
-  invalidateNodeLocalTransform(halo);
-  addNodeChild(root, halo);
-  return root;
-}
 
 function startGame(startedFrom?: Event): void {
-  if (horseTemplate === null || phase === 'loading') return;
+  if (!visuals.isReady() || phase === 'loading') return;
 
   const now = performance.now();
   // The credits only exist on the score screen now, so a panel left open there must not
@@ -343,9 +187,7 @@ function startGame(startedFrom?: Event): void {
   stackedObjects = [];
   objectsDropped = 0;
   aimOffset = 0;
-  indicatorAngle = 0;
-  indicatorAngularVelocity = 0;
-  indicatorUpdatedAt = now;
+  indicator.resetTeeter(now);
   lastAimAt = now;
   nextObjectAt = 0;
   gameEndsAt = now + GAME_DURATION_MS;
@@ -362,16 +204,7 @@ function startGame(startedFrom?: Event): void {
   removeNodeChildren(stackLayer);
   removeNodeChildren(previewLayer);
   addNodeChild(stackLayer, previewLayer);
-  landingGhost = createNode3D(Node3DKind, { name: 'landing-preview' });
-  // A solid silhouette keeps the small chicken readable and prevents the
-  // horse's back-facing surfaces from showing through the preview. The halo,
-  // beam, emissive material, and point light retain the golden placement cue.
-  landingGhost.alpha = 1;
-  landingGhost.name = 'landing-preview';
-  addNodeChild(previewLayer, landingGhost);
-  landingRadiance = createLandingRadiance();
-  addNodeChild(previewLayer, landingRadiance);
-  indicatorLight.intensity = 0;
+  indicator.beginRound();
   particles.reset();
 
   phase = 'playing';
@@ -384,9 +217,7 @@ function startGame(startedFrom?: Event): void {
 function spawnObject(now: number): void {
   if (phase !== 'playing' || now >= gameEndsAt) return;
 
-  indicatorAngle = 0;
-  indicatorAngularVelocity = 0;
-  indicatorUpdatedAt = now;
+  indicator.resetTeeter(now);
   lastAimAt = now;
   const kind = getRandomStackObjectKind();
   const variantIndex = kind === 'horse' ? 0 : getRandomFarmPropVariantIndex(kind);
@@ -396,12 +227,10 @@ function spawnObject(now: number): void {
     variantIndex,
     x: 0,
   };
-  setLandingGhostKind(kind, variantIndex);
-  if (landingGhost !== null) landingGhost.enabled = true;
-  if (landingRadiance !== null) landingRadiance.enabled = true;
+  indicator.setKind(kind, variantIndex);
   // Announced to screen readers only. The label alone: an emoji here is read aloud as its
   // own name before the word it duplicates.
-  statusCopy.textContent = getStackObjectVisualLabel(kind, variantIndex);
+  statusCopy.textContent = visuals.label(kind, variantIndex);
   updateActiveStackObject(now);
 }
 
@@ -409,11 +238,11 @@ function updateActiveStackObject(now: number): void {
   const current = activeObject;
   if (current === null) return;
 
-  updateIndicatorTeeter(now);
+  indicator.stepTeeter(now);
   const horizontalLimit = getAimHalfWidth();
   current.x = clamp(aimOffset, -horizontalLimit, horizontalLimit);
-  current.angle = indicatorAngle;
-  updateLandingGhost(current, now);
+  current.angle = indicator.angle();
+  indicator.update(current.kind, current.x, current.angle, getLandingSurfaceY(current.x, current.kind), now);
 }
 
 function commitObjectPlacement(now: number): void {
@@ -433,25 +262,18 @@ function commitObjectPlacement(now: number): void {
   body.velocityX = 0;
   body.velocityY = 0;
   body.angularVelocity = 0;
-  const node = createStackObjectVisual(current.kind, current.variantIndex);
-  setStackObjectVisualTransform(node, current.x, landingY, current.angle);
+  const node = visuals.create(current.kind, current.variantIndex);
+  visuals.setTransform(node, current.x, landingY, current.angle);
   addNodeChild(stackLayer, node);
   stackedObjects.push({ body, kind: current.kind, lost: false, node });
   activeObject = null;
   // The prompt has served its purpose once the player has placed something.
-  if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
-  indicatorLight.intensity = 0;
+  indicator.hide();
   objectsDropped++;
   audio.playStackThud();
 
   nextObjectAt = now + getNextObjectDelay(objectsDropped);
   renderRequested = true;
-}
-
-function getStackObjectVisualLabel(kind: StackObjectKind, variantIndex: number): string {
-  if (kind === 'horse') return STACK_OBJECT_PROFILES.horse.label;
-  return FARM_PROP_VARIANTS[kind][variantIndex]?.label ?? STACK_OBJECT_PROFILES[kind].label;
 }
 
 function updateGame(now: number): void {
@@ -475,9 +297,7 @@ function beginSettling(now: number): void {
   audio.beginResultCount();
   activeObject = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
-  if (landingGhost !== null) landingGhost.enabled = false;
-  if (landingRadiance !== null) landingRadiance.enabled = false;
-  indicatorLight.intensity = 0;
+  indicator.hide();
   renderRequested = true;
 }
 
@@ -616,7 +436,7 @@ function synchronizeStackVisuals(): void {
     const carried = clamp((body.y - PASTURE_TOP_Y) / 0.9, 0, 1);
     const sway = prefersReducedMotion() ? 0 : carried * carried;
     const phase = swayClock + body.index * 0.7;
-    setStackObjectVisualTransform(
+    visuals.setTransform(
       object.node,
       body.x + Math.sin(phase) * 0.0016 * sway,
       body.y,
@@ -627,52 +447,6 @@ function synchronizeStackVisuals(): void {
   // Fallen objects have already left the physics world and score calculation;
   // keep them out of every subsequent placement, height, and visual scan too.
   stackedObjects.length = retainedCount;
-}
-
-function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): void {
-  if (landingGhost === null) return;
-
-  const previewX = current.x;
-  const landingSurfaceY = getLandingSurfaceY(previewX, current.kind);
-
-  landingGhost.enabled = Math.abs(previewX) <= PASTURE_HALF_WIDTH;
-  if (!landingGhost.enabled) {
-    if (landingRadiance !== null) landingRadiance.enabled = false;
-    indicatorLight.intensity = 0;
-    return;
-  }
-  const landingY =
-    landingSurfaceY + getStackObjectVerticalExtent(current.kind, current.angle);
-  // The halo and its light ride up with the object so the ring surrounds whatever is
-  // about to drop, rather than marking the landing pose it will fall to.
-  const previewY = landingY + LANDING_PREVIEW_LIFT;
-  previewTopY = previewY + getStackObjectVerticalExtent(current.kind, current.angle);
-  setStackObjectVisualTransform(landingGhost, previewX, previewY, current.angle);
-  updateLandingRadiance(previewX, previewY, now);
-}
-
-function updateLandingRadiance(x: number, physicsY: number, now: number): void {
-  const radiance = landingRadiance;
-  if (radiance === null) return;
-  const pulse = prefersReducedMotion() ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
-  radiance.enabled = true;
-  setNode3DAlpha(radiance, 0.48 + Math.sin(now * 0.008) * 0.055);
-  radiance.position.x = STACK_X + 0.006;
-  radiance.position.y = STACK_BASE_Y + physicsY;
-  radiance.position.z = STACK_Z - x;
-  radiance.scale.x = pulse;
-  radiance.scale.y = pulse;
-  radiance.scale.z = pulse;
-  invalidateNodeLocalTransform(radiance);
-
-  indicatorLight.position.x = STACK_X + 0.1;
-  indicatorLight.position.y = STACK_BASE_Y + physicsY + 0.09;
-  indicatorLight.position.z = STACK_Z - x;
-  // Down from 0.8: a gold point light this close at that strength lit every preview the
-  // same gold no matter what its material said, which is why blending the material barely
-  // showed. The marker still reads — the halo ring and the tint carry it — and now the
-  // piece's own colour survives underneath.
-  indicatorLight.intensity = 0.34 + Math.sin(now * 0.008) * 0.07;
 }
 
 function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
@@ -696,38 +470,12 @@ function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
   return surfaceY;
 }
 
-function setStackObjectVisualTransform(node: Node3D, x: number, physicsY: number, angle: number): void {
-  node.position.x = STACK_X;
-  node.position.y = STACK_BASE_Y + physicsY;
-  node.position.z = STACK_Z - x;
-  setQuaternionFromEuler(node.rotation, angle, 0, 0);
-  invalidateNodeLocalTransform(node);
-}
-
 function getCurrentStackHeight(): number {
   measurementBodies.length = 0;
   for (const object of stackedObjects) {
     if (!object.lost) measurementBodies.push(object.body);
   }
   return getSupportedStackHeight(physicsWorld, measurementBodies);
-}
-
-function updateIndicatorTeeter(now: number): void {
-  const deltaTime = clamp((now - indicatorUpdatedAt) / 1000, 0, 0.05);
-  indicatorUpdatedAt = now;
-  if (deltaTime === 0) return;
-  const acceleration =
-    -indicatorAngle * INDICATOR_SPRING - indicatorAngularVelocity * INDICATOR_DAMPING;
-  indicatorAngularVelocity = clamp(
-    indicatorAngularVelocity + acceleration * deltaTime,
-    -INDICATOR_MAX_SPIN,
-    INDICATOR_MAX_SPIN,
-  );
-  indicatorAngle = clamp(
-    indicatorAngle + indicatorAngularVelocity * deltaTime,
-    -INDICATOR_MAX_ANGLE,
-    INDICATOR_MAX_ANGLE,
-  );
 }
 
 function bindGameControls(): void {
@@ -892,11 +640,7 @@ function setAimOffset(targetX: number, horizontalLimit: number, now: number): vo
   const nextAim = clamp(targetX, -horizontalLimit, horizontalLimit);
   const elapsed = clamp((now - lastAimAt) / 1000, 0.008, 0.08);
   const pointerVelocity = (nextAim - aimOffset) / elapsed;
-  indicatorAngularVelocity = clamp(
-    indicatorAngularVelocity - clamp(pointerVelocity * 0.32, -4.2, 4.2),
-    -INDICATOR_MAX_SPIN,
-    INDICATOR_MAX_SPIN,
-  );
+  indicator.nudge(pointerVelocity);
   aimOffset = nextAim;
   lastAimAt = now;
 }
@@ -1103,7 +847,7 @@ if (import.meta.env.DEV) {
         distance: cameraRig.controller.distance,
         followed: cameraRig.followedHeight(),
         measured: cachedStackHeight,
-        preview: ndcY(previewTopY),
+        preview: ndcY(indicator.previewTopY()),
         targetY: cameraRig.controller.target.y,
         top: ndcY(cachedStackHeight),
       };

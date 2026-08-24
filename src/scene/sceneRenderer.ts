@@ -103,7 +103,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
 
   const backdropBlurEffect: BlurEffect = createBlurEffect({ blurX: 0, blurY: 0 });
   const backdropVignetteEffect: VignetteEffect = createVignetteEffect({
-    color: 0x0d1622,
+    color: 0x0d1622ff,
     intensity: 0,
     radius: 0.5,
     softness: 0.85,

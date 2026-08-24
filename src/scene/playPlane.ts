@@ -15,9 +15,10 @@
 // stackObjectVisual.setTransform encodes:
 //     world = (STACK_X, STACK_BASE_Y + physicsY, STACK_Z - physicsX)
 // so the plane is the constant-X plane through the pile, and inverting that mapping gives the
-// physics coordinates back.
-import type { Camera3D, Vector3 } from '@flighthq/sdk';
-import { createVector3, getCamera3DScreenToWorldRay } from '@flighthq/sdk';
+// physics coordinates back. In the ax + by + cz + d = 0 form the SDK's plane primitives take,
+// that is normal (1, 0, 0) with d = -STACK_X.
+import { createPlane, createRay3D, getCamera3DScreenToWorldRay, getRay3DPointAt, createVector3, intersectRay3DPlane } from '@flighthq/sdk';
+import type { Camera3D } from '@flighthq/sdk';
 import { STACK_BASE_Y, STACK_X, STACK_Z } from '../game/gameConfig';
 
 export interface PlayPlanePoint {
@@ -26,14 +27,16 @@ export interface PlayPlanePoint {
 }
 
 // Reused across calls; this runs on every pointer move.
-const ray = { direction: createVector3(0, 0, 0) as Vector3, origin: createVector3(0, 0, 0) as Vector3 };
+const ray = createRay3D();
+const point = createVector3(0, 0, 0);
+const playPlane = createPlane(1, 0, 0, -STACK_X);
 
 /**
  * Writes the physics-plane coordinates under a normalized device point into `out`.
  *
  * `ndcX` and `ndcY` are -1..1 with +Y up, the convention getCamera3DScreenToWorldRay and
  * getCamera3DWorldToScreen both use. Returns false when the camera cannot produce a ray, or
- * when that ray runs parallel to the play plane and never meets it — neither happens in this
+ * when that ray never meets the play plane ahead of the camera — neither happens in this
  * game's framing, but a caller that ignored it would silently aim at stale coordinates.
  */
 export function unprojectToPlayPlane(
@@ -45,14 +48,12 @@ export function unprojectToPlayPlane(
 ): boolean {
   if (!getCamera3DScreenToWorldRay(ray, camera, ndcX, ndcY, aspect)) return false;
 
-  // The plane is x = STACK_X, so the ray parameter falls straight out of the X component.
-  // A near-zero denominator means the ray is running along the plane rather than into it.
-  const denominator = ray.direction.x;
-  if (Math.abs(denominator) < 1e-6) return false;
-  const t = (STACK_X - ray.origin.x) / denominator;
-  if (!Number.isFinite(t)) return false;
+  // -1 is the miss: the ray runs along the plane, or meets it behind the camera.
+  const t = intersectRay3DPlane(ray, playPlane);
+  if (t < 0) return false;
 
-  out.x = STACK_Z - (ray.origin.z + ray.direction.z * t);
-  out.y = ray.origin.y + ray.direction.y * t - STACK_BASE_Y;
+  getRay3DPointAt(point, ray, t);
+  out.x = STACK_Z - point.z;
+  out.y = point.y - STACK_BASE_Y;
   return true;
 }

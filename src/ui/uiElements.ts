@@ -9,6 +9,12 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
+  appendShapeCurveTo,
+  appendShapeEndFill,
+  appendShapeLineStyle,
+  appendShapeLineTo,
+  appendShapeMoveTo,
+  appendShapePolygon,
   appendShapeRoundRectangle,
   clearShapeCommands,
   computeTextFormatFontString,
@@ -128,4 +134,39 @@ export function fitLabelToWidth(
     setTextLabelHeight(node, fitted * 1.6);
   }
   return fitted;
+}
+
+/**
+ * The speaker icon on the mute control, drawn rather than typed.
+ *
+ * It was 🔊/🔇 to begin with. An emoji is not a glyph the page can colour: the font paints
+ * its own multi-colour bitmap, so it arrived blue-and-grey beside the flat near-white ⛶ and
+ * i of the controls either side of it, and no `color` on the label could touch it. Drawing
+ * the speaker keeps it one ink with its neighbours and scales with the pill instead of with
+ * whatever the platform's emoji metrics happen to be.
+ *
+ * Centred on the shape's own origin, so the caller places its middle.
+ */
+export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: boolean): void {
+  clearShapeCommands(shape);
+  appendShapeBeginFill(shape, colour, alpha);
+  // Body and cone as one outline: back of the box, along the top of the cone, down its
+  // face, and back. Wound clockwise in the 2D frame, where +y is down.
+  appendShapePolygon(shape, [-5.5, -2.5, -2.5, -2.5, 1.5, -6.5, 1.5, 6.5, -2.5, 2.5, -5.5, 2.5]);
+  appendShapeEndFill(shape);
+
+  // Two arcs for sound, one bar for silence. Drawn as strokes so they stay legible at 30px
+  // where a filled crescent would close up into a blob.
+  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round');
+  if (muted) {
+    appendShapeMoveTo(shape, 4, -4.5);
+    appendShapeLineTo(shape, 9, 4.5);
+    appendShapeMoveTo(shape, 9, -4.5);
+    appendShapeLineTo(shape, 4, 4.5);
+    return;
+  }
+  appendShapeMoveTo(shape, 4, -3);
+  appendShapeCurveTo(shape, 6.2, 0, 4, 3);
+  appendShapeMoveTo(shape, 6.5, -5.5);
+  appendShapeCurveTo(shape, 9.8, 0, 6.5, 5.5);
 }

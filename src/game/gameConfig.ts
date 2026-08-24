@@ -60,6 +60,10 @@ export const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 1.2;
 export const CAMERA_PILE_FILL = 0.8;
 export const CAMERA_PILE_FILL_AT_HEIGHT = 0.56;
 export const CAMERA_TOP_BIAS = 0.16;
+// Sky reserved above the pile while it is short, in world units — see the note in
+// cameraRig.update. One horse height; the frame has about that much wasted grass below the
+// pasture to spend on it, so the pasture stays in shot.
+export const CAMERA_EARLY_HEADROOM = HORSE_HALF_HEIGHT * 2;
 export const CAMERA_MIN_DISTANCE = 1.05;
 // High enough that the fit is never the thing that binds in real play. It used to be
 // 3.25, which the fit reached at a 12m pile — from there the camera stopped backing off

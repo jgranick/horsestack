@@ -30,6 +30,7 @@ import {
 import { createUiRenderer } from './uiRenderer';
 import {
   fill,
+  drawSpeaker,
   fitLabelToWidth,
   GOLD,
   INK,
@@ -210,7 +211,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const fullscreenPill = createShape();
   const fullscreenText = label('⛶', 15, INK, SANS);
   const mutePill = createShape();
-  const muteText = label('🔊', 14, INK, SANS);
+  const muteIcon = createShape();
 
   for (const node of [
     titleText, timePill, timeText, steadyPill, steadyText, timeBlurb, steadyBlurb,
@@ -221,7 +222,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
-    mutePill, muteText,
+    mutePill, muteIcon,
     menuFromResultPill, menuFromResultText,
   ]) {
     addNodeChild(root, node);
@@ -257,6 +258,31 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     setTextLabelWidth(text, w);
     place(text, x, y + sink + (h - (text.data.textFormat.size ?? 12) * 1.35) / 2);
     buttons.push({ height: h, id, width: w, x, y });
+  }
+
+  /**
+   * A round control whose face is a drawn icon rather than a glyph. Same hover swell and
+   * press sink as `pill`, so the two sit together without looking like different widgets;
+   * the only difference is that the icon is centred on the pill's middle, because a shape
+   * has no baseline to bias against the way a text label does.
+   */
+  function iconPill(
+    shape: Shape, icon: Shape, id: UiButton['id'], x: number, y: number, size: number,
+    colour: number, alpha: number, draw: (target: Shape, ink: number, inkAlpha: number) => void,
+  ): void {
+    const hovered = hovering(x, y, size, size);
+    if (hovered) hoveringAnything = true;
+    const pressed = hovered && pointer.down;
+    const grow = pressed ? -1.5 : hovered ? 2.5 : 0;
+    const sink = pressed ? 1.5 : 0;
+    fill(
+      shape, colour, Math.min(1, alpha + (hovered ? 0.14 : 0)),
+      -grow, -grow, size + grow * 2, size + grow * 2, (size + grow * 2) / 2,
+    );
+    place(shape, x, y + sink);
+    draw(icon, INK, 1);
+    place(icon, x + size / 2, y + sink + size / 2);
+    buttons.push({ height: size, id, width: size, x, y });
   }
 
   function update(model: UiModel): boolean {
@@ -562,8 +588,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1dff, 0.42);
     // Beside fullscreen, and on every screen: the moment you want to mute is whenever the
     // sound is bothering you, which is not a moment the game gets to choose.
-    setText(muteText, model.muted ? '🔇' : '🔊');
-    pill(mutePill, muteText, 'mute', width - 92, height - 54, 30, 30, 0x1f2d1dff, 0.42);
+    iconPill(
+      mutePill, muteIcon, 'mute', width - 92, height - 54, 30, 0x1f2d1dff, 0.42,
+      (target, ink, inkAlpha) => drawSpeaker(target, ink, inkAlpha, model.muted),
+    );
 
     const creditsShowing = onResult && model.creditsOpen;
     show(creditsBody, creditsShowing);

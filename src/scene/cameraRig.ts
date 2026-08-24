@@ -17,6 +17,7 @@ import {
   CAMERA_HEIGHT_COLLAPSE_RATE,
   CAMERA_HEIGHT_DEADBAND,
   CAMERA_HEIGHT_FALL_RATE,
+  CAMERA_EARLY_HEADROOM,
   CAMERA_HEIGHT_RISE_RATE,
   CAMERA_MAX_DISTANCE,
   CAMERA_MIN_DISTANCE,
@@ -106,7 +107,22 @@ export function createCameraRig(): CameraRig {
         camera.projection.kind === 'perspective' ? Math.tan(camera.projection.fovY / 2) : 1;
       const visibleHalfHeight = controller.distance * tanHalfFov;
       const pileBottomY = STACK_BASE_Y + PASTURE_TOP_Y;
-      const pileTopY = STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
+      // Room to work ABOVE the pile, which the framing has to reserve deliberately now that
+      // a piece can be held anywhere rather than dropped from the top. Framing the pile
+      // alone, an empty pasture filled CAMERA_PILE_FILL of the frame with one horse height,
+      // leaving about 1.4 horse heights of sky over it — and a piece has to be lifted clear
+      // of everything already placed before it can be set down, so the early game was the
+      // stage with both the least headroom and the most need for it.
+      //
+      // Reserved as extra SPAN rather than by pulling the camera back, because at these
+      // heights the distance is pinned to CAMERA_MIN_DISTANCE anyway and backing off further
+      // would frame the pasture from halfway across the valley. Growing the span raises the
+      // midpoint the camera centres on, which spends the wasted grass under the pasture on
+      // sky instead. It eases off as the pile grows, where the pile's own height has already
+      // opened the frame up.
+      const headroom = CAMERA_EARLY_HEADROOM * (1 - rise);
+      const pileTopY =
+        STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2) + headroom;
       const pileSpan = Math.max(pileTopY - pileBottomY, 0.0001);
       const desiredTargetY = (pileBottomY + pileTopY) / 2 + CAMERA_TOP_BIAS * visibleHalfHeight;
       const moved = Math.abs(desiredTargetY - controller.target.y) > 0.001;

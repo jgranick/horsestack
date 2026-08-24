@@ -9,7 +9,6 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
-  appendShapeCircle,
   appendShapeRoundRectangle,
   clearShapeCommands,
   computeTextFormatFontString,
@@ -63,20 +62,6 @@ export function show(node: DisplayObject, visible: boolean): void {
 export function setText(node: TextLabel, text: string): void {
   if (node.data.text === text) return;
   setTextLabelString(node, text);
-}
-
-/**
- * A filled circle of `radius`, centred on the shape's own origin.
- *
- * Not `fill` with a corner radius of half the side: at small sizes a
- * 9px rounded rect still reads as a square with the corners taken off. The rasterizer wants
- * an actual circle to draw one.
- */
-export function fillCircle(shape: Shape, colour: number, alpha: number, radius: number): void {
-  clearShapeCommands(shape);
-  appendShapeBeginFill(shape, colour, alpha);
-  appendShapeCircle(shape, 0, 0, radius);
-  invalidateNodeRender(shape);
 }
 
 export function fill(

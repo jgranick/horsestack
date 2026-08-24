@@ -1,9 +1,6 @@
 import type {
   Material,
   StandardPbrMaterial,
-  ImportDiagnostic,
-  Mesh,
-  MeshGeometry,
   Node3D,
   Physics2DWorld,
   RigidBody2D,
@@ -12,45 +9,30 @@ import type {
 import {
   addNodeChild,
   clamp,
-  cloneMeshGeometry,
   cloneMaterial,
-  cloneMesh,
   cloneNode3DSubtree,
-  compactMeshGeometryVertices,
   createMesh,
   createNode3D,
   createRingMeshGeometry,
   createStandardPbrMaterial,
   createVector3,
   easeOutCubic,
-  findNodeByName,
   getCamera3DWorldToScreen,
   getMaterialOfKind,
-  getNodeLocalMatrix4,
   invalidateNodeLocalTransform,
-  isMesh,
-  isNodeLocalMatrix4Detached,
   Node3DKind,
   StandardPbrMaterialKind,
-  refreshMeshGeometryBounds,
   removeNodeChildren,
   removePhysics2DBody,
   setNode3DAlpha,
-  setMeshGeometrySubsets,
-  setNodeLocalMatrix4,
-  setNodeTransform3D,
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
-import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { createGameUi2D } from './ui/gameUi';
 import type { UiScreen } from './ui/gameUi';
 import {
-  FARM_PROP_SCENE_SCALE,
   FARM_PROP_VARIANTS,
   getRandomFarmPropVariantIndex,
-  selectFarmPropTriangleIndices,
 } from './data/farmPropGeometry';
-import type { FarmPropPartSpec, FarmPropTriangleFilter } from './data/farmPropGeometry';
 import {
   addStackObjectBody,
   createHorseStackWorld,
@@ -86,10 +68,13 @@ import {
   STACK_X,
   STACK_Z,
   START_INPUT_GUARD_MS,
-  WINDMILL_RADIANS_PER_SECOND,
 } from './game/gameConfig';
 import { createAudioManager } from './audio/audioManager';
 import { createCameraRig } from './scene/cameraRig';
+import type { FarmPropTemplates } from './scene/modelLoader';
+import { extractFarmPropTemplates, loadGltfScene, mountFarm } from './scene/modelLoader';
+import type { Windmill } from './scene/windmill';
+import { createWindmill } from './scene/windmill';
 import { createParticleEffects } from './scene/particleEffects';
 import { createSceneRenderer } from './scene/sceneRenderer';
 import { createSceneGraph } from './scene/sceneGraph';
@@ -173,13 +158,9 @@ let phase: GamePhase = 'loading';
 let placementArmedAt = 0;
 let swayClock = 0;
 let horseTemplate: Scene3D | null = null;
-const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
-// The farm's sail assembly, spun in place each frame. Null until the farm mounts.
-let windmillSails: Node3D | null = null;
-// Centre of the sail disc in the mesh's own space, on the Y/Z axes it turns within.
-let windmillHubY = 0;
-let windmillHubZ = 0;
-let windmillAngle = 0;
+let farmPropTemplates: FarmPropTemplates = {};
+// Bound once the farm mounts; null until then.
+let windmill: Windmill | null = null;
 let landingGhost: Node3D | null = null;
 let landingRadiance: Node3D | null = null;
 let physicsWorld: Physics2DWorld = createHorseStackWorld();
@@ -224,9 +205,9 @@ async function start(): Promise<void> {
       loadGltfScene(`${modelRoot}/horse`),
     ]);
 
-    extractFarmPropTemplates(farm);
-    bindWindmillSails(farm);
-    mountFarm(farm);
+    farmPropTemplates = extractFarmPropTemplates(farm);
+    windmill = createWindmill(farm);
+    mountFarm(farm, scene);
     horseTemplate = horse;
     phase = 'ready';
     cameraRig.update(camera, 1, cachedStackHeight, objectsDropped);
@@ -236,60 +217,6 @@ async function start(): Promise<void> {
   } catch (error) {
     showSceneError('Unable to load Horse Stacker.', error);
   }
-}
-
-// The farm is flattened by material, and the sails are their own layer: Object_6 holds
-// the whole rotor, Object_18 the tower it sits on. In the source's Z-up space the rotor's
-// Y and Z extents match (a disc), and X is the shaft it turns about — so it spins around
-// mesh-space X, centred on the disc's Y/Z midpoint. Rotating about a point off the node
-// origin needs no reparenting: for a rotation R about an axis through `hub`, the plain
-// TRS position that reproduces it is hub - R*hub, and the shaft-axis component cancels.
-function bindWindmillSails(farm: Readonly<Scene3D>): void {
-  const sails = findNodeByName(farm.root, 'Object_6');
-  if (sails === null || !isMesh(sails)) {
-    throw new Error('Windmill sail mesh Object_6 was not imported');
-  }
-  const materialName = sails.materials[0]?.name;
-  if (materialName !== 'Windmill2') {
-    throw new Error(
-      `Windmill sail mesh Object_6 uses ${materialName ?? 'no material'}, expected Windmill2`,
-    );
-  }
-  refreshMeshGeometryBounds(sails.geometry);
-  const bounds = sails.geometry.bounds;
-  if (bounds === null) throw new Error('Windmill sail mesh has no bounds');
-  windmillHubY = (bounds.min.y + bounds.max.y) / 2;
-  windmillHubZ = (bounds.min.z + bounds.max.z) / 2;
-  windmillSails = sails;
-  windmillAngle = 0;
-  updateWindmill(0);
-}
-
-function updateWindmill(deltaTime: number): boolean {
-  const sails = windmillSails;
-  if (sails === null || prefersReducedMotion()) return false;
-  windmillAngle = (windmillAngle + WINDMILL_RADIANS_PER_SECOND * deltaTime) % (Math.PI * 2);
-  const sin = Math.sin(windmillAngle);
-  const cos = Math.cos(windmillAngle);
-  setQuaternionFromEuler(sails.rotation, windmillAngle, 0, 0);
-  sails.position.y = windmillHubY - (windmillHubY * cos - windmillHubZ * sin);
-  sails.position.z = windmillHubZ - (windmillHubY * sin + windmillHubZ * cos);
-  invalidateNodeLocalTransform(sails);
-  return true;
-}
-
-function mountFarm(model: Scene3D): void {
-  const wrapper = createNode3D(Node3DKind);
-  const scale = FARM_PROP_SCENE_SCALE;
-  wrapper.scale.x = scale;
-  wrapper.scale.y = scale;
-  wrapper.scale.z = scale;
-  wrapper.position.x = 0.5;
-  wrapper.position.y = -0.043;
-  wrapper.position.z = -2.2;
-  invalidateNodeLocalTransform(wrapper);
-  addNodeChild(wrapper, model.root);
-  addNodeChild(scene, wrapper);
 }
 
 function createStackObjectVisual(
@@ -391,91 +318,6 @@ function setLandingGhostKind(kind: StackObjectKind, variantIndex: number): void 
   ghost.name = `${kind}-landing-preview`;
 }
 
-function extractFarmPropTemplates(farm: Readonly<Scene3D>): void {
-  for (const kind of ['hay', 'cow', 'chickens'] as const) {
-    const templates: Node3D[] = [];
-    for (let variantIndex = 0; variantIndex < FARM_PROP_VARIANTS[kind].length; variantIndex += 1) {
-      const spec = FARM_PROP_VARIANTS[kind][variantIndex];
-      if (spec === undefined) continue;
-      const template = createNode3D(Node3DKind, { name: `${kind}-${variantIndex}-template` });
-      const scaleRoot = createNode3D(Node3DKind);
-      const scale = FARM_PROP_SCENE_SCALE * (spec.scaleMultiplier ?? 1);
-      scaleRoot.scale.x = scale;
-      scaleRoot.scale.y = scale;
-      scaleRoot.scale.z = scale;
-      invalidateNodeLocalTransform(scaleRoot);
-
-      const axisRoot = createNode3D(Node3DKind);
-      setNodeTransform3D(axisRoot, farm.root);
-      if (isNodeLocalMatrix4Detached(farm.root)) {
-        setNodeLocalMatrix4(axisRoot, getNodeLocalMatrix4(farm.root));
-      }
-
-      const centeredSource = createNode3D(Node3DKind);
-      centeredSource.position.x = -spec.centerX;
-      centeredSource.position.y = -spec.centerY;
-      centeredSource.position.z = -spec.centerZ;
-      invalidateNodeLocalTransform(centeredSource);
-      for (const part of spec.parts) {
-        const source = findNodeByName(farm.root, part.nodeName);
-        if (source === null || !isMesh(source)) {
-          throw new Error(`Farm prop mesh ${part.nodeName} was not imported`);
-        }
-        const materialName = source.materials[0]?.name;
-        if (materialName !== part.materialName) {
-          throw new Error(
-            `Farm prop mesh ${part.nodeName} uses ${materialName ?? 'no material'}, expected ${part.materialName}`,
-          );
-        }
-        addNodeChild(centeredSource, cloneFarmPropPart(source, part));
-      }
-      const orientationRoot = createNode3D(Node3DKind);
-      setQuaternionFromEuler(orientationRoot.rotation, 0, 0, spec.rotationZ ?? 0);
-      invalidateNodeLocalTransform(orientationRoot);
-      addNodeChild(orientationRoot, centeredSource);
-      addNodeChild(axisRoot, orientationRoot);
-      addNodeChild(scaleRoot, axisRoot);
-      addNodeChild(template, scaleRoot);
-      templates.push(template);
-    }
-    farmPropTemplates[kind] = templates;
-  }
-}
-
-function cloneFarmPropPart(source: Readonly<Mesh>, part: Readonly<FarmPropPartSpec>): Mesh {
-  const clone = cloneMesh(source);
-  if (part.filter !== undefined) {
-    clone.geometry = filterFarmPropGeometry(source.geometry, part.filter, part.nodeName);
-  }
-  return clone;
-}
-
-function filterFarmPropGeometry(
-  source: Readonly<MeshGeometry>,
-  filter: Readonly<FarmPropTriangleFilter>,
-  nodeName: string,
-): MeshGeometry {
-  if (source.topology !== 'triangle-list' || source.indices === null) {
-    throw new Error(`Farm prop mesh ${nodeName} is not an indexed triangle list`);
-  }
-
-  const selectedIndices = selectFarmPropTriangleIndices(source, filter);
-
-  if (selectedIndices.length === 0) {
-    throw new Error(`Farm prop mesh ${nodeName} produced no selected triangles`);
-  }
-
-  const filtered = cloneMeshGeometry(source);
-  filtered.indices =
-    source.indices instanceof Uint32Array
-      ? new Uint32Array(selectedIndices)
-      : new Uint16Array(selectedIndices);
-  setMeshGeometrySubsets(filtered, [{ indexCount: selectedIndices.length, indexOffset: 0 }]);
-  const compact = compactMeshGeometryVertices(filtered);
-  refreshMeshGeometryBounds(compact);
-  return compact;
-}
-
 function createLandingRadiance(): Node3D {
   const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
   const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
@@ -485,30 +327,6 @@ function createLandingRadiance(): Node3D {
   invalidateNodeLocalTransform(halo);
   addNodeChild(root, halo);
   return root;
-}
-
-async function loadGltfScene(basePath: string): Promise<Scene3D> {
-  const [documentResponse, bufferResponse] = await Promise.all([
-    fetch(`${basePath}/scene.gltf`),
-    fetch(`${basePath}/scene.bin`),
-  ]);
-
-  if (!documentResponse.ok || !bufferResponse.ok) {
-    throw new Error(`Model download failed for ${basePath}`);
-  }
-
-  const diagnostics: ImportDiagnostic[] = [];
-  const document = await documentResponse.text();
-  const buffer = new Uint8Array(await bufferResponse.arrayBuffer());
-  const imported = createScene3DFromGltf(document, diagnostics, {
-    basePath: `${basePath}/`,
-    externalBuffers: { 'scene.bin': buffer },
-  });
-
-  if (diagnostics.length > 0) {
-    console.info(`Flight imported ${basePath} with diagnostics:`, diagnostics);
-  }
-  return imported;
 }
 
 function startGame(startedFrom?: Event): void {
@@ -1181,7 +999,7 @@ function enterFrame(now: number): void {
       updateResultAnimation(now);
     }
 
-    if (updateWindmill(deltaTime)) renderRequested = true;
+    if (windmill?.update(deltaTime) === true) renderRequested = true;
 
     const screen = getUiScreen();
     const wantsBackdrop = screen === 'title' || screen === 'result' ? 1 : 0;

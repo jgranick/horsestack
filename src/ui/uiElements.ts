@@ -9,12 +9,9 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
-  appendShapeCurveTo,
   appendShapeEndFill,
-  appendShapeLineStyle,
-  appendShapeLineTo,
-  appendShapeMoveTo,
   appendShapePolygon,
+  appendShapeRectangle,
   appendShapeRoundRectangle,
   clearShapeCommands,
   computeTextFormatFontString,
@@ -139,11 +136,22 @@ export function fitLabelToWidth(
 /**
  * The speaker icon on the mute control, drawn rather than typed.
  *
- * It was 🔊/🔇 to begin with. An emoji is not a glyph the page can colour: the font paints
- * its own multi-colour bitmap, so it arrived blue-and-grey beside the flat near-white ⛶ and
- * i of the controls either side of it, and no `color` on the label could touch it. Drawing
- * the speaker keeps it one ink with its neighbours and scales with the pill instead of with
- * whatever the platform's emoji metrics happen to be.
+ * It was an emoji to begin with. An emoji is not a glyph the page can colour: the font
+ * paints its own multi-colour bitmap, so it arrived blue-and-grey beside the flat near-white
+ * marks of the controls either side of it, and no `color` on the label could touch it.
+ *
+ * WHY IT IS ALL RECTANGLES AND ONE FLAT-SIDED CONE. The shape rasterizer does no coverage
+ * blending, so nothing here gets antialiased — unlike the neighbouring glyphs, which come
+ * from the font atlas already smoothed, which is why they look fine and this did not. The
+ * first version put curved arcs and a diagonal cross beside the speaker in 1.5px strokes,
+ * and at this size those are the worst thing you can ask an unantialiased rasterizer for:
+ * every one of them is a staircase. Multisampling the UI target was tried as a fix and is
+ * not one — it left a black border around the frame and did nothing for the arcs.
+ *
+ * So the marks that carry the state are upright bars. A vertical edge lands on whole pixels
+ * at any size and cannot alias at all, and two bars beside a speaker read as sound while a
+ * bar across them reads as cut off. The cone keeps two diagonals because a speaker without
+ * them is a box, and at this size two short ones are a fair price.
  *
  * Centred on the shape's own origin, so the caller places its middle.
  */
@@ -152,21 +160,13 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
   appendShapeBeginFill(shape, colour, alpha);
   // Body and cone as one outline: back of the box, along the top of the cone, down its
   // face, and back. Wound clockwise in the 2D frame, where +y is down.
-  appendShapePolygon(shape, [-5.5, -2.5, -2.5, -2.5, 1.5, -6.5, 1.5, 6.5, -2.5, 2.5, -5.5, 2.5]);
-  appendShapeEndFill(shape);
-
-  // Two arcs for sound, one bar for silence. Drawn as strokes so they stay legible at 30px
-  // where a filled crescent would close up into a blob.
-  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round');
+  appendShapePolygon(shape, [-6, -2.5, -3, -2.5, 1, -6.5, 1, 6.5, -3, 2.5, -6, 2.5]);
   if (muted) {
-    appendShapeMoveTo(shape, 4, -4.5);
-    appendShapeLineTo(shape, 9, 4.5);
-    appendShapeMoveTo(shape, 9, -4.5);
-    appendShapeLineTo(shape, 4, 4.5);
-    return;
+    // One bar straight across where the sound would be.
+    appendShapeRectangle(shape, 3, -0.75, 5.5, 1.5);
+  } else {
+    appendShapeRectangle(shape, 3, -3, 1.5, 6);
+    appendShapeRectangle(shape, 6.5, -5.5, 1.5, 11);
   }
-  appendShapeMoveTo(shape, 4, -3);
-  appendShapeCurveTo(shape, 6.2, 0, 4, 3);
-  appendShapeMoveTo(shape, 6.5, -5.5);
-  appendShapeCurveTo(shape, 9.8, 0, 6.5, 5.5);
+  appendShapeEndFill(shape);
 }

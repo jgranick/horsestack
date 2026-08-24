@@ -90,13 +90,6 @@ export function createUiRenderer(screenState: GlRenderState, pixelRatio: number)
         width: Math.round(width * nextPixelRatio),
         height: Math.round(height * nextPixelRatio),
         depth: 'none',
-        // Every edge in the UI that is not axis-aligned is drawn by the shape rasterizer
-        // with no coverage blending of its own, so the speaker icon's cone and arcs — and
-        // the corner of every pill — came out stepped. The canvas itself is created with
-        // antialias:false because the 3D pipeline does its own, so this target is the only
-        // place the 2D layer can ask for it. endGlRenderPass resolves the samples before
-        // presentGlRenderTarget ever reads the texture.
-        sampleCount: 4,
       });
     },
 

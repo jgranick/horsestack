@@ -15,21 +15,25 @@
 //   fastest@2s    speed of the quickest body two seconds in, against the world's
 //                 sleepLinearThreshold; one body over it keeps its whole island awake
 import type { RigidBody2D } from '@flighthq/sdk';
+import { PASTURE_TOP_Y } from '../src/physics/pasture';
 import {
-  addStackObjectBody,
-  createHorseStackWorld,
   getNextObjectDelay,
   getRandomStackObjectKind,
+} from '../src/physics/stackObjectKind';
+import type { StackObjectKind } from '../src/physics/stackObjectKind';
+import {
+  STACK_OBJECT_PROFILES,
   getStackBodyHalfWidth,
   getStackBodySupportExtent,
   getStackObjectVerticalExtent,
-  getSupportedStackHeight,
-  PASTURE_TOP_Y,
+} from '../src/physics/stackObjectProfile';
+import {
   PHYSICS_STEP,
-  STACK_OBJECT_PROFILES,
+  addStackObjectBody,
+  createHorseStackWorld,
+  getSupportedStackHeight,
   stepHorseStack,
-} from '../src/physics/horseStackPhysics';
-import type { StackObjectKind } from '../src/physics/horseStackPhysics';
+} from '../src/physics/stackPhysics';
 
 type World = ReturnType<typeof createHorseStackWorld>;
 interface Variant {

@@ -6,13 +6,13 @@
 // feeding the raw measurement to the camera made it shudder. Kept as a module-private let
 // behind createCameraRig, that separation is structural rather than a convention someone has
 // to remember.
-import type { Camera3D, OrbitCameraController } from '@flighthq/sdk';
 import {
   clamp,
   createOrbitCameraController,
   createVector3,
   updateOrbitCameraController,
 } from '@flighthq/sdk';
+import type { Camera3D, OrbitCameraController } from '@flighthq/sdk';
 import {
   CAMERA_HEIGHT_COLLAPSE_RATE,
   CAMERA_HEIGHT_DEADBAND,
@@ -27,7 +27,8 @@ import {
   STACK_X,
   STACK_Z,
 } from '../game/gameConfig';
-import { HORSE_HALF_HEIGHT, PASTURE_TOP_Y } from '../physics/horseStackPhysics';
+import { PASTURE_TOP_Y } from '../physics/pasture';
+import { HORSE_HALF_HEIGHT } from '../physics/stackObjectProfile';
 
 export interface CameraRig {
   controller: OrbitCameraController;

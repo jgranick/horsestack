@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { ImportDiagnostic, Mesh, Node3D } from '@flighthq/sdk';
 import { getNodeChildren } from '@flighthq/sdk/core';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
@@ -10,7 +8,9 @@ import {
   getRandomFarmPropVariantIndex,
   selectFarmPropTriangleIndices,
 } from '../src/data/farmPropGeometry';
-import { STACK_OBJECT_PROFILES } from '../src/physics/horseStackPhysics';
+import { STACK_OBJECT_PROFILES } from '../src/physics/stackObjectProfile';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const models = [
   {

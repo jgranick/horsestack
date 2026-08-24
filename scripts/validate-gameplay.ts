@@ -1,31 +1,37 @@
 import type { RigidBody2D } from '@flighthq/sdk';
 import {
-  addStackObjectBody,
-  createHorseStackWorld,
-  FINAL_SETTLE_SECONDS,
+  PASTURE_HALF_WIDTH,
+  PASTURE_TOP_Y,
+} from '../src/physics/pasture';
+import {
+  STACK_OBJECT_KINDS,
+  STACK_OBJECT_WEIGHTS,
   getNextObjectDelay,
   getRandomStackObjectKind,
+} from '../src/physics/stackObjectKind';
+import type { StackObjectKind } from '../src/physics/stackObjectKind';
+import {
+  HORSE_HALF_HEIGHT,
+  HORSE_SIZE_MULTIPLIER,
+  HORSE_WITHERS_HEIGHT,
+  STACK_OBJECT_PROFILES,
+  TYPICAL_HORSE_WITHERS_METERS,
   getStackBodyHalfWidth,
   getStackBodySupportExtent,
   getStackHeightHands,
   getStackHeightMeters,
   getStackObjectSupportExtent,
   getStackObjectVerticalExtent,
-  getSupportedStackHeight,
-  HORSE_HALF_HEIGHT,
-  HORSE_SIZE_MULTIPLIER,
-  HORSE_WITHERS_HEIGHT,
-  isStackBodyWithinPasture,
-  PASTURE_HALF_WIDTH,
-  PASTURE_TOP_Y,
+} from '../src/physics/stackObjectProfile';
+import {
+  FINAL_SETTLE_SECONDS,
   PHYSICS_STEP,
-  STACK_OBJECT_KINDS,
-  STACK_OBJECT_PROFILES,
-  STACK_OBJECT_WEIGHTS,
+  addStackObjectBody,
+  createHorseStackWorld,
+  getSupportedStackHeight,
+  isStackBodyWithinPasture,
   stepHorseStack,
-  TYPICAL_HORSE_WITHERS_METERS,
-} from '../src/physics/horseStackPhysics';
-import type { StackObjectKind } from '../src/physics/horseStackPhysics';
+} from '../src/physics/stackPhysics';
 
 interface ScenarioResult {
   contacts: number;

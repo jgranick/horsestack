@@ -11,7 +11,6 @@
 // The spring is the part most worth having behind a boundary: aiming kicks its angular
 // velocity, the frame advances it, and a new piece zeroes it, so its three numbers were
 // written from three different places and read from a fourth.
-import type { Material, Node3D, PointLight, StandardPbrMaterial } from '@flighthq/sdk';
 import {
   addNodeChild,
   clamp,
@@ -28,6 +27,7 @@ import {
   setQuaternionFromEuler,
   StandardPbrMaterialKind,
 } from '@flighthq/sdk';
+import type { Material, Node3D, PointLight, StandardPbrMaterial } from '@flighthq/sdk';
 import {
   INDICATOR_DAMPING,
   INDICATOR_MAX_ANGLE,
@@ -38,8 +38,9 @@ import {
   STACK_X,
   STACK_Z,
 } from '../game/gameConfig';
-import type { StackObjectKind } from '../physics/horseStackPhysics';
-import { getStackObjectVerticalExtent, PASTURE_HALF_WIDTH } from '../physics/horseStackPhysics';
+import { PASTURE_HALF_WIDTH } from '../physics/pasture';
+import type { StackObjectKind } from '../physics/stackObjectKind';
+import { getStackObjectVerticalExtent } from '../physics/stackObjectProfile';
 import { prefersReducedMotion } from '../reducedMotion';
 import type { StackObjectVisuals } from './stackObjectVisual';
 

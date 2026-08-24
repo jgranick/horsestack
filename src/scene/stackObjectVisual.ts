@@ -10,7 +10,6 @@
 //
 // The templates arrive from the network, so they are set after construction rather than
 // passed in. isReady() is what the game asks instead of reaching for a template itself.
-import type { Material, Node3D, Scene3D } from '@flighthq/sdk';
 import {
   addNodeChild,
   cloneNode3DSubtree,
@@ -19,6 +18,7 @@ import {
   Node3DKind,
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
+import type { Material, Node3D, Scene3D } from '@flighthq/sdk';
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {
   HORSE_SCALE,
@@ -27,8 +27,8 @@ import {
   STACK_X,
   STACK_Z,
 } from '../game/gameConfig';
-import type { StackObjectKind } from '../physics/horseStackPhysics';
-import { STACK_OBJECT_PROFILES } from '../physics/horseStackPhysics';
+import type { StackObjectKind } from '../physics/stackObjectKind';
+import { STACK_OBJECT_PROFILES } from '../physics/stackObjectProfile';
 import type { FarmPropTemplates } from './modelLoader';
 
 /** Replaces each source material on a clone. Null leaves the piece's own materials alone. */

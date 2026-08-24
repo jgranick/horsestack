@@ -11,13 +11,6 @@
 // Every mismatch here throws rather than degrading. A prop that silently fails to resolve
 // gives an invisible piece that still has physics, and that is much harder to diagnose from
 // the symptom than a load-time error naming the mesh.
-import type {
-  ImportDiagnostic,
-  Mesh,
-  MeshGeometry,
-  Node3D,
-  Scene3D,
-} from '@flighthq/sdk';
 import {
   addNodeChild,
   cloneMesh,
@@ -36,14 +29,21 @@ import {
   setNodeTransform3D,
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
+import type {
+  ImportDiagnostic,
+  Mesh,
+  MeshGeometry,
+  Node3D,
+  Scene3D,
+} from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
-import type { FarmPropPartSpec, FarmPropTriangleFilter } from '../data/farmPropGeometry';
 import {
   FARM_PROP_SCENE_SCALE,
   FARM_PROP_VARIANTS,
   selectFarmPropTriangleIndices,
 } from '../data/farmPropGeometry';
-import type { StackObjectKind } from '../physics/horseStackPhysics';
+import type { FarmPropPartSpec, FarmPropTriangleFilter } from '../data/farmPropGeometry';
+import type { StackObjectKind } from '../physics/stackObjectKind';
 
 /** One entry per variant of each non-horse kind, ready to be cloned per placed piece. */
 export type FarmPropTemplates = Partial<Record<StackObjectKind, Node3D[]>>;

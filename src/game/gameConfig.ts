@@ -1,3 +1,8 @@
+import {
+  HORSE_HALF_HEIGHT,
+  HORSE_SIZE_MULTIPLIER,
+} from '../physics/stackObjectProfile';
+
 // Every tuning number the game is played on, gathered in one place — the shape the Haxe
 // sibling settles on in src/game/GameConfig.hx. Pulling these out of main.ts is what makes
 // the rest of the split work: scene/, ui/ and the game loop all read the same numbers, and
@@ -9,7 +14,6 @@
 // because the headless validation scripts import that module on its own and it has to keep
 // standing up with no game around it. The reference hoists them into GameConfig and has
 // physics read upward; leaving them below is the one place this split diverges on purpose.
-import { HORSE_HALF_HEIGHT, HORSE_SIZE_MULTIPLIER } from '../physics/horseStackPhysics';
 
 // Maps physics Y into world Y, and so decides where the play surface sits against the
 // rendered farm. PASTURE_TOP_Y is -0.015, putting the platform at world Y -0.072 — the

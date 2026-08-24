@@ -363,9 +363,15 @@ export function createGame(deps: GameDeps): Game {
   ): number | null {
     if (!isPlacementBlocked(kind, x, fromY, angle)) return fromY;
     const extent = getStackObjectVerticalExtent(kind, angle);
-    const onTop = getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP;
-    // Never below the cursor.
-    if (onTop <= fromY) return null;
+    // Never below the cursor — but a destination that is already under it is a reason to
+    // start from the cursor, NOT a reason to refuse. It used to return null here, and that
+    // was the dead spot: over a horse's neck, a hand's width above its head, the pose is
+    // blocked (the head is real geometry) while the reported destination is well below the
+    // cursor (the surface a horse offers is its BACK — supportHalfHeight stops at 0.447 of
+    // its height, so the head stands about 70mm above the surface the resolver was aiming
+    // for). Blocked, with nowhere higher to be sent: no preview, and a click that did
+    // nothing. Every kind has a band like it over every horse; only the height differs.
+    const onTop = Math.max(getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP, fromY);
     // Then clear whatever the reported surface did not account for, rather than giving up.
     //
     // Landing surfaces come from each piece's SILHOUETTE extents, but its collider was
@@ -382,7 +388,36 @@ export function createGame(deps: GameDeps): Game {
     for (let y = onTop; y <= limit; y += step) {
       if (!isPlacementBlocked(kind, x, y, angle)) return y;
     }
-    return null;
+    // The climb is short on purpose, so it cannot wander up the pile — but a piece can be in
+    // the way that the landing surface never reported, because getLandingSurfaceY only counts
+    // a body it is nearly over (92% of the combined reach) while a collider blocks from its
+    // full width. Beside a horse's head is exactly that gap: blocked by the head, told to
+    // stand on the ground. So ask the one remaining question directly — what is the top of
+    // the thing in the way — and offer that pose. Still one destination, still with something
+    // underneath it, and still never below the cursor.
+    const overhead = getBlockingCeilingY(kind, x);
+    if (overhead === null) return null;
+    const clear = Math.max(overhead + extent + PLACEMENT_LIFT_STEP, onTop);
+    return isPlacementBlocked(kind, x, clear, angle) ? null : clear;
+  }
+
+  /**
+   * The top of the tallest placed piece whose collider can reach the held piece's column,
+   * or null when nothing is over it. Full extents and full widths on both sides — this is
+   * the "what is in my way" question, not the "what may I rest on" one that
+   * getLandingSurfaceY answers, so it applies none of that one's allowances.
+   */
+  function getBlockingCeilingY(kind: StackObjectKind, x: number): number | null {
+    const halfWidth = STACK_OBJECT_PROFILES[kind].halfWidth;
+    let ceiling: number | null = null;
+    for (const object of stackedObjects) {
+      if (object.lost) continue;
+      const body = object.body;
+      if (Math.abs(body.x - x) >= halfWidth + getStackBodyHalfWidth(body)) continue;
+      const top = body.y + getStackBodyVerticalExtent(body);
+      if (ceiling === null || top > ceiling) ceiling = top;
+    }
+    return ceiling;
   }
 
   function setAim(targetX: number, targetY: number, now: number): void {

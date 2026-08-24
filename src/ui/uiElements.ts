@@ -162,14 +162,39 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
   // its face, and back. Wound clockwise in the 2D frame, where +y is down.
   appendShapePolygon(shape, [-6, -2.5, -3, -2.5, 1, -6.5, 1, 6.5, -3, 2.5, -6, 2.5]);
   if (muted) {
-    // One stroke straight across where the sound would be.
-    appendShapeMoveTo(shape, 3.5, 0);
-    appendShapeLineTo(shape, 8.5, 0);
+    // A small cross where the sound would be.
+    appendShapeMoveTo(shape, 4.5, -2);
+    appendShapeLineTo(shape, 8, 2);
+    appendShapeMoveTo(shape, 8, -2);
+    appendShapeLineTo(shape, 4.5, 2);
   } else {
     appendShapeMoveTo(shape, 4, -3);
     appendShapeLineTo(shape, 4, 3);
     appendShapeMoveTo(shape, 7.5, -5.5);
     appendShapeLineTo(shape, 7.5, 5.5);
+  }
+  invalidateNodeRender(shape);
+}
+
+/**
+ * The fullscreen control's four corner brackets, in the same line weight as the speaker
+ * beside it. Drawn rather than set as ⛶ so the two controls are one piece of line work
+ * instead of a glyph next to a drawing — the glyph came from the font at whatever weight the
+ * platform had, and never quite matched.
+ *
+ * All eight strokes are axis-aligned, so this one cannot alias at any size.
+ *
+ * Centred on the shape's own origin, so the caller places its middle.
+ */
+export function drawFullscreen(shape: Shape, colour: number, alpha: number): void {
+  clearShapeCommands(shape);
+  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
+  const outer = 6;
+  const inner = 2.5;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+    appendShapeMoveTo(shape, sx * inner, sy * outer);
+    appendShapeLineTo(shape, sx * outer, sy * outer);
+    appendShapeLineTo(shape, sx * outer, sy * inner);
   }
   invalidateNodeRender(shape);
 }

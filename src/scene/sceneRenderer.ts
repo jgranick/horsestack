@@ -86,11 +86,14 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   const renderState = createGlRenderState(canvas, {
     pixelRatio: initialPixelRatio,
     backgroundColor: 0x00000000,
-    // Antialiasing left at the context default (on). It used to be switched off on the
-    // grounds that the 3D pipeline does its own multisampling and the canvas need not pay
-    // for a second lot; that is true of the 3D, but the UI is drawn by the shape rasterizer,
-    // which has no coverage blending of its own.
-    contextAttributes: { alpha: true },
+    // Antialiasing OFF, and it has to stay off. The canvas is composited with alpha, and
+    // multisampling resolves its edge samples against transparent black, so every edge of
+    // the frame comes back fringed with a dark border. That has now been seen twice from two
+    // different directions — first from sampleCount on the UI render target, then from
+    // letting this attribute default to on — so it is the multisample resolve rather than
+    // either particular knob. The 3D does its own multisampling inside the effect pipeline,
+    // where the resolve is not against the page.
+    contextAttributes: { alpha: true, antialias: false },
     powerPreference: 'high-performance',
   });
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);

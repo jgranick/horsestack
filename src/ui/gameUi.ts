@@ -30,6 +30,7 @@ import {
 import { createUiRenderer } from './uiRenderer';
 import {
   fill,
+  drawFullscreen,
   drawSpeaker,
   fitLabelToWidth,
   GOLD,
@@ -213,7 +214,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     align: 'left', color: 0xd8e0d2ff, font: SANS, leading: 3, size: 11,
   });
   const fullscreenPill = createShape();
-  const fullscreenText = label('⛶', 15, INK, SANS);
+  const fullscreenIcon = createShape();
   const mutePill = createShape();
   const muteIcon = createShape();
 
@@ -225,7 +226,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     timeUpScrim, timeUpText,
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
-    creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
+    creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenIcon,
     mutePill, muteIcon,
     menuFromResultPill, menuFromResultText,
   ]) {
@@ -589,7 +590,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     if (onResult) {
       pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1dff, 0.42);
     }
-    pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1dff, 0.42);
+    iconPill(
+      fullscreenPill, fullscreenIcon, 'fullscreen', width - 54, height - 54, 30,
+      0x1f2d1dff, 0.42, drawFullscreen,
+    );
     // Beside fullscreen, and on every screen: the moment you want to mute is whenever the
     // sound is bothering you, which is not a moment the game gets to choose.
     iconPill(

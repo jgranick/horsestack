@@ -49,23 +49,18 @@ body {
 }
 
 /*
-  The canvas is focusable (it is the game's keyboard surface) and main.ts focuses it on the
-  first placement, so without this the browser draws its focus ring around an element that IS
-  the viewport — which reads as a hairline appearing around the whole screen the moment you
-  drop the first object, in whatever colour the system accent happens to be. Nothing in the
-  frame is drawing it, which is why it survives every renderer-side change.
+  No focus ring, in either state. The canvas is focusable and IS the viewport, so any ring the
+  browser draws on it frames the whole screen — which is what the hairline border turned out to
+  be, appearing on the first placement because that was the first click that focused it.
+  Nothing in the rendered frame drew it, which is why it survived every renderer-side change.
 
-  Suppressed for the pointer, kept for the keyboard: a player who arrived by Tab has no other
-  way to know the game has the keys, so the ring stays for :focus-visible — inset, so it reads
-  as part of the game's own frame rather than as a seam at the edge of the display.
+  Losing the indicator costs a keyboard player nothing here, because main.ts takes the keys off
+  the window: play never depends on this element holding focus. It keeps its tabindex and its
+  aria-label so it is still announced and still reachable.
 */
-.viewer canvas:focus {
-  outline: none;
-}
-
+.viewer canvas:focus,
 .viewer canvas:focus-visible {
-  outline: 3px solid rgba(255, 209, 102, 0.9);
-  outline-offset: -6px;
+  outline: none;
 }
 
 .panel {

@@ -181,14 +181,21 @@ function bindGameControls(): void {
     // Controls and links keep their own meaning: Start over must restart, the place
     // prompt has its own handler, and a credit link must still open.
     if (isInteractiveEventTarget(event.target)) return;
-    canvas.focus({ preventScroll: true });
+    // Deliberately NOT focusing the canvas. It used to, so the keys would work after a click;
+    // they come off the window now and do not need it. Focusing by hand is read as a KEYBOARD
+    // focus — :focus-visible matches a programmatic focus() — and this canvas is the whole
+    // viewport, so the ring framed the entire screen from the first placement onward.
     const now = performance.now();
     aimFromClient(event.clientX, event.clientY, now);
     game.place(now, event.timeStamp);
     renderRequested = true;
   });
 
-  canvas.addEventListener('keydown', (event: KeyboardEvent) => {
+  // On the window rather than the canvas, for the same reason aiming is: the keys should work
+  // whenever a run is live, without the game having to take focus to earn them. Anything the
+  // page owns keeps its own keys — the error panel's button still takes Space and Enter.
+  window.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (isInteractiveEventTarget(event.target)) return;
     // Escape is the STEADY HANDS run's other way out, matching the MENU pill. A timed round
     // ends on its own, so it keeps Escape's browser-default meaning.
     if (event.key === 'Escape' && game.mode === 'steady' && game.isRunning) {

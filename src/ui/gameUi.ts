@@ -31,6 +31,7 @@ import {
 import { createUiRenderer } from './uiRenderer';
 import {
   fill,
+  fillCircle,
   fitLabelToWidth,
   GOLD,
   INK,
@@ -105,7 +106,7 @@ const TITLE_PIVOT_RATIO = 60 / 96;
 const MODE_PILL_WIDTH = 216;
 // The STEADY HANDS readout is the timed pill plus a row of strike dots, so it stands taller.
 const STEADY_PILL_HEIGHT = 82;
-const DOT_SIZE = 9;
+const DOT_SIZE = 10;
 
 const HANDS_PER_EMOJI_COLUMN = 7;
 // One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
@@ -508,14 +509,12 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         const dot = strikeDots[index];
         if (dot === undefined) continue;
         const spent = index < model.piecesLost;
-        fill(
-          dot, spent ? 0x8c3a24ff : INK, spent ? 0.95 : 0.26,
-          0, 0, DOT_SIZE, DOT_SIZE, DOT_SIZE / 2,
-        );
+        fillCircle(dot, spent ? 0x8c3a24ff : INK, spent ? 0.95 : 0.34, DOT_SIZE / 2);
+        // fillCircle centres on the shape's origin, so this places the dot's middle.
         place(
           dot,
-          x + w / 2 - dotsWidth / 2 - DOT_SIZE / 2 + index * spacing,
-          STEADY_PILL_HEIGHT - 4 - DOT_SIZE + 18 - drop,
+          x + w / 2 - dotsWidth / 2 + index * spacing,
+          STEADY_PILL_HEIGHT - 12 + 18 - drop,
         );
       }
       pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);

@@ -193,9 +193,19 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
  */
 export function drawFullscreen(shape: Shape, colour: number, alpha: number): void {
   clearShapeCommands(shape);
-  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
+  // PIXEL HINTED, and the speaker is not. With no antialiasing a 1.5-wide stroke covers
+  // either one device pixel or two depending on where its centre happens to fall, and this
+  // figure is eight short straight strokes mirrored about a centre — so the left arm and the
+  // right arm of the same bracket land on opposite sides of that split and come out
+  // different widths. On the speaker the same unevenness hides in curves and diagonals;
+  // here it IS the design, four brackets that are meant to be identical and visibly are not.
+  // Hinting snaps each stroke to the pixel grid so all eight match.
+  //
+  // Square caps rather than round for the same reason: a round cap on a 3.5-long arm is a
+  // fifth of it, and eight of them unantialiased read as blobs on the ends.
+  appendShapeLineStyle(shape, 1.5, colour, alpha, true, undefined, 'square', 'miter');
   const outer = 6;
-  const inner = 2.5;
+  const inner = 2;
   for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
     appendShapeMoveTo(shape, sx * inner, sy * outer);
     appendShapeLineTo(shape, sx * outer, sy * outer);

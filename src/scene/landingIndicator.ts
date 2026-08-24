@@ -37,7 +37,7 @@ import {
   STACK_X,
   STACK_Z,
 } from '../game/gameConfig';
-import { PASTURE_HALF_WIDTH } from '../physics/pasture';
+import { PASTURE_MAX_X, PASTURE_MIN_X } from '../physics/pasture';
 import type { StackObjectKind } from '../physics/stackObjectKind';
 import { getStackObjectVerticalExtent } from '../physics/stackObjectProfile';
 import { prefersReducedMotion } from '../reducedMotion';
@@ -248,14 +248,14 @@ export function createLandingIndicator(
 
     update(kind, x, y, pieceAngle, blocked, now) {
       if (ghost === null) return;
-      ghost.enabled = Math.abs(x) <= PASTURE_HALF_WIDTH;
+      ghost.enabled = x >= PASTURE_MIN_X && x <= PASTURE_MAX_X;
       if (!ghost.enabled) {
         if (radiance !== null) radiance.enabled = false;
         indicatorLight.intensity = 0;
         return;
       }
       previewTopY = y + getStackObjectVerticalExtent(kind, pieceAngle);
-      visuals.setTransform(ghost, x, y, pieceAngle);
+      visuals.setTransform(ghost, kind, x, y, pieceAngle);
       // Blocked reads as "this is not a real option": the piece goes ghostly and the marker
       // furniture — halo and light, which say "here" — switches off entirely.
       setNode3DAlpha(ghost, blocked ? BLOCKED_GHOST_ALPHA : 1);

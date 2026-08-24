@@ -1,6 +1,6 @@
 import type { RigidBody2D } from '@flighthq/sdk';
 import {
-  PASTURE_HALF_WIDTH,
+  PASTURE_MAX_X,
   PASTURE_TOP_Y,
 } from '../src/physics/pasture';
 import {
@@ -318,7 +318,7 @@ function validateFarmEdgeFalloff(): void {
   const object = addStackObjectBody(
     world,
     'hay',
-    PASTURE_HALF_WIDTH - hay.halfWidth,
+    PASTURE_MAX_X - hay.halfWidth,
     0.2,
     0,
   );

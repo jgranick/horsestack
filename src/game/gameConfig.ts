@@ -128,3 +128,13 @@ export const INDICATOR_MAX_ANGLE = 0.65;
 export const INDICATOR_MAX_SPIN = 5.5;
 export const FIXED_STEP_LIMIT = 6;
 
+
+// How close to the ground counts as ON the ground, for the dropped-horse rule.
+//
+// Two jobs, which is why it is one number: it is the slack that stops a horse set down on
+// the grass being read as placed in the tower, and the slack that lets a horse that has
+// fallen onto the grass be recognised there despite the solver letting it settle a
+// millimetre or two into the surface. 20mm is comfortably more than either, and comfortably
+// less than the shortest thing you can stand a horse on — a chicken at 62mm — so a horse
+// resting on the smallest possible support still reads as being in the tower.
+export const GROUNDED_MARGIN = 0.02;

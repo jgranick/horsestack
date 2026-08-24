@@ -17,7 +17,7 @@ import {
 } from '@flighthq/sdk';
 import type { Physics2DMaterial, Physics2DWorld, RigidBody2D } from '@flighthq/sdk';
 import { getCentredColliderPolygons } from './colliderGeometry';
-import { PASTURE_HALF_WIDTH, PASTURE_TOP_Y } from './pasture';
+import { PASTURE_MAX_X, PASTURE_MIN_X, PASTURE_TOP_Y } from './pasture';
 import {
   deleteStackBodyAnchor,
   findStackBodyKind,
@@ -179,9 +179,9 @@ export function createHorseStackWorld(ground?: GroundProfile): Physics2DWorld {
       createPhysics2DCollider(
         {
           kind: 'aabb',
-          minX: -PASTURE_HALF_WIDTH,
+          minX: PASTURE_MIN_X,
           minY: -0.02,
-          maxX: PASTURE_HALF_WIDTH,
+          maxX: PASTURE_MAX_X,
           maxY: 0.02,
         },
         PASTURE_MATERIAL,
@@ -330,7 +330,8 @@ function applyAssistInertia(body: RigidBody2D, assist: number): void {
 
 
 export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {
-  return Math.abs(body.x) <= PASTURE_HALF_WIDTH + getStackBodyHalfWidth(body);
+  const reach = getStackBodyHalfWidth(body);
+  return body.x >= PASTURE_MIN_X - reach && body.x <= PASTURE_MAX_X + reach;
 }
 
 

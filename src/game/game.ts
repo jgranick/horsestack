@@ -25,7 +25,8 @@ import type { Node3D, Physics2DWorld, RigidBody2D } from '@flighthq/sdk';
 import type { AudioManager } from '../audio/audioManager';
 import { getRandomFarmPropVariantIndex } from '../data/farmPropGeometry';
 import {
-  PASTURE_HALF_WIDTH,
+  PASTURE_MAX_X,
+  PASTURE_MIN_X,
   PASTURE_TOP_Y,
 } from '../physics/pasture';
 import {
@@ -61,6 +62,7 @@ import type { StackObjectVisuals } from '../scene/stackObjectVisual';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
+  GROUNDED_MARGIN,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
@@ -91,6 +93,13 @@ interface StackedObject {
    * and because the count must happen exactly once however far it goes on to roll.
    */
   dropped: boolean;
+  /**
+   * True when this piece was set down ABOVE the bare ground — that is, into the tower rather
+   * than as part of its foundation. Only these can be dropped: a horse stood on the grass on
+   * purpose has not fallen off anything, and must not be counted when it is still standing
+   * exactly where it was put.
+   */
+  placedInTower: boolean;
   node: Node3D;
 }
 
@@ -264,12 +273,15 @@ export function createGame(deps: GameDeps): Game {
   // wherever the cursor is, and anything on screen is reachable by definition. The old
   // "visible half width" term existed to stop a LINEAR screen-to-world map running the piece
   // off the edge, and that map is gone.
-  function getAimHalfWidth(): number {
+  function getAimLimits(): [number, number] {
     const activeHalfWidth =
       activeObject === null
         ? STACK_OBJECT_PROFILES.horse.halfWidth
         : STACK_OBJECT_PROFILES[activeObject.kind].halfWidth;
-    return PASTURE_HALF_WIDTH - activeHalfWidth * 1.2;
+    // A pair rather than a half width: the pasture is not centred on the origin, so the two
+    // ends have to be insetted separately or the shorter one sets the limit for both.
+    const inset = activeHalfWidth * 1.2;
+    return [PASTURE_MIN_X + inset, PASTURE_MAX_X - inset];
   }
 
   /**
@@ -304,8 +316,8 @@ export function createGame(deps: GameDeps): Game {
     const current = activeObject;
     const kind = current === null ? 'horse' : current.kind;
     const angle = current === null ? 0 : current.angle;
-    const horizontalLimit = getAimHalfWidth();
-    const nextX = clamp(targetX, -horizontalLimit, horizontalLimit);
+    const [minAimX, maxAimX] = getAimLimits();
+    const nextX = clamp(targetX, minAimX, maxAimX);
     // No ceiling: holding a piece high and letting it fall is a legitimate (and destructive)
     // choice. The floor is real though — nothing may be placed inside the pasture.
     const nextY = Math.max(targetY, getFloorY(kind, angle, nextX));
@@ -360,8 +372,8 @@ export function createGame(deps: GameDeps): Game {
     }
 
     indicator.stepTeeter(now);
-    const horizontalLimit = getAimHalfWidth();
-    current.x = clamp(aimX, -horizontalLimit, horizontalLimit);
+    const [minAimX, maxAimX] = getAimLimits();
+    current.x = clamp(aimX, minAimX, maxAimX);
     current.angle = indicator.angle();
     // Re-clamp against the floor here as well as in setAim: the teeter keeps turning the
     // piece after the pointer stops, and a rotating piece's vertical extent grows, so a pose
@@ -409,7 +421,7 @@ export function createGame(deps: GameDeps): Game {
     body.velocityY = 0;
     body.angularVelocity = 0;
     const node = visuals.create(current.kind, current.variantIndex);
-    visuals.setTransform(node, current.x, landingY, current.angle);
+    visuals.setTransform(node, current.kind, current.x, landingY, current.angle);
     addNodeChild(stackLayer, node);
     stackedObjects.push({
       body,
@@ -417,6 +429,9 @@ export function createGame(deps: GameDeps): Game {
       kind: current.kind,
       lost: false,
       node,
+      placedInTower:
+        landingY - getStackObjectVerticalExtent(current.kind, current.angle) >
+        getGroundY(groundProfile, current.x) + GROUNDED_MARGIN,
     });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
@@ -531,20 +546,41 @@ export function createGame(deps: GameDeps): Game {
       if (object.lost) continue;
       const body = object.body;
 
+      // THE RULE: a horse that ends up on the bare grass has been dropped.
+      //
+      // It is checked against the ground UNDER the horse rather than against a fixed fall
+      // distance, so what counts is where it ended up, not how far it travelled — a horse
+      // shrugged off a two-piece tower is as dropped as one that fell twenty metres, which
+      // is how it feels to play. `placedInTower` is what keeps the foundation honest: a
+      // horse stood on the grass deliberately is already on the grass and can never trip
+      // this, while every horse placed above one can.
+      //
+      // This replaced "a horse that leaves the map". That rule was unreachable in practice:
+      // measured over 34 placements aimed deliberately at the rim across two runs, building
+      // to 5.09m and 9.03m, not one horse ever left. The floor spans the whole pasture and
+      // the aim clamps inside it, so a collapse piles up against the edge and stays there —
+      // and Steady Hands went back to being endless, the same failure the "every piece off
+      // the pasture" rule had before it. Landing on the grass is the thing that actually
+      // happens when a tower falls.
+      if (
+        !object.dropped &&
+        object.placedInTower &&
+        object.kind === 'horse' &&
+        body.y - getStackBodyVerticalExtent(body) <=
+          getGroundY(groundProfile, body.x) + GROUNDED_MARGIN
+      ) {
+        object.dropped = true;
+        horsesDropped++;
+      }
+
       // Leave enough void beyond the collider for the whole tumble to remain visible.
-      if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
+      if (body.y < -1 || body.x < PASTURE_MIN_X - 1.5 || body.x > PASTURE_MAX_X + 1.5) {
         object.lost = true;
         object.node.enabled = false;
         removePhysics2DBody(physicsWorld, body);
-        // EVERY HORSE MUST STAY ON THE MAP. That is the whole rule: a horse tumbling down the
-        // pile and landing safely on the grass is a mess you can build back from, a horse
-        // going over the edge is not.
-        //
-        // This replaced a "fell a horse-height below where it was released" test. That one
-        // worked — it was verified firing — but it made the same event count differently
-        // depending on how high the tower happened to be, and it quietly punished dropping a
-        // horse the short distance onto a pile you meant to drop it onto. Leaving the map is
-        // unambiguous, and it is the same edge test the game already ran for other reasons.
+        // A horse can also leave sideways without ever touching down — over the edge at the
+        // height it was placed — so the grass test above will not have caught it. Off the
+        // map is off the pile too.
         if (object.kind === 'horse' && !object.dropped) {
           object.dropped = true;
           horsesDropped++;
@@ -561,6 +597,7 @@ export function createGame(deps: GameDeps): Game {
       const swayPhase = swayClock + body.index * 0.7;
       visuals.setTransform(
         object.node,
+        object.kind,
         body.x + Math.sin(swayPhase) * 0.0016 * sway,
         body.y,
         body.angle + Math.sin(swayPhase * 0.77 + 1.3) * 0.010 * sway,

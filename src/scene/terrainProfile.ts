@@ -23,7 +23,7 @@ import type { Mesh, Scene3D } from '@flighthq/sdk';
 import { createRay3D, createScene3DHit, pickScene3DWithRay3D, setRay3D } from '@flighthq/sdk';
 import { createVector3 } from '@flighthq/sdk';
 import { STACK_BASE_Y, STACK_X, STACK_Z } from '../game/gameConfig';
-import { PASTURE_HALF_WIDTH } from '../physics/pasture';
+import { PASTURE_MIN_X, PASTURE_WIDTH } from '../physics/pasture';
 
 /** Ground heights in PHYSICS coordinates, evenly spaced across the pasture. */
 export interface TerrainProfile {
@@ -67,8 +67,8 @@ function isGroundMesh(mesh: Readonly<Mesh>): boolean {
  * a re-exported model with different materials should not stop the game running.
  */
 export function sampleFarmTerrain(farm: Readonly<Scene3D>): TerrainProfile | null {
-  const minX = -PASTURE_HALF_WIDTH;
-  const step = (PASTURE_HALF_WIDTH * 2) / (SAMPLE_COUNT - 1);
+  const minX = PASTURE_MIN_X;
+  const step = PASTURE_WIDTH / (SAMPLE_COUNT - 1);
   // NaN means "no ground found over this sample". Filled in from the neighbours at the end
   // rather than defaulting to the flat height: an uncovered sample sitting at PASTURE_TOP_Y
   // next to a covered one 26mm higher is a step in the floor, and a step is exactly the

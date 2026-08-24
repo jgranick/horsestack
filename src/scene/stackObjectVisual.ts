@@ -28,8 +28,20 @@ import {
   STACK_Z,
 } from '../game/gameConfig';
 import type { StackObjectKind } from '../physics/stackObjectKind';
+import { getColliderCentroidOffsetY } from '../physics/colliderGeometry';
 import { STACK_OBJECT_PROFILES } from '../physics/stackObjectProfile';
 import type { FarmPropTemplates } from './modelLoader';
+
+// Every piece's collider is re-centred on its area centroid, which for a horse sits 15mm
+// above the middle of its silhouette (head and neck). The model has to move by the same
+// amount or it is drawn 15mm below the floor it is standing on. Derived rather than typed
+// out, so a re-authored silhouette carries the drawing with it; see
+// getColliderCentroidOffsetY. Chickens are a circle centred on the body and need nothing.
+const VISUAL_OFFSET_Y: Partial<Record<StackObjectKind, number>> = {
+  cow: getColliderCentroidOffsetY('cow'),
+  hay: getColliderCentroidOffsetY('hay'),
+  horse: getColliderCentroidOffsetY('horse'),
+};
 
 /** Replaces each source material on a clone. Null leaves the piece's own materials alone. */
 export type MaterialMapper = (material: Material | null) => Material | null;
@@ -44,8 +56,11 @@ export interface StackObjectVisuals {
     materialMapper?: MaterialMapper | null,
     alpha?: number,
   ) => Node3D;
-  /** Place a node at a physics pose: x along the play line, physicsY above the pasture. */
-  setTransform: (node: Node3D, x: number, physicsY: number, angle: number) => void;
+  /**
+   * Place a node at a physics pose: x along the play line, physicsY above the pasture. Pass
+   * the kind so the node can be lined up with its own collider — see VISUAL_OFFSET_Y.
+   */
+  setTransform: (node: Node3D, kind: StackObjectKind, x: number, physicsY: number, angle: number) => void;
   /** Screen-reader label for a queued piece. */
   label: (kind: StackObjectKind, variantIndex: number) => string;
 }
@@ -91,11 +106,16 @@ export function createStackObjectVisuals(): StackObjectVisuals {
       return pivot;
     },
 
-    setTransform(node, x, physicsY, angle) {
+    setTransform(node, kind, x, physicsY, angle) {
       node.position.x = STACK_X;
-      node.position.y = STACK_BASE_Y + physicsY;
+      node.position.y = STACK_BASE_Y + physicsY + (VISUAL_OFFSET_Y[kind] ?? 0);
       node.position.z = STACK_Z - x;
-      setQuaternionFromEuler(node.rotation, angle, 0, 0);
+      // A chicken's collider is a CIRCLE, which has no orientation at all, so drawing the
+      // hen turned reports a pose the physics is not holding: at 45 degrees the corners of
+      // its silhouette reach 13mm past the circle that is actually resting on the ground,
+      // and the hen's beak and feet go into the grass. Left upright, the drawing and the
+      // collider agree at every angle. Nothing else here is round, so nothing else cares.
+      setQuaternionFromEuler(node.rotation, kind === 'chickens' ? 0 : angle, 0, 0);
       invalidateNodeLocalTransform(node);
     },
 

@@ -20,7 +20,18 @@ import {
 // shape on its own — density is uniform, so area weighting is mass weighting. Translating
 // changes no extent, so the silhouette stays put.
 export function getCentredColliderPolygons(kind: Exclude<StackObjectKind, 'chickens'>): number[][] {
-  const polygons = kind === 'horse' ? getHorseColliderPolygons() : [getPolygonColliderPoints(kind)];
+  const polygons = getRawColliderPolygons(kind);
+  const [centroidX, centroidY] = getColliderCentroid(polygons);
+  return polygons.map((points) =>
+    points.map((value, index) => value - (index % 2 === 0 ? centroidX : centroidY)),
+  );
+}
+
+function getRawColliderPolygons(kind: Exclude<StackObjectKind, 'chickens'>): number[][] {
+  return kind === 'horse' ? getHorseColliderPolygons() : [getPolygonColliderPoints(kind)];
+}
+
+function getColliderCentroid(polygons: readonly (readonly number[])[]): [number, number] {
   let totalArea = 0;
   let centroidX = 0;
   let centroidY = 0;
@@ -30,12 +41,27 @@ export function getCentredColliderPolygons(kind: Exclude<StackObjectKind, 'chick
     centroidX += area * x;
     centroidY += area * y;
   }
-  if (totalArea === 0) return polygons;
-  centroidX /= totalArea;
-  centroidY /= totalArea;
-  return polygons.map((points) =>
-    points.map((value, index) => value - (index % 2 === 0 ? centroidX : centroidY)),
-  );
+  if (totalArea === 0) return [0, 0];
+  return [centroidX / totalArea, centroidY / totalArea];
+}
+
+/**
+ * How far the centring above moved the collider up, which the VISUAL has to move with it.
+ *
+ * This is the horse's sunk feet. The silhouette is authored around the model's own middle,
+ * then re-centred on its AREA centroid so the body's mass sits where its shape does — and
+ * for a horse those are 15mm apart, because the head and neck stand well above the barrel
+ * and pull the centroid up. The collider moved and the model did not, so the horse rested on
+ * a floor 15mm above its hooves and its feet disappeared into the grass. The cow is the same
+ * story at 3mm.
+ *
+ * Returned from the same numbers the centring uses rather than written down as a constant,
+ * so re-authoring a silhouette cannot put the two back out of step.
+ */
+export function getColliderCentroidOffsetY(kind: Exclude<StackObjectKind, 'chickens'>): number {
+  // Negated because the centring SUBTRACTS the centroid: a silhouette whose centroid sits
+  // below its middle is moved up, and this reports that displacement, not the centroid.
+  return -getColliderCentroid(getRawColliderPolygons(kind))[1];
 }
 export function getPolygonAreaCentroid(points: readonly number[]): [number, number, number] {
   let twiceArea = 0;

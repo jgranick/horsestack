@@ -63,7 +63,6 @@ import {
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
   START_INPUT_GUARD_MS,
-  HORSE_DROP_FALL,
   STEADY_HANDS_ALLOWANCE,
 } from './gameConfig';
 import type { GameMode } from './gameMode';
@@ -92,8 +91,6 @@ interface StackedObject {
    */
   dropped: boolean;
   node: Node3D;
-  /** Where it was let go, which is what a fall is measured against. */
-  placedY: number;
 }
 
 export interface GameDeps {
@@ -211,6 +208,10 @@ export function createGame(deps: GameDeps): Game {
   let aimY = 0;
   // True when the held piece overlaps something already placed, so it cannot be put down.
   let aimBlocked = false;
+  // Whether the player has said where they want the piece yet, this round. Until they have,
+  // there is nothing sensible to hover: a device with no pointer has no "where the mouse is",
+  // and parking the piece in the middle of the pasture invents an intent nobody expressed.
+  let aimKnown = false;
   let lastAimAt = performance.now();
   let nextObjectAt = 0;
   let gameEndsAt = 0;
@@ -289,6 +290,7 @@ export function createGame(deps: GameDeps): Game {
   }
 
   function setAim(targetX: number, targetY: number, now: number): void {
+    aimKnown = true;
     const current = activeObject;
     const kind = current === null ? 'horse' : current.kind;
     const angle = current === null ? 0 : current.angle;
@@ -338,6 +340,11 @@ export function createGame(deps: GameDeps): Game {
   function updateActiveStackObject(now: number): void {
     const current = activeObject;
     if (current === null) return;
+    if (!aimKnown) {
+      // Nothing has been aimed yet this round. Hold the piece off screen rather than guessing.
+      indicator.hide();
+      return;
+    }
 
     indicator.stepTeeter(now);
     const horizontalLimit = getAimHalfWidth();
@@ -358,10 +365,13 @@ export function createGame(deps: GameDeps): Game {
     lastAimAt = now;
     const { kind, variantIndex } = queued;
     queued = drawPiece();
-    // Opens resting on whatever is under the middle of the pasture, so the first frame shows
-    // a plausible pose before the pointer has said anything.
-    aimX = 0;
-    aimY = getLandingSurfaceY(0, kind) + getStackObjectVerticalExtent(kind, 0);
+    // The aim is NOT reset. A new piece appears wherever the pointer already is, which is
+    // where the player is looking — resetting it to the middle made every piece jump away
+    // from the cursor and have to be dragged back.
+    //
+    // The floor still has to be re-checked, because the new piece may be taller than the one
+    // that just left and the old height could now be inside the grass.
+    aimY = Math.max(aimY, getFloorY(kind, 0));
     aimBlocked = false;
     activeObject = { angle: 0, kind, variantIndex, x: aimX, y: aimY };
     indicator.setKind(kind, variantIndex);
@@ -394,13 +404,15 @@ export function createGame(deps: GameDeps): Game {
       kind: current.kind,
       lost: false,
       node,
-      placedY: landingY,
     });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
     indicator.hide();
     objectsDropped++;
     audio.playStackThud();
+    // Both modes. It is tied to the horse rather than to the impact now, so it no longer
+    // chatters through a long build the way a collision-driven one did.
+    if (current.kind === 'horse') audio.maybePlayHorseWhinny(now);
 
     nextObjectAt = now + getNextObjectDelay(objectsDropped);
   }
@@ -487,11 +499,6 @@ export function createGame(deps: GameDeps): Game {
 
     lastImpactAt = now;
     particles.burstDust(point.x, STACK_BASE_Y + point.y);
-    // TIME CHALLENGE only. The whinny fires at random off collisions, which is a nice bit of
-    // life over a thirty second scramble and an irritant over a long careful build — the same
-    // reason STEADY HANDS runs without the soundtrack. The dust still puffs on every impact,
-    // so a landing is not silent, it just stops editorialising.
-    if (mode === 'time') audio.maybePlayCollisionWhinny(now);
   }
 
   function stepGamePhysics(now: number, deltaTime: number): void {
@@ -511,25 +518,20 @@ export function createGame(deps: GameDeps): Game {
       if (object.lost) continue;
       const body = object.body;
 
-      // A horse that has fallen a full horse-height below where it was let go has been
-      // dropped, wherever it ends up — onto the grass is as bad as off the map, because the
-      // thing that went wrong is the same. Counted the moment it has fallen that far rather
-      // than once it settles, so the strike lands while the tumble is on screen.
-      //
-      // This also covers releasing one in mid-air: placement is free, so a horse let go above
-      // the pile and allowed to drop IS a dropped horse. That is the rule doing its job.
-      if (!object.dropped && object.kind === 'horse' && body.y < object.placedY - HORSE_DROP_FALL) {
-        object.dropped = true;
-        horsesDropped++;
-      }
-
       // Leave enough void beyond the collider for the whole tumble to remain visible.
       if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
         object.lost = true;
         object.node.enabled = false;
         removePhysics2DBody(physicsWorld, body);
-        // A horse can leave sideways without ever falling far — off the edge of the pasture
-        // at the height it was placed — so the fall test above will not have caught it.
+        // EVERY HORSE MUST STAY ON THE MAP. That is the whole rule: a horse tumbling down the
+        // pile and landing safely on the grass is a mess you can build back from, a horse
+        // going over the edge is not.
+        //
+        // This replaced a "fell a horse-height below where it was released" test. That one
+        // worked — it was verified firing — but it made the same event count differently
+        // depending on how high the tower happened to be, and it quietly punished dropping a
+        // horse the short distance onto a pile you meant to drop it onto. Leaving the map is
+        // unambiguous, and it is the same edge test the game already ran for other reasons.
         if (object.kind === 'horse' && !object.dropped) {
           object.dropped = true;
           horsesDropped++;
@@ -668,6 +670,7 @@ export function createGame(deps: GameDeps): Game {
       aimX = 0;
       aimY = 0;
       aimBlocked = false;
+      aimKnown = false;
       indicator.resetTeeter(now);
       lastAimAt = now;
       queued = drawPiece();
@@ -761,6 +764,13 @@ export function createGame(deps: GameDeps): Game {
     },
 
     nudgeAim(deltaX, deltaY, now) {
+      // The arrows are how a keyboard player says where they want it, so the first press has
+      // to seed a pose — the middle of the pasture, resting on whatever is under it.
+      if (!aimKnown && activeObject !== null) {
+        aimX = 0;
+        aimY = getLandingSurfaceY(0, activeObject.kind)
+          + getStackObjectVerticalExtent(activeObject.kind, 0);
+      }
       setAim(aimX + deltaX, aimY + deltaY, now);
     },
   };

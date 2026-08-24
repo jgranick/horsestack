@@ -14,6 +14,7 @@
 // audio does in the same commit as changing where it lives.
 import {
   FINAL_WHINNY_CHANCE,
+  HORSE_PLACEMENT_WHINNY_CHANCE,
   HORSE_WHINNY_CUES,
   HORSE_WHINNY_INTERVAL_JITTER_MS,
   HORSE_WHINNY_MIN_INTERVAL_MS,
@@ -38,8 +39,16 @@ export interface AudioManager {
   playResultTick: (now: number) => void;
   /** The count-up has landed on the final number. */
   celebrateResult: () => void;
-  /** Two pieces hit hard enough to be worth a whinny — throttled to one every few seconds. */
-  maybePlayCollisionWhinny: (now: number) => void;
+  /**
+   * A horse has just been set down — it may say something about it. A chance rather than a
+   * certainty, and throttled, so it stays a flourish instead of a sound effect.
+   *
+   * This replaced a whinny fired off physics COLLISIONS, which had two problems: it went off
+   * for hay landing on hay, and under a long careful build it turned into ambient chatter.
+   * Tying it to placing a horse means it only ever comments on the thing the game is named
+   * after, and only when the player did something.
+   */
+  maybePlayHorseWhinny: (now: number) => void;
   /**
    * A round is starting: re-arm the effects and bring the sound up. The soundtrack is a
    * TIME CHALLENGE thing — a STEADY HANDS run gets the farm's ambience and nothing else,
@@ -150,8 +159,9 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       }, 180);
     },
 
-    maybePlayCollisionWhinny(now) {
+    maybePlayHorseWhinny(now) {
       if (now < nextHorseWhinnyAt) return;
+      if (Math.random() >= HORSE_PLACEMENT_WHINNY_CHANCE) return;
       playHorseWhinny();
       nextHorseWhinnyAt =
         now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;

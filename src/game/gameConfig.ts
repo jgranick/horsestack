@@ -102,6 +102,10 @@ export const RESULT_TICK_POOL_SIZE = 8;
 export const HORSE_WHINNY_MIN_INTERVAL_MS = 9_000;
 export const HORSE_WHINNY_INTERVAL_JITTER_MS = 6_000;
 export const FINAL_WHINNY_CHANCE = 0.28;
+// How often setting a horse down gets a whinny out of it. Well under half, because the point
+// is that it is a surprise — at every placement it stops being a reaction and becomes the
+// sound a horse makes when you put it down, which is a different and much duller thing.
+export const HORSE_PLACEMENT_WHINNY_CHANCE = 0.3;
 // Quiet regions in the source sample separate these four calls. Cueing the
 // original file avoids shipping four near-identical derived assets.
 export const HORSE_WHINNY_CUES = [
@@ -124,8 +128,3 @@ export const FIXED_STEP_LIMIT = 6;
 // not see coming. Three is enough slack to absorb that and still short enough that every
 // loss is felt.
 export const STEADY_HANDS_ALLOWANCE = 3;
-
-// How far a horse must fall below where it was let go before it counts as dropped. A full
-// horse-height: far enough that nothing a settling pile does to a well-placed horse reaches
-// it, close enough that an actual fall is caught while it is still on screen.
-export const HORSE_DROP_FALL = HORSE_HALF_HEIGHT * 2;

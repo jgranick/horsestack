@@ -109,6 +109,8 @@ const MODE_PILL_WIDTH = 216;
 // The STEADY HANDS readout is the timed pill plus a row of strike dots, so it stands taller.
 const STEADY_PILL_HEIGHT = 82;
 const DOT_SIZE = 10;
+// The NEXT readout, off for now. See the note where it is laid out.
+const SHOW_NEXT_PREVIEW = false;
 
 const HANDS_PER_EMOJI_COLUMN = 7;
 // One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
@@ -549,12 +551,14 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);
     }
 
-    // NEXT belongs to both modes: knowing a horse is coming is worth a moment of preparation
-    // under the clock too, not just during a careful build.
-    show(nextPill, playing);
-    show(nextCaption, playing);
-    show(nextGlyph, playing);
-    if (playing) {
+    // NEXT is built and wired but switched off for now at the user's request. The model still
+    // carries nextPieceGlyph and the nodes still exist, so turning it back on is this one
+    // constant — that is cheaper than deleting it and writing it again.
+    const showNext = SHOW_NEXT_PREVIEW && playing;
+    show(nextPill, showNext);
+    show(nextCaption, showNext);
+    show(nextGlyph, showNext);
+    if (showNext) {
       const w = 62;
       // Right edge flush with the readout above it, which sits 24 in from the window edge.
       // (This used to add the difference between the two pill widths on top of an x that was

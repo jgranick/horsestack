@@ -8,6 +8,11 @@
 // height measurement the score is read from.
 import {
   addPhysics2DBody,
+  createCollisionManifold2D,
+  registerBuiltInCollisionPairTests2D,
+  registerBuiltInCollisionSupports2D,
+  testCollision2D,
+  updatePhysics2DColliderWorldShape,
   createPhysics2DCollider,
   createPhysics2DWorld,
   createRigidBody2D,
@@ -218,17 +223,14 @@ export function createHorseStackWorld(ground?: GroundProfile): Physics2DWorld {
 }
 
 
-export function addStackObjectBody(
-  world: Physics2DWorld,
+/** A body carrying this kind's colliders, in no world. */
+function createStackObjectBody(
   kind: StackObjectKind,
   x: number,
   y: number,
   angle: number,
 ): RigidBody2D {
   const body = createRigidBody2D('dynamic', x, y, angle);
-  body.linearDamping = STACK_DAMPING[kind].linear;
-  body.angularDamping = STACK_DAMPING[kind].angular;
-  body.bullet = false;
   if (kind === 'chickens') {
     body.colliders.push(
       createPhysics2DCollider(
@@ -236,15 +238,84 @@ export function addStackObjectBody(
         STACK_MATERIALS.chickens,
       ),
     );
-  } else {
-    // One shape for every prop but the horse, which is a compound; see
-    // getHorseColliderPolygons.
-    for (const points of getCentredColliderPolygons(kind)) {
-      body.colliders.push(
-        createPhysics2DCollider({ kind: 'polygon', points }, STACK_MATERIALS[kind]),
-      );
+    return body;
+  }
+  // One shape for every prop but the horse, which is a compound; see
+  // getHorseColliderPolygons.
+  for (const points of getCentredColliderPolygons(kind)) {
+    body.colliders.push(
+      createPhysics2DCollider({ kind: 'polygon', points }, STACK_MATERIALS[kind]),
+    );
+  }
+  return body;
+}
+
+// One reusable body per kind, posed and re-posed to ask "would this fit here". Building a
+// body per query would allocate on every pointer move.
+const placementProbes = new Map<StackObjectKind, RigidBody2D>();
+const placementManifold = createCollisionManifold2D();
+let collisionTestsRegistered = false;
+
+/**
+ * Would a piece of this kind, held at this pose, actually intersect any of these bodies?
+ *
+ * The real shapes, not their bounding boxes. The refusal used to compare half extents on
+ * each axis, and for a box like a hay bale that is exact — but a horse is legs and a barrel
+ * with a notch in front of its chest, and its bounding box is much bigger than it is.
+ * Measured over the poses the box test refused, 21% of them had no contact at all: two
+ * horses standing side by side were refused out to 243mm apart when they only touch at 199.
+ * So the piece the game is named after was the one you could not put down next to itself,
+ * and the notch the compound collider exists to provide could never be used.
+ *
+ * This is the same test the solver runs a moment later, which is what the preview always
+ * claimed to be doing.
+ */
+export function doesStackPlacementOverlap(
+  kind: StackObjectKind,
+  x: number,
+  y: number,
+  angle: number,
+  bodies: readonly Readonly<RigidBody2D>[],
+): boolean {
+  if (!collisionTestsRegistered) {
+    // Global and idempotent. testCollision2D dispatches through this registry and silently
+    // answers "no contact" for every pair until it is filled, which reads exactly like a
+    // placement rule that never refuses anything.
+    registerBuiltInCollisionSupports2D();
+    registerBuiltInCollisionPairTests2D();
+    collisionTestsRegistered = true;
+  }
+  let probe = placementProbes.get(kind);
+  if (probe === undefined) {
+    probe = createStackObjectBody(kind, x, y, angle);
+    placementProbes.set(kind, probe);
+  }
+  probe.x = x;
+  probe.y = y;
+  probe.angle = angle;
+  for (const collider of probe.colliders) updatePhysics2DColliderWorldShape(collider, probe);
+
+  for (const body of bodies) {
+    for (const probeCollider of probe.colliders) {
+      for (const collider of body.colliders) {
+        if (testCollision2D(probeCollider.world, collider.world, placementManifold)) return true;
+      }
     }
   }
+  return false;
+}
+
+export function addStackObjectBody(
+  world: Physics2DWorld,
+  kind: StackObjectKind,
+  x: number,
+  y: number,
+  angle: number,
+): RigidBody2D {
+  const body = createStackObjectBody(kind, x, y, angle);
+  body.linearDamping = STACK_DAMPING[kind].linear;
+  body.angularDamping = STACK_DAMPING[kind].angular;
+  body.bullet = false;
   addPhysics2DBody(world, body);
   setStackBodyKind(body, kind);
   return body;

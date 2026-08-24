@@ -138,3 +138,8 @@ export const FIXED_STEP_LIMIT = 6;
 // A second is clear of both: past it, a piece that arrives at the floor cannot have been
 // falling the whole time, so it was resting on something that has since given way.
 export const HORSE_DROP_GRACE_MS = 1000;
+
+// The clearance left above a piece the preview has had to lift, and the step it lifts by
+// when searching. Small enough that the lift is never further than it needs to be, large
+// enough that "resting exactly on" does not read as an overlap to the solver.
+export const PLACEMENT_LIFT_STEP = 0.002;

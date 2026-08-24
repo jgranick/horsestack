@@ -50,6 +50,7 @@ import {
   PHYSICS_STEP,
   addStackObjectBody,
   createHorseStackWorld,
+  doesStackPlacementOverlap,
   getSupportedStackHeight,
   isStackBodyTouchingGround,
   stepHorseStack,
@@ -64,6 +65,7 @@ import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
   HORSE_DROP_GRACE_MS,
+  PLACEMENT_LIFT_STEP,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
@@ -223,6 +225,8 @@ export function createGame(deps: GameDeps): Game {
   // within the plane rather than a horizontal aim over a top-down drop.
   let aimX = 0;
   let aimY = 0;
+  // Reused by isPlacementBlocked, which runs on every pointer move.
+  const nearbyBodies: RigidBody2D[] = [];
   // True when the held piece overlaps something already placed, so it cannot be put down.
   let aimBlocked = false;
   // Whether the player has said where they want the piece yet, this round. Until they have,
@@ -296,21 +300,54 @@ export function createGame(deps: GameDeps): Game {
   }
 
   /**
-   * Does a piece held here overlap something already placed? Extents are the same ones the
-   * colliders and the landing scan use, so "roughly where it would fit" means the same thing
-   * to the preview as it will to the solver a moment later.
+   * Does a piece held here overlap something already placed?
+   *
+   * Two passes. The extent comparison is a broad phase that throws out everything nowhere
+   * near the pose, and then the real collider shapes settle the survivors — which is what
+   * this always claimed to do and did not. See doesStackPlacementOverlap for what the box
+   * test alone was costing.
    */
   function isPlacementBlocked(kind: StackObjectKind, x: number, y: number, angle: number): boolean {
     const halfWidth = STACK_OBJECT_PROFILES[kind].halfWidth;
     const vertical = getStackObjectVerticalExtent(kind, angle);
+    nearbyBodies.length = 0;
     for (const object of stackedObjects) {
       if (object.lost) continue;
       const body = object.body;
       if (Math.abs(body.x - x) >= halfWidth + getStackBodyHalfWidth(body)) continue;
       if (Math.abs(body.y - y) >= vertical + getStackBodyVerticalExtent(body)) continue;
-      return true;
+      nearbyBodies.push(body);
     }
-    return false;
+    if (nearbyBodies.length === 0) return false;
+    return doesStackPlacementOverlap(kind, x, y, angle, nearbyBodies);
+  }
+
+  /**
+   * Where a piece aimed here can actually go: the pose itself if it fits, otherwise the
+   * first one above it that does. Null when nothing between here and the top of the pile
+   * fits, which is the only case left where a click does nothing.
+   *
+   * Lifting rather than refusing is the answer to "what should a click that cannot place
+   * do". A click that silently does nothing reads as the game being broken, and the cursor
+   * under free placement is a request rather than an instruction — you are saying "here",
+   * and just above here is the honest reading of that when here is full. The search stops at
+   * the top of the pile under the cursor, which always fits, so it can never wander off
+   * looking for somewhere in the sky.
+   */
+  function findPlaceableY(
+    kind: StackObjectKind,
+    x: number,
+    fromY: number,
+    angle: number,
+  ): number | null {
+    if (!isPlacementBlocked(kind, x, fromY, angle)) return fromY;
+    const extent = getStackObjectVerticalExtent(kind, angle);
+    const ceiling = getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP;
+    const step = extent * 0.25;
+    for (let y = fromY + step; y < ceiling; y += step) {
+      if (!isPlacementBlocked(kind, x, y, angle)) return y;
+    }
+    return isPlacementBlocked(kind, x, ceiling, angle) ? null : ceiling;
   }
 
   function setAim(targetX: number, targetY: number, now: number): void {
@@ -380,8 +417,13 @@ export function createGame(deps: GameDeps): Game {
     // Re-clamp against the floor here as well as in setAim: the teeter keeps turning the
     // piece after the pointer stops, and a rotating piece's vertical extent grows, so a pose
     // that cleared the grass a moment ago may not now.
-    current.y = Math.max(aimY, getFloorY(current.kind, current.angle, aimX));
-    aimBlocked = isPlacementBlocked(current.kind, current.x, current.y, current.angle);
+    const heldY = Math.max(aimY, getFloorY(current.kind, current.angle, aimX));
+    // The preview shows where the piece will GO, not where the cursor is, so a click always
+    // puts it exactly where you were looking at it. Without this the marker sits refused
+    // inside the pile and the piece then appears somewhere else.
+    const placeableY = findPlaceableY(current.kind, current.x, heldY, current.angle);
+    current.y = placeableY ?? heldY;
+    aimBlocked = placeableY === null;
     indicator.update(current.kind, current.x, current.y, current.angle, aimBlocked, now);
   }
 
@@ -411,9 +453,11 @@ export function createGame(deps: GameDeps): Game {
   function commitObjectPlacement(now: number): void {
     const current = activeObject;
     if (current === null || phase !== 'playing') return;
-    // A pose that overlaps something already placed is refused rather than resolved. Letting
-    // the solver push the two apart would fire pieces out of the pile at speed.
-    if (isPlacementBlocked(current.kind, current.x, current.y, current.angle)) return;
+    // current.y is already the lifted pose the preview has been showing (see
+    // updateActiveStackObject), so this only catches the case where nothing fits at all.
+    // Placing an overlapping pose anyway would have the solver push the two apart and fire
+    // pieces out of the pile at speed.
+    if (aimBlocked || isPlacementBlocked(current.kind, current.x, current.y, current.angle)) return;
 
     // Exactly where it was being held. It is not dropped onto a surface any more, so it may
     // well be unsupported — and then it falls, which is the player's problem.

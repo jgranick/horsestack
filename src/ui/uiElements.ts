@@ -9,9 +9,10 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
-  appendShapeEndFill,
+  appendShapeLineStyle,
+  appendShapeLineTo,
+  appendShapeMoveTo,
   appendShapePolygon,
-  appendShapeRectangle,
   appendShapeRoundRectangle,
   clearShapeCommands,
   computeTextFormatFontString,
@@ -140,33 +141,35 @@ export function fitLabelToWidth(
  * paints its own multi-colour bitmap, so it arrived blue-and-grey beside the flat near-white
  * marks of the controls either side of it, and no `color` on the label could touch it.
  *
- * WHY IT IS ALL RECTANGLES AND ONE FLAT-SIDED CONE. The shape rasterizer does no coverage
- * blending, so nothing here gets antialiased — unlike the neighbouring glyphs, which come
- * from the font atlas already smoothed, which is why they look fine and this did not. The
- * first version put curved arcs and a diagonal cross beside the speaker in 1.5px strokes,
- * and at this size those are the worst thing you can ask an unantialiased rasterizer for:
- * every one of them is a staircase. Multisampling the UI target was tried as a fix and is
- * not one — it left a black border around the frame and did nothing for the arcs.
+ * Drawn as an OUTLINE — a line style and no fill — so it reads as line work of the same
+ * weight as the ⛶ beside it rather than as a solid blob.
  *
- * So the marks that carry the state are upright bars. A vertical edge lands on whole pixels
- * at any size and cannot alias at all, and two bars beside a speaker read as sound while a
- * bar across them reads as cut off. The cone keeps two diagonals because a speaker without
- * them is a box, and at this size two short ones are a fair price.
+ * WHY THE MARKS ARE UPRIGHT BARS. The shape rasterizer does no coverage blending, so nothing
+ * here is antialiased, unlike the neighbouring glyphs, which arrive from the font atlas
+ * already smoothed. An earlier version put curved arcs and a diagonal cross beside the
+ * speaker, and at this size those are the worst thing you can ask an unantialiased
+ * rasterizer for: every one of them is a staircase. A vertical edge lands on whole pixels at
+ * any size and cannot alias at all, and two bars beside a speaker read as sound while a bar
+ * across them reads as cut off. Multisampling the UI target was tried as a fix and is not
+ * one — it left a black border around the frame and did nothing for the arcs.
  *
  * Centred on the shape's own origin, so the caller places its middle.
  */
 export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: boolean): void {
   clearShapeCommands(shape);
-  appendShapeBeginFill(shape, colour, alpha);
-  // Body and cone as one outline: back of the box, along the top of the cone, down its
-  // face, and back. Wound clockwise in the 2D frame, where +y is down.
+  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
+  // Body and cone as one closed outline: back of the box, along the top of the cone, down
+  // its face, and back. Wound clockwise in the 2D frame, where +y is down.
   appendShapePolygon(shape, [-6, -2.5, -3, -2.5, 1, -6.5, 1, 6.5, -3, 2.5, -6, 2.5]);
   if (muted) {
-    // One bar straight across where the sound would be.
-    appendShapeRectangle(shape, 3, -0.75, 5.5, 1.5);
+    // One stroke straight across where the sound would be.
+    appendShapeMoveTo(shape, 3.5, 0);
+    appendShapeLineTo(shape, 8.5, 0);
   } else {
-    appendShapeRectangle(shape, 3, -3, 1.5, 6);
-    appendShapeRectangle(shape, 6.5, -5.5, 1.5, 11);
+    appendShapeMoveTo(shape, 4, -3);
+    appendShapeLineTo(shape, 4, 3);
+    appendShapeMoveTo(shape, 7.5, -5.5);
+    appendShapeLineTo(shape, 7.5, 5.5);
   }
-  appendShapeEndFill(shape);
+  invalidateNodeRender(shape);
 }

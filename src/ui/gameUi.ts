@@ -160,7 +160,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   // question "what is the difference between these two" is the moment they are looking at
   // the two buttons, and a line here answers it without a screen or a click in the way.
   const timeBlurb = label('Stack as high as you can in 30 seconds', 11, INK, SANS);
-  const steadyBlurb = label("No clock. Drop one horse and you're done", 11, INK, SANS);
+  const steadyBlurb = label('No time and no horse may fall', 11, INK, SANS);
   const menuPill = createShape();
   const menuText = label('MENU', 12, INK, SANS, true);
   // What is coming after the piece in hand.

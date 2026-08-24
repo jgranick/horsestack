@@ -1,81 +1,33 @@
-// The game's UI, drawn with Flight's 2D renderer instead of DOM and CSS.
+// The game's UI: what is on each of the five screens, where it sits, and how it animates in.
+// src/ui/GameUi.hx in the Haxe sibling, which splits the UI the same three ways — this file
+// is the layout, ui/uiRenderer.ts is the GL plumbing that gets it onto the canvas, and
+// ui/uiElements.ts holds the node helpers and the palette it is written with.
 //
-// One canvas. The UI is drawn into its own offscreen render target using a SECOND render
-// state over the SAME GL context, then presented onto the finished 3D frame as a single
-// blended quad.
-//
-// This is all public SDK now. beginGlRenderPass/endGlRenderPass own the target, its clear,
-// and the save/restore of enclosing state; presentGlRenderTarget lays the finished target
-// over the canvas and destroyGlRenderTarget hands its GL objects back. present reads the
-// target's DECLARED colour space, so an 'srgb' target (which a 2D scene is — Flight's 2D
-// tower composites in the encoded domain by policy, render/SCENE2D_WORKING_COLOR_SPACE)
-// is copied straight through with premultiplied blending rather than being gamma-encoded a
-// second time. That seam is the reason the alternatives failed and is worth recording:
-//   - rendering 2D straight at the canvas after the pipeline presents draws nothing;
-//   - rendering it into the pipeline's own target, nested pass or not, destroys the 3D;
-//   - handing the UI target to the pipeline as a DestinationOver CompositeEffect backdrop
-//     works and is public API too — but the pipeline composites in LINEAR, and while our
-//     own colours can be converted on the way in, sRGB texture content cannot, so the
-//     emoji tally came out washed.
-//
-// Two more things make this work, each of which broke an earlier attempt:
-//   - the second state comes from createGlOffscreenRenderState, so its renderer/material
-//     registrations and per-frame batch state are its own. Sharing one state with the 3D
-//     pipeline corrupts the 3D — props lose their textures.
-//   - present runs immediately after the 2D pass closes, which is where renderGlScene2D has
-//     already left blending on and depth/cull off — the state the blend needs. It also owns
-//     its own VAO and unbinds what it sampled, so nothing leaks into the next frame's 3D.
-import type { DisplayObject, GlRenderState, GlRenderTarget, RichText, Shape, TextLabel } from '@flighthq/sdk';
+// Everything below is one long layout pass. It runs every frame and is deliberately
+// straight-line: `update` reads a UiModel snapshot, positions every node for the screen it
+// names, and returns whether anything is still animating. There is no retained widget tree
+// and no diffing — the nodes are built once, and each frame decides afresh what is shown.
+import type { GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
 import {
   addNodeChild,
-  beginGlRenderPass,
-  appendShapeBeginFill,
-  appendShapeRoundRectangle,
-  clearShapeCommands,
-  createCanvasShapeRasterizer,
-  createCanvasTextureResolvers,
   createDisplayObject,
-  createGlOffscreenRenderState,
-  createGlRenderTarget,
-  destroyGlRenderTarget,
-  endGlRenderPass,
   createRichText,
-  createMatrix,
   createShape,
-  createTextLabel,
   easeOutBack,
   easeOutCubic,
   easePiecewise,
   easeScaleOutput,
-  defaultGlShapeCommands,
-  defaultGlRichTextRenderer,
-  defaultGlShapeRenderer,
-  defaultGlTextLabelRenderer,
   invalidateNodeAppearance,
-  invalidateNodeRender,
-  invalidateNodeLocalTransform,
-  prepareScene2DRender,
-  presentGlRenderTarget,
-  registerGlShapeCommands,
-  registerGlShapeRasterizer,
-  registerGlStandardMaterial,
-  registerRenderer,
-  renderGlScene2D,
   saturate,
-  setGlRenderTransform2D,
-  RichTextKind,
   setRichTextDefaultTextFormat,
   setRichTextMultiline,
   setRichTextString,
   setRichTextWidth,
   setRichTextWordWrap,
-  setTextLabelFormat,
-  setTextLabelHeight,
-  setTextLabelString,
   setTextLabelWidth,
-  ShapeKind,
-  TextLabelKind,
 } from '@flighthq/sdk';
+import { createUiRenderer } from './uiRenderer';
+import { fill, GOLD, INK, label, place, SANS, SERIF, setText, show } from './uiElements';
 
 export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
 
@@ -125,12 +77,6 @@ const HANDS_PER_EMOJI_COLUMN = 7;
 // columns for a poor run, a dozen for a good one — and does not saturate until about 26m,
 // which nothing has reached.
 const HANDS_PER_EMOJI = 2;
-// Every colour in this file is 0xRRGGBBAA — Flight's packed colour word, alpha in the low
-// byte. The trailing ff is load-bearing, not decoration: a bare 0xRRGGBB is read as
-// 0x00RRGGBB, which shifts the channels one place (gold arrives as cyan) AND lands the blue
-// byte in alpha, where the fill commands MULTIPLY it into the alpha argument. Dropping it
-// therefore misses twice over, and the second miss is the quiet one.
-const GOLD = 0xffd166ff;
 
 // The DOM original eased each of these with CSS keyframes; recreated here on Flight's
 // easing primitives so the beats survive the move to Flight 2D, and so the curves are the
@@ -153,53 +99,8 @@ function slamScale(t: number): number {
   return t <= 0 ? 1 : slamCurve(t);
 }
 
-const INK = 0xfbf7ecff;
-const SERIF = 'Georgia, "Times New Roman", serif';
-const SANS = 'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif';
-
-function label(text: string, size: number, color: number, font: string, bold = false): TextLabel {
-  const node = createTextLabel();
-  setTextLabelString(node, text);
-  setTextLabelFormat(node, { align: 'center', bold, color, font, size });
-  setTextLabelWidth(node, 10);
-  setTextLabelHeight(node, size * 1.6);
-  return node;
-}
-
-function place(node: DisplayObject, x: number, y: number): void {
-  node.x = x;
-  node.y = y;
-  invalidateNodeLocalTransform(node);
-}
-
-function show(node: DisplayObject, visible: boolean): void {
-  if (node.visible === visible) return;
-  node.visible = visible;
-  invalidateNodeAppearance(node);
-}
-
-function setText(node: TextLabel, text: string): void {
-  if (node.data.text === text) return;
-  setTextLabelString(node, text);
-}
-
-function fill(shape: Shape, colour: number, alpha: number, x: number, y: number, w: number, h: number, r: number): void {
-  clearShapeCommands(shape);
-  appendShapeBeginFill(shape, colour, alpha);
-  appendShapeRoundRectangle(shape, x, y, w, h, r, r);
-  invalidateNodeRender(shape);
-}
-
 export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): UiState {
-  const state: GlRenderState = createGlOffscreenRenderState(screenState);
-  let target: GlRenderTarget | null = null;
-  let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
-  registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
-  registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
-  registerGlShapeCommands(state, defaultGlShapeCommands);
-  registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers()));
-  registerGlStandardMaterial(state);
+  const renderer = createUiRenderer(screenState, pixelRatio);
 
   const root = createDisplayObject();
   // Same treatment as TIME UP and the result height: big gold serif, so the three
@@ -525,41 +426,11 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   function resize(nextWidth: number, nextHeight: number, nextPixelRatio: number): void {
     width = Math.max(1, Math.round(nextWidth));
     height = Math.max(1, Math.round(nextHeight));
-    state.pixelRatio = nextPixelRatio;
-    deviceTransform = createMatrix(nextPixelRatio, 0, 0, nextPixelRatio, 0, 0);
-    // The target matches the drawing buffer exactly, so UI text lands on whole device
-    // pixels and stays crisp rather than being resampled by the composite. Resizing
-    // allocates a new one, so the old one has to go back or every resize leaks a
-    // screen-sized texture.
-    if (target !== null) destroyGlRenderTarget(state, target);
-    target = createGlRenderTarget(state, {
-      width: Math.round(width * nextPixelRatio),
-      height: Math.round(height * nextPixelRatio),
-      depth: 'none',
-    });
+    renderer.resize(width, height, nextPixelRatio);
   }
 
   function render(): void {
-    const surface = target;
-    if (surface === null) return;
-    // The device transform must be set BEFORE prepare, not after begin: it is an input to
-    // every prepared proxy transform, so setting it later leaves the frame laid out at 1:1
-    // in a target sized in device pixels — on a 2x display the whole UI drew into the
-    // top-left quarter, and the buttons stopped being where their hit boxes were.
-    setGlRenderTransform2D(state, deviceTransform);
-    if (!prepareScene2DRender(state, root)) return;
-
-    // Draw the UI into its own target. begin binds and clears it, end resolves and puts the
-    // enclosing binding and viewport back, so the frame the 3D pipeline just presented is
-    // untouched. The bracket also saves and restores the transform set above.
-    beginGlRenderPass(state, surface);
-    renderGlScene2D(state, root);
-    endGlRenderPass(state);
-
-    // Lay it over that frame. The target declares itself sRGB, so present copies it straight
-    // through — no second gamma encode — with premultiplied blending, which is exactly what
-    // the UI's own transparent target needs. See the note at the top of the file.
-    presentGlRenderTarget(state, surface);
+    renderer.render(root);
   }
 
   return { buttons, render, resize, update };

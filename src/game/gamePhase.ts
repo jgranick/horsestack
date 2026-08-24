@@ -1,7 +1,8 @@
 // The round's state machine, as five names. src/game/GamePhase.hx in the Haxe sibling.
 //
-// Its own file because both game/game.ts (which advances it) and main.ts (which maps it to a
-// UI screen) need it, and neither should have to import the other to name a phase.
+// Its own file so the phase can be named without importing the module that advances it —
+// game/game.ts re-exports it through the Game interface, which is how main.ts reads it when
+// mapping a phase to a UI screen.
 //
 //   loading   — models still downloading; no input, no frames
 //   ready     — models in, title screen up, waiting for PLAY

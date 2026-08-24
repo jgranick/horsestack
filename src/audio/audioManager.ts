@@ -75,6 +75,9 @@ export interface AudioManager {
   readonly muted: boolean;
 }
 
+// The track opens on two seconds of near-silence; skipping it means the music arrives on
+// the beat the player pressed PLAY.
+const SOUNDTRACK_SKIP_SECONDS = 2;
 const MUTED_KEY = 'horse-stacker.muted';
 
 // Per-sound gains, carried over from the element volumes they replaced.
@@ -123,6 +126,11 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   let idleSince = 0;
   let ambienceFaded = false;
   let muted = readMuted();
+  // What SHOULD be looping, as against what is. The two come apart on the very first round:
+  // the buffers are still decoding then, so the calls that start these return nothing and
+  // the round plays silent. See reconcileLoops.
+  let wantSoundtrack = false;
+  let wantAmbience = false;
 
   function ensureContext(): AudioContext | null {
     if (context === null) {
@@ -209,7 +217,34 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     setAudioBusGain(ambienceBus, 1);
     ambienceFaded = false;
     idleSince = 0;
+    wantAmbience = true;
     if (ambienceChannel === null) ambienceChannel = play('ambience', ambienceBus, Infinity);
+  }
+
+  /**
+   * Start any loop that should be running and is not.
+   *
+   * THE FIRST ROUND IS SILENT WITHOUT THIS. The AudioContext is built on the first user
+   * gesture — it has to be, since one built earlier arrives suspended — and the sounds can
+   * only be decoded once there is a context to decode them into. But the gesture that builds
+   * it is the same click that starts round one, so at the moment the music is asked for its
+   * buffer is still being fetched, play() finds nothing in `resources` and returns null, and
+   * the round runs without music. By the second round the decode has long finished, which is
+   * exactly the shape of the bug: fine on every play but the first.
+   *
+   * Retrying each frame rather than queueing a callback per sound keeps it honest about
+   * INTENT: a loop starts if it is still wanted by the time it can be heard, and a round
+   * that ended while its music was still decoding stays quiet, which is what you want.
+   * One-shot effects are deliberately not retried — a thud that arrives half a second late
+   * is worse than one that never comes.
+   */
+  function reconcileLoops(): void {
+    if (wantAmbience && ambienceChannel === null) {
+      ambienceChannel = play('ambience', ambienceBus, Infinity);
+    }
+    if (wantSoundtrack && soundtrackChannel === null) {
+      soundtrackChannel = play('soundtrack', musicBus, 0, SOUNDTRACK_SKIP_SECONDS);
+    }
   }
 
   return {
@@ -235,6 +270,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     },
 
     beginResultCount() {
+      wantSoundtrack = false;
       soundtrackChannel = stop(soundtrackChannel);
       play('fanfare', effectsBus);
     },
@@ -279,24 +315,29 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       // STEADY HANDS has no clock, and a three minute song under an open-ended session turns
       // into a loop you notice. Stopping rather than merely not starting matters because the
       // previous round may have been a timed one whose music is still playing.
-      if (mode === 'steady') return;
+      wantSoundtrack = mode !== 'steady';
+      if (!wantSoundtrack) return;
       // The track opens on two seconds of near-silence, which reads as the music failing to
       // start on the very beat the player pressed PLAY.
-      soundtrackChannel = play('soundtrack', musicBus, 0, 2);
+      soundtrackChannel = play('soundtrack', musicBus, 0, SOUNDTRACK_SKIP_SECONDS);
     },
 
     leaveRound() {
+      wantSoundtrack = false;
       soundtrackChannel = stop(soundtrackChannel);
       stopWhinny();
     },
 
     stopAll() {
+      wantSoundtrack = false;
+      wantAmbience = false;
       soundtrackChannel = stop(soundtrackChannel);
       ambienceChannel = stop(ambienceChannel);
       stopWhinny();
     },
 
     update(now, playing) {
+      reconcileLoops();
       if (playing) {
         if (ambienceFaded || idleSince !== 0) raiseAmbience();
         return;

@@ -15,6 +15,7 @@ import { STACK_BASE_Y, STACK_X, STACK_Z } from './game/gameConfig';
 import type { StackObjectKind } from './physics/stackObjectKind';
 import { getStackHeightMeters } from './physics/stackObjectProfile';
 import { createCameraRig } from './scene/cameraRig';
+import { probeFrameEdges } from './scene/edgeProbe';
 import { createLandingIndicator } from './scene/landingIndicator';
 import { extractFarmPropTemplates, loadGltfScene, mountFarm } from './scene/modelLoader';
 import { createParticleEffects } from './scene/particleEffects';
@@ -353,6 +354,9 @@ function setLoadingState(copy: string): void {
 
 function renderFrame(): void {
   sceneRenderer.drawScene(sceneGraph, backdropFocus);
+  // Between the two presents, so a border pixel that is already wrong here is the scene's
+  // and one that only goes wrong below is the UI's. See scene/edgeProbe.ts.
+  if (import.meta.env.DEV && edgeProbeRequested) probeFrameEdges(renderState.gl, 'after 3D');
   const countProgress = game.countProgress;
   const finalMeters = getStackHeightMeters(game.finalHeight);
   const shownMeters = finalMeters * easeOutCubic(countProgress);
@@ -381,8 +385,16 @@ function renderFrame(): void {
     timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup' ? 1 : game.timeUpProgress,
   });
   gameUi.render();
+  if (import.meta.env.DEV && edgeProbeRequested) {
+    probeFrameEdges(renderState.gl, 'after UI');
+    edgeProbeRequested = false;
+  }
   if (uiWantsAnotherFrame) renderRequested = true;
 }
+
+// DEV only: set by __game.probeEdges() and cleared by the frame it reads, so the probe costs
+// four readPixels calls once rather than a stall on every frame.
+let edgeProbeRequested = false;
 
 // DEV only: pins the UI to one screen so a short-lived one (TIME UP lasts 2.35s) can be
 // held still and inspected instead of raced with a screenshot.
@@ -489,6 +501,12 @@ if (import.meta.env.DEV) {
     },
     get placed() {
       return game.objectsDropped;
+    },
+    // Reads the frame's outermost pixels on the next frame and logs what is in them, before
+    // and after the UI is composited. For chasing an edge artifact without a screenshot.
+    probeEdges() {
+      edgeProbeRequested = true;
+      renderRequested = true;
     },
     set screen(value: UiScreen | null) {
       forcedScreen = value;

@@ -64,7 +64,17 @@ export const CAMERA_TOP_BIAS = 0.16;
 // cameraRig.update. One horse height; the frame has about that much wasted grass below the
 // pasture to spend on it, so the pasture stays in shot.
 export const CAMERA_EARLY_HEADROOM = HORSE_HALF_HEIGHT * 2;
-export const CAMERA_MIN_DISTANCE = 1.05;
+// How far in the camera will ever come, which in practice sets the framing at the START of
+// a round: the fit wants about 0.7 for a bare pasture, so this is what it gets instead, and
+// it stops binding once the pile has any height to it.
+//
+// It was 1.05, and that showed about a THIRD of the pasture's width. A player who cannot
+// see the ground either side of the pile has only one direction to build in, and the game
+// quietly became "how high", when going wide first is the better opening and the pasture is
+// 3.18 across. At this distance a little over half the width is in shot, which is enough to
+// see that the room exists. Not further: the pile has to stay legible against the barn, and
+// a horse still wants to read as a horse rather than as a brown mark.
+export const CAMERA_MIN_DISTANCE = 1.7;
 // High enough that the fit is never the thing that binds in real play. It used to be
 // 3.25, which the fit reached at a 12m pile — from there the camera stopped backing off
 // and the tower simply climbed the frame instead. Measured over played runs at the old

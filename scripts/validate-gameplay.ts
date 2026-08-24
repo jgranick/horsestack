@@ -24,8 +24,8 @@ import {
   STACK_OBJECT_WEIGHTS,
   stepHorseStack,
   TYPICAL_HORSE_WITHERS_METERS,
-} from '../src/horseStackPhysics';
-import type { StackObjectKind } from '../src/horseStackPhysics';
+} from '../src/physics/horseStackPhysics';
+import type { StackObjectKind } from '../src/physics/horseStackPhysics';
 
 interface ScenarioResult {
   contacts: number;

@@ -9,8 +9,8 @@ import {
   FARM_PROP_VARIANTS,
   getRandomFarmPropVariantIndex,
   selectFarmPropTriangleIndices,
-} from '../src/farmPropGeometry';
-import { STACK_OBJECT_PROFILES } from '../src/horseStackPhysics';
+} from '../src/data/farmPropGeometry';
+import { STACK_OBJECT_PROFILES } from '../src/physics/horseStackPhysics';
 
 const models = [
   {

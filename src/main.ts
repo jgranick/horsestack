@@ -95,15 +95,15 @@ import {
 } from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
-import { createGameUi2D } from './gameUi2d';
-import type { UiScreen } from './gameUi2d';
+import { createGameUi2D } from './ui/gameUi';
+import type { UiScreen } from './ui/gameUi';
 import {
   FARM_PROP_SCENE_SCALE,
   FARM_PROP_VARIANTS,
   getRandomFarmPropVariantIndex,
   selectFarmPropTriangleIndices,
-} from './farmPropGeometry';
-import type { FarmPropPartSpec, FarmPropTriangleFilter } from './farmPropGeometry';
+} from './data/farmPropGeometry';
+import type { FarmPropPartSpec, FarmPropTriangleFilter } from './data/farmPropGeometry';
 import {
   addStackObjectBody,
   createHorseStackWorld,
@@ -117,14 +117,42 @@ import {
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
   HORSE_HALF_HEIGHT,
-  HORSE_SIZE_MULTIPLIER,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
   STACK_OBJECT_PROFILES,
   stepHorseStack,
-} from './horseStackPhysics';
-import type { StackObjectKind } from './horseStackPhysics';
+} from './physics/horseStackPhysics';
+import type { StackObjectKind } from './physics/horseStackPhysics';
+import {
+  CAMERA_HEIGHT_COLLAPSE_RATE,
+  CAMERA_HEIGHT_DEADBAND,
+  CAMERA_HEIGHT_FALL_RATE,
+  CAMERA_HEIGHT_RISE_RATE,
+  CAMERA_MAX_DISTANCE,
+  CAMERA_MIN_DISTANCE,
+  CAMERA_PILE_FILL,
+  CAMERA_PILE_FILL_AT_HEIGHT,
+  CAMERA_TOP_BIAS,
+  FIXED_STEP_LIMIT,
+  GAME_DURATION_MS,
+  HORSE_SCALE,
+  HORSE_VISUAL_CENTER_Y,
+  INDICATOR_DAMPING,
+  INDICATOR_MAX_ANGLE,
+  INDICATOR_MAX_SPIN,
+  INDICATOR_SPRING,
+  LANDING_PREVIEW_LIFT,
+  MAX_RESULT_COUNT_DURATION_MS,
+  MIN_RESULT_COUNT_DURATION_MS,
+  STACK_BASE_Y,
+  STACK_X,
+  STACK_Z,
+  START_INPUT_GUARD_MS,
+  WINDMILL_RADIANS_PER_SECOND,
+} from './game/gameConfig';
+import { createAudioManager } from './audio/audioManager';
+import { prefersReducedMotion } from './reducedMotion';
 import './styles.css';
 
 type GamePhase = 'loading' | 'ready' | 'playing' | 'settling' | 'finished';
@@ -143,85 +171,6 @@ interface StackedObject {
   node: Node3D;
 }
 
-// Maps physics Y into world Y, and so decides where the play surface sits against the
-// rendered farm. PASTURE_TOP_Y is -0.015, putting the platform at world Y -0.072 — the
-// height of the modelled grass under the play band, sampled by ray-casting the farm
-// glTF's Ground/Ground2 triangles along the pile line (world x=1.55): the terrain runs
-// -0.045 to -0.079 there, mean -0.066, and this sits just under that so pieces settle
-// into the grass rather than hovering over it. Deliberately fixed HERE and not by moving
-// PASTURE_TOP_Y: the physics and scoring code treats y=0 as the floor in several places
-// (getSupportedStackHeight's empty-pile sentinel, its fall-off test, getStackHeightMeters'
-// guard), so lowering the pasture itself would read a settled chicken as fallen.
-const STACK_BASE_Y = -0.057;
-// At a 90° camera azimuth, +X is toward the viewer and Z runs horizontally.
-// Pull the 2D play plane close to the island's front edge at roughly x=1.8,
-// while retaining a small strip of visible pasture beneath the pieces.
-const STACK_X = 1.55;
-const STACK_Z = -2.15;
-const HORSE_SCALE = 0.00279 * HORSE_SIZE_MULTIPLIER;
-const HORSE_VISUAL_CENTER_Y = 0.07875 * HORSE_SIZE_MULTIPLIER;
-// The preview floats a full horse-height above its landing surface so the queued
-// object reads as "about to drop" rather than as an object already in the pile.
-// Placement still uses the unlifted landing pose.
-// Was a full horse-height. Once the camera fills the frame with the tower, a marker that
-// high sat off the top edge in all but 4 samples in 45 — and with the header and the
-// in-viewer callout both hidden, the marker is the only remaining cue to what is queued.
-// At this lift it is back inside the frame in about 7 samples in 10, still clearly
-// hovering above the landing pose rather than resting on it.
-const LANDING_PREVIEW_LIFT = HORSE_HALF_HEIGHT * 1.2;
-// The camera used to hold a constant lift above the pile so the raised marker always
-// cleared the top of the frame. Measured over a played run, that spent 56% of the screen
-// on empty sky and pushed the base of the pile off the bottom edge in 32 of 41 samples.
-// Framing is pulled toward the pile instead: the target sits this share of the visible
-// half-height BELOW the pile top, and the camera starts a little further back so the
-// marker still fits. Measured after: 40% sky, the pile top at +0.19 of the frame instead
-// of -0.13, and the ground never leaving the frame at all. The marker's centre grazes the
-// top edge somewhat more often (8 samples in 43 against 3), which is the deliberate trade
-// — the pile is the subject, the marker is a cue.
-// Share of the frame height the tower should occupy, and how far above the tower's middle
-// to sit. Measured over played runs against the previous top-tracking camera: the tower
-// goes from filling 54% of the frame to about 70%, the pasture stays in frame throughout,
-// and the pile top is inside the frame in roughly nine samples in ten.
-// How much of the frame the tower fills. It EASES OFF with height on purpose: a tall pile
-// framed as tightly as a short one crowds the barn and silo out of shot, and the joke is
-// the pile reaching them. Backing off keeps them behind it.
-const CAMERA_PILE_FILL = 0.8;
-const CAMERA_PILE_FILL_AT_HEIGHT = 0.56;
-const CAMERA_TOP_BIAS = 0.16;
-const CAMERA_MIN_DISTANCE = 1.05;
-// High enough that the fit is never the thing that binds in real play. It used to be
-// 3.25, which the fit reached at a 12m pile — from there the camera stopped backing off
-// and the tower simply climbed the frame instead. Measured over played runs at the old
-// limit, the pile top sat 91% of the way to the top edge above 20m and the piece waiting
-// to drop was off screen in every sample. Piles now reach past 20m routinely, so the
-// ceiling has to clear that with room. GAME_VIEW.maxDistance below must stay above this:
-// the controller clamps again on its own, and that second clamp is the easier one to miss.
-const CAMERA_MAX_DISTANCE = 7.5;
-// The camera frames the measured stack top, but that measurement is a max over the
-// qualifying bodies: when a piece settles, the top can change by centimetres in a single
-// step while nothing visibly moves much. Feeding that straight to the camera is what made
-// it shudder. The camera follows its own copy of the height instead — deadbanded so
-// millimetre flicker is ignored outright, and rate limited so even the worst measured jump
-// (about 0.063 units) reaches the camera as at most 0.0023 per frame rather than all at
-// once. Rising is quick so a placed piece is framed promptly; falling is slow, because a
-// pile that has just lost a few millimetres is exactly the case that should not yank the
-// view. Only the camera reads this; scoring and the HUD keep the true measurement.
-const CAMERA_HEIGHT_DEADBAND = 0.008;
-const CAMERA_HEIGHT_RISE_RATE = 1.1;
-const CAMERA_HEIGHT_FALL_RATE = 0.14;
-// A flat fall rate treats losing a couple of centimetres and losing the whole tower as the
-// same event. At 0.14 a unit-and-a-half collapse takes twelve seconds to walk back down,
-// which is most of a round spent framed for a pile that is no longer there. So the fall
-// gets a term proportional to how far behind the camera is: a settling wobble still
-// crawls, while a genuine collapse is chased down in a second or two and eases as it
-// closes, since the term shrinks with the gap it is closing.
-const CAMERA_HEIGHT_COLLAPSE_RATE = 1.6;
-// One lazy turn every fourteen seconds. The sails are ambient scenery, so this is
-// slow enough to read as idling wind rather than as something demanding attention.
-const WINDMILL_RADIANS_PER_SECOND = (Math.PI * 2) / 14;
-// Long enough to swallow the second half of a double-click on "Start stacking",
-// short enough that a player who reacts to the first preview never notices it.
-const START_INPUT_GUARD_MS = 400;
 // The title and score screens used to sit behind a flat black wash. The scene is the nicest
 // thing on screen, so instead of hiding it the pipeline defocuses it: a real blur, plus a
 // vignette to pull the eye to the middle and keep light text legible over bright grass.
@@ -258,27 +207,6 @@ function getBackdropEffects(focus: number): readonly RenderEffect[] {
 }
 
 let backdropFocus = 0;
-const GAME_DURATION_MS = 30_000;
-const MIN_RESULT_COUNT_DURATION_MS = 2_200;
-const MAX_RESULT_COUNT_DURATION_MS = 4_000;
-const RESULT_TICK_INTERVAL_MS = 32;
-const RESULT_TICK_POOL_SIZE = 8;
-const HORSE_WHINNY_MIN_INTERVAL_MS = 9_000;
-const HORSE_WHINNY_INTERVAL_JITTER_MS = 6_000;
-const FINAL_WHINNY_CHANCE = 0.28;
-// Quiet regions in the source sample separate these four calls. Cueing the
-// original file avoids shipping four near-identical derived assets.
-const HORSE_WHINNY_CUES = [
-  { duration: 2.1, start: 0.08 },
-  { duration: 1.2, start: 3.7 },
-  { duration: 1.7, start: 5.7 },
-  { duration: 1.25, start: 8.82 },
-] as const;
-const INDICATOR_SPRING = 22;
-const INDICATOR_DAMPING = 6.2;
-const INDICATOR_MAX_ANGLE = 0.65;
-const INDICATOR_MAX_SPIN = 5.5;
-const FIXED_STEP_LIMIT = 6;
 const GAME_VIEW = {
   azimuth: Math.PI / 2,
   distance: 0.82,
@@ -296,25 +224,13 @@ const loadingCopy = requireElement<HTMLParagraphElement>('loading-copy');
 const errorPanel = requireElement<HTMLDivElement>('error-panel');
 const retryButton = requireElement<HTMLButtonElement>('retry-button');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 // Keep these paths indirect so Vite leaves the runtime module-relative URLs untouched
 // without warning. Both directories are served straight out of public/.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 const soundPathFromModule = '../sounds/';
 const soundRoot = new URL(soundPathFromModule, import.meta.url).href;
-const soundUrl = (file: string): string => new URL(encodeURIComponent(file), soundRoot).href;
-
-const soundtrack = createAudioTrack(soundUrl("Elijah_K - The Mountain's Happy Song.mp3"), 0.36);
-const farmAmbience = createAudioTrack(soundUrl('free-sound-1674978362.mp3'), 0.16, true);
-const horseThud = createAudioTrack(soundUrl('free-sound-1674747349.mp3'), 0.24);
-const countFanfare = createAudioTrack(soundUrl('free-sound-1674977569.mp3'), 0.46);
-const resultTada = createAudioTrack(soundUrl('free-sound-1674895520.mp3'), 0.52);
-const horseWhinnies = createAudioTrack(soundUrl('free-sound-effects-HORSE3.mp3'), 0.22);
-const resultTickUrl = soundUrl('free-sound-1674778893.mp3');
-const resultTicks = Array.from({ length: RESULT_TICK_POOL_SIZE }, () =>
-  createAudioTrack(resultTickUrl, 0.1),
-);
+const audio = createAudioManager(soundRoot);
 
 retryButton.addEventListener('click', () => window.location.reload());
 const { canvas, pipeline, renderState } = initializeRenderer();
@@ -607,11 +523,6 @@ let resultAnimationStart = 0;
 let resultAnimationDuration = 0;
 let resultHands = 0;
 let resultHandsShown = 0;
-let resultTickIndex = 0;
-let nextResultTickAt = 0;
-let nextHorseWhinnyAt = 0;
-let horseWhinnyStopTimer: number | null = null;
-let scheduledHorseWhinnyTimer: number | null = null;
 let physicsAccumulator = 0;
 let previousTime = performance.now();
 let isViewerVisible = true;
@@ -677,7 +588,7 @@ function bindWindmillSails(farm: Readonly<Scene3D>): void {
 
 function updateWindmill(deltaTime: number): boolean {
   const sails = windmillSails;
-  if (sails === null || reducedMotion.matches) return false;
+  if (sails === null || prefersReducedMotion()) return false;
   windmillAngle = (windmillAngle + WINDMILL_RADIANS_PER_SECOND * deltaTime) % (Math.PI * 2);
   const sin = Math.sin(windmillAngle);
   const cos = Math.cos(windmillAngle);
@@ -928,7 +839,7 @@ function startGame(startedFrom?: Event): void {
   // The credits only exist on the score screen now, so a panel left open there must not
   // still be open when the next score screen arrives.
   creditsOpen = false;
-  startGameAudio(now);
+  audio.startRound(now);
   physicsWorld = createHorseStackWorld();
   physicsAccumulator = 0;
   activeObject = null;
@@ -1038,7 +949,7 @@ function commitObjectPlacement(now: number): void {
   if (landingRadiance !== null) landingRadiance.enabled = false;
   indicatorLight.intensity = 0;
   objectsDropped++;
-  restartAudioTrack(horseThud, 'Stack thud');
+  audio.playStackThud();
 
   nextObjectAt = now + getNextObjectDelay(objectsDropped);
   renderRequested = true;
@@ -1067,8 +978,7 @@ function updateGame(now: number): void {
 
 function beginSettling(now: number): void {
   phase = 'settling';
-  stopAudioTrack(soundtrack);
-  restartAudioTrack(countFanfare, 'Count fanfare');
+  audio.beginResultCount();
   activeObject = null;
   finishAt = now + FINAL_SETTLE_SECONDS * 1000;
   if (landingGhost !== null) landingGhost.enabled = false;
@@ -1084,10 +994,9 @@ function finishGame(now: number): void {
   recordFinalHeight(getStackHeightMeters(finalHeight));
   resultHands = getStackHeightHands(finalHeight);
   resultHandsShown = 0;
-  resultTickIndex = 0;
-  nextResultTickAt = now;
+  audio.armResultTicks(now);
   resultAnimationStart = now;
-  resultAnimationDuration = reducedMotion.matches
+  resultAnimationDuration = prefersReducedMotion()
     ? 1
     : clamp(
         1_800 + resultHands * 14,
@@ -1103,7 +1012,7 @@ function updateResultAnimation(now: number): void {
   const progress = clamp((now - resultAnimationStart) / resultAnimationDuration, 0, 1);
   const easedProgress = easeOutCubic(progress);
   const handsToShow = Math.min(resultHands, Math.floor(resultHands * easedProgress));
-  if (advanceHorseHands(handsToShow)) playResultTick(now);
+  if (advanceHorseHands(handsToShow)) audio.playResultTick(now);
 
   if (progress >= 1) completeResultAnimation();
 }
@@ -1118,8 +1027,7 @@ function advanceHorseHands(targetCount: number): boolean {
 
 function completeResultAnimation(): void {
   resultAnimationStart = 0;
-  restartAudioTrack(resultTada, 'Result fanfare');
-  maybePlayCelebrationWhinny();
+  audio.celebrateResult();
   advanceHorseHands(resultHands);
 
   celebrateFinalHeight();
@@ -1214,7 +1122,7 @@ function handlePhysicsContacts(now: number): void {
     STACK_Z - point.x,
     0xe8d6a9cc,
   );
-  maybePlayCollisionWhinny(now);
+  audio.maybePlayCollisionWhinny(now);
 }
 
 function synchronizeStackVisuals(): void {
@@ -1236,7 +1144,7 @@ function synchronizeStackVisuals(): void {
     // read we want from something this tall. Amplitude grows with how high the piece rides
     // and is nil at the pasture, so the base looks planted and the top looks precarious.
     const carried = clamp((body.y - PASTURE_TOP_Y) / 0.9, 0, 1);
-    const sway = reducedMotion.matches ? 0 : carried * carried;
+    const sway = prefersReducedMotion() ? 0 : carried * carried;
     const phase = swayClock + body.index * 0.7;
     setStackObjectVisualTransform(
       object.node,
@@ -1276,7 +1184,7 @@ function updateLandingGhost(current: Readonly<ActiveStackObject>, now: number): 
 function updateLandingRadiance(x: number, physicsY: number, now: number): void {
   const radiance = landingRadiance;
   if (radiance === null) return;
-  const pulse = reducedMotion.matches ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
+  const pulse = prefersReducedMotion() ? 1 : 1 + Math.sin(now * 0.006) * 0.025;
   radiance.enabled = true;
   setNode3DAlpha(radiance, 0.48 + Math.sin(now * 0.008) * 0.055);
   radiance.position.x = STACK_X + 0.006;
@@ -1822,122 +1730,8 @@ function bindRenderingLifecycle(): void {
   });
 }
 
-function createAudioTrack(source: string, volume: number, loop = false): HTMLAudioElement {
-  const audio = new Audio(source);
-  audio.preload = 'auto';
-  audio.volume = volume;
-  audio.loop = loop;
-  return audio;
-}
-
-function playAudioTrack(audio: HTMLAudioElement, label: string): void {
-  void audio.play().catch((error: unknown) => {
-    if (error instanceof DOMException && error.name === 'AbortError') return;
-    // Audio permission or device failures should never prevent a game from running.
-    console.info(`${label} could not start.`, error);
-  });
-}
-
-function restartAudioTrack(audio: HTMLAudioElement, label: string): void {
-  stopAudioTrack(audio);
-  playAudioTrack(audio, label);
-}
-
-function stopAudioTrack(audio: HTMLAudioElement): void {
-  audio.pause();
-  audio.currentTime = 0;
-}
-
-function stopHorseWhinny(): void {
-  if (horseWhinnyStopTimer !== null) window.clearTimeout(horseWhinnyStopTimer);
-  if (scheduledHorseWhinnyTimer !== null) window.clearTimeout(scheduledHorseWhinnyTimer);
-  horseWhinnyStopTimer = null;
-  scheduledHorseWhinnyTimer = null;
-  stopAudioTrack(horseWhinnies);
-}
-
-function playHorseWhinny(): void {
-  stopHorseWhinny();
-  const cue = HORSE_WHINNY_CUES[Math.floor(Math.random() * HORSE_WHINNY_CUES.length)];
-  if (cue === undefined) return;
-  horseWhinnies.currentTime = cue.start;
-  playAudioTrack(horseWhinnies, 'Horse whinny');
-  horseWhinnyStopTimer = window.setTimeout(() => {
-    horseWhinnyStopTimer = null;
-    stopAudioTrack(horseWhinnies);
-  }, cue.duration * 1000);
-}
-
-function maybePlayCollisionWhinny(now: number): void {
-  if (now < nextHorseWhinnyAt) return;
-  playHorseWhinny();
-  nextHorseWhinnyAt =
-    now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
-}
-
-function maybePlayCelebrationWhinny(): void {
-  if (Math.random() >= FINAL_WHINNY_CHANCE) return;
-  scheduledHorseWhinnyTimer = window.setTimeout(() => {
-    scheduledHorseWhinnyTimer = null;
-    playHorseWhinny();
-  }, 180);
-}
-
-function reloadAudioTrack(audio: HTMLAudioElement): void {
-  audio.pause();
-  // load() clears an ended or interrupted media pipeline and starts a fresh
-  // preload. Re-arming short effects here gives them the entire next round to
-  // buffer instead of discovering an evicted resource during the result beat.
-  audio.load();
-}
-
-function playResultTick(now: number): void {
-  if (reducedMotion.matches || now < nextResultTickAt) return;
-  const tick = resultTicks[resultTickIndex % resultTicks.length];
-  if (tick === undefined) return;
-  resultTickIndex++;
-  nextResultTickAt = now + RESULT_TICK_INTERVAL_MS;
-  restartAudioTrack(tick, 'Result tick');
-}
-
-function stopResultTicks(): void {
-  for (const tick of resultTicks) stopAudioTrack(tick);
-  resultTickIndex = 0;
-  nextResultTickAt = 0;
-}
-
-function reloadGameEffects(): void {
-  stopHorseWhinny();
-  reloadAudioTrack(horseThud);
-  reloadAudioTrack(horseWhinnies);
-  reloadAudioTrack(countFanfare);
-  reloadAudioTrack(resultTada);
-  for (const tick of resultTicks) reloadAudioTrack(tick);
-  resultTickIndex = 0;
-  nextResultTickAt = 0;
-}
-
-function startGameAudio(now: number): void {
-  reloadGameEffects();
-  nextHorseWhinnyAt =
-    now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
-  if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
-  restartAudioTrack(soundtrack, 'Background music');
-  soundtrack.currentTime = 2;
-}
-
-function stopAllAudio(): void {
-  stopAudioTrack(soundtrack);
-  stopAudioTrack(farmAmbience);
-  stopAudioTrack(horseThud);
-  stopAudioTrack(countFanfare);
-  stopAudioTrack(resultTada);
-  stopResultTicks();
-  stopHorseWhinny();
-}
-
 function showSceneError(message: string, error: unknown): void {
-  stopAllAudio();
+  audio.stopAll();
   console.error(message, error);
   loadingPanel.classList.add('is-hidden');
   errorPanel.hidden = false;

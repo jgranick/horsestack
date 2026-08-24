@@ -28,8 +28,8 @@ import {
   PHYSICS_STEP,
   STACK_OBJECT_PROFILES,
   stepHorseStack,
-} from '../src/horseStackPhysics';
-import type { StackObjectKind } from '../src/horseStackPhysics';
+} from '../src/physics/horseStackPhysics';
+import type { StackObjectKind } from '../src/physics/horseStackPhysics';
 
 type World = ReturnType<typeof createHorseStackWorld>;
 interface Variant {

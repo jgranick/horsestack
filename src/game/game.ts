@@ -603,10 +603,21 @@ export function createGame(deps: GameDeps): Game {
     // and without this the hovering ghost and its halo hang over the result screen.
     activeObject = null;
     indicator.hide();
-    // The peak, not the height at this instant. They are the same for a timed round, which
-    // ends with the pile standing; a STEADY HANDS run ends BECAUSE pieces fell, often taking
-    // the top of the tower with them, and scoring the rubble would throw away the whole run.
-    finalHeight = Math.max(peakHeight, getCurrentStackHeight());
+    // Each mode scores what its own rule says, and they are NOT the same number.
+    //
+    // A STEADY HANDS run ends BECAUSE pieces fell, often taking the top of the tower with
+    // them, so it scores the peak: the tallest the tower ever stood. Scoring the rubble it
+    // ends as would throw away the whole run.
+    //
+    // A timed round scores what is STANDING after the clock and FINAL_SETTLE_SECONDS. This
+    // used to take the peak as well, on the reasoning that a timed round ends with the pile
+    // up so the two agree. They do not, and holding a key finds the gap: keyboard auto-repeat
+    // places each piece the instant it is drawn, faster than the pile can fall, and a column
+    // placed like that is briefly in contact and briefly still — which is all the live
+    // measurement asks for (see getSupportedStackHeight). The peak latched that column, and
+    // the round scored a tower that never stood for a frame after gravity reached it.
+    finalHeight =
+      mode === 'steady' ? Math.max(peakHeight, getCurrentStackHeight()) : getCurrentStackHeight();
     cachedStackHeight = finalHeight;
     recordFinalHeight(getStackHeightMeters(finalHeight));
     resultHands = getStackHeightHands(finalHeight);

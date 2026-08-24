@@ -9,8 +9,8 @@
 // Two pressures on one verb, which is the whole point of having two: `time` asks how high
 // you can get in half a minute, `steady` asks how high you can get without dropping any.
 // Neither is a different game, which is why nothing below this branches on the mode beyond
-// the four places that actually differ — the clock, the soundtrack, the HUD, and what ends
-// the round.
+// the five places that actually differ — the clock, the soundtrack, the HUD, what ends the
+// round, and which height above SCORES it: the settled one for `time`, the peak for `steady`.
 //
 // `steady` was called `endless` for one commit. It was a true sandbox then, and a sandbox
 // turned out to have nothing to score: the height readout and the per-mode record both want

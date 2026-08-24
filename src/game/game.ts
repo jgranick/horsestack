@@ -65,6 +65,7 @@ import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
   HORSE_DROP_GRACE_MS,
+  PLACEMENT_LIFT_LIMIT,
   PLACEMENT_LIFT_STEP,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
@@ -324,15 +325,17 @@ export function createGame(deps: GameDeps): Game {
 
   /**
    * Where a piece aimed here can actually go: the pose itself if it fits, otherwise the
-   * first one above it that does. Null when nothing between here and the top of the pile
-   * fits, which is the only case left where a click does nothing.
+   * first one above it that does, within PLACEMENT_LIFT_LIMIT. Null when nothing in that
+   * reach fits, which is the only case where a click does nothing.
    *
    * Lifting rather than refusing is the answer to "what should a click that cannot place
    * do". A click that silently does nothing reads as the game being broken, and the cursor
    * under free placement is a request rather than an instruction — you are saying "here",
-   * and just above here is the honest reading of that when here is full. The search stops at
-   * the top of the pile under the cursor, which always fits, so it can never wander off
-   * looking for somewhere in the sky.
+   * and just above here is the honest reading of that when here is full.
+   *
+   * But only just above. Two ceilings, and the lower one wins: the top of the pile under
+   * the cursor, which always fits, and the lift limit, which is what stops a piece aimed
+   * into a gap under the pile from climbing out at the summit.
    */
   function findPlaceableY(
     kind: StackObjectKind,
@@ -342,7 +345,14 @@ export function createGame(deps: GameDeps): Game {
   ): number | null {
     if (!isPlacementBlocked(kind, x, fromY, angle)) return fromY;
     const extent = getStackObjectVerticalExtent(kind, angle);
-    const ceiling = getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP;
+    const ceiling = Math.min(
+      getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP,
+      fromY + PLACEMENT_LIFT_LIMIT,
+    );
+    // Never below the cursor. getLandingSurfaceY ignores anything still moving fast, so a
+    // piece knocked loose mid-fall can leave the pile-top ceiling UNDER the pose being
+    // aimed — and a lift that resolves downward is not a lift.
+    if (ceiling <= fromY) return null;
     const step = extent * 0.25;
     for (let y = fromY + step; y < ceiling; y += step) {
       if (!isPlacementBlocked(kind, x, y, angle)) return y;

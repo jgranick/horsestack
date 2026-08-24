@@ -68,7 +68,7 @@ export function setText(node: TextLabel, text: string): void {
 /**
  * A filled circle of `radius`, centred on the shape's own origin.
  *
- * Not `fill` with a corner radius of half the side: at the sizes the strike dots use, a
+ * Not `fill` with a corner radius of half the side: at small sizes a
  * 9px rounded rect still reads as a square with the corners taken off. The rasterizer wants
  * an actual circle to draw one.
  */

@@ -34,6 +34,7 @@ import {
 } from '../physics/stackObjectKind';
 import type { StackObjectKind } from '../physics/stackObjectKind';
 import type { GroundProfile } from '../physics/stackPhysics';
+import { getGroundY } from '../physics/stackPhysics';
 import {
   STACK_OBJECT_PROFILES,
   getStackBodyHalfWidth,
@@ -64,7 +65,6 @@ import {
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
   START_INPUT_GUARD_MS,
-  STEADY_HANDS_ALLOWANCE,
 } from './gameConfig';
 import type { GameMode } from './gameMode';
 import type { GamePhase } from './gamePhase';
@@ -133,7 +133,7 @@ export interface Game {
   readonly timeUpProgress: number;
   readonly secondsLeft: number;
   readonly resultHandsShown: number;
-  /** Horses dropped this round, for the STEADY HANDS strike dots. */
+  /** Horses that have gone off the map this round; one ends a STEADY HANDS run. */
   readonly horsesDropped: number;
   readonly beatTheRecord: boolean;
   /** The record as it stood when the round began, or null if there was none. */
@@ -272,9 +272,13 @@ export function createGame(deps: GameDeps): Game {
     return PASTURE_HALF_WIDTH - activeHalfWidth * 1.2;
   }
 
-  /** The lowest a piece of this kind can be held: resting on the bare pasture. */
-  function getFloorY(kind: StackObjectKind, angle: number): number {
-    return PASTURE_TOP_Y + getStackObjectVerticalExtent(kind, angle);
+  /**
+   * The lowest a piece of this kind can be held: resting on the bare ground under it. The
+   * ground is the sampled terrain, not the flat pasture — see getGroundY for why holding a
+   * piece at a flat floor over sloping ground drew it buried in the grass.
+   */
+  function getFloorY(kind: StackObjectKind, angle: number, x: number): number {
+    return getGroundY(groundProfile, x) + getStackObjectVerticalExtent(kind, angle);
   }
 
   /**
@@ -304,7 +308,7 @@ export function createGame(deps: GameDeps): Game {
     const nextX = clamp(targetX, -horizontalLimit, horizontalLimit);
     // No ceiling: holding a piece high and letting it fall is a legitimate (and destructive)
     // choice. The floor is real though — nothing may be placed inside the pasture.
-    const nextY = Math.max(targetY, getFloorY(kind, angle));
+    const nextY = Math.max(targetY, getFloorY(kind, angle, nextX));
     // The teeter reads horizontal speed only. Raising and lowering a piece is a deliberate,
     // careful motion and should not set it swinging.
     const elapsed = clamp((now - lastAimAt) / 1000, 0.008, 0.08);
@@ -315,7 +319,7 @@ export function createGame(deps: GameDeps): Game {
   }
 
   function getLandingSurfaceY(x: number, kind: StackObjectKind): number {
-    let surfaceY = PASTURE_TOP_Y;
+    let surfaceY = getGroundY(groundProfile, x);
     const activeHalfWidth = STACK_OBJECT_PROFILES[kind].halfWidth;
 
     for (const object of stackedObjects) {
@@ -323,7 +327,10 @@ export function createGame(deps: GameDeps): Game {
       const horizontalReach = activeHalfWidth + getStackBodyHalfWidth(body);
       if (
         object.lost ||
-        body.y < PASTURE_TOP_Y ||
+        // Below the ground UNDER IT, not below the flat pasture. The terrain dips 55mm under
+        // the old flat height at the low end, so a piece resting perfectly well down there
+        // read as "fallen through" and could not be stacked on.
+        body.y < getGroundY(groundProfile, body.x) ||
         Math.abs(body.x - x) > horizontalReach * 0.92 ||
         Math.abs(body.velocityY) > 1.2
       ) {
@@ -359,7 +366,7 @@ export function createGame(deps: GameDeps): Game {
     // Re-clamp against the floor here as well as in setAim: the teeter keeps turning the
     // piece after the pointer stops, and a rotating piece's vertical extent grows, so a pose
     // that cleared the grass a moment ago may not now.
-    current.y = Math.max(aimY, getFloorY(current.kind, current.angle));
+    current.y = Math.max(aimY, getFloorY(current.kind, current.angle, aimX));
     aimBlocked = isPlacementBlocked(current.kind, current.x, current.y, current.angle);
     indicator.update(current.kind, current.x, current.y, current.angle, aimBlocked, now);
   }
@@ -377,7 +384,7 @@ export function createGame(deps: GameDeps): Game {
     //
     // The floor still has to be re-checked, because the new piece may be taller than the one
     // that just left and the old height could now be inside the grass.
-    aimY = Math.max(aimY, getFloorY(kind, 0));
+    aimY = Math.max(aimY, getFloorY(kind, 0, aimX));
     aimBlocked = false;
     activeObject = { angle: 0, kind, variantIndex, x: aimX, y: aimY };
     indicator.setKind(kind, variantIndex);
@@ -572,14 +579,20 @@ export function createGame(deps: GameDeps): Game {
         beginSettling(now);
         return;
       }
-      // What ends a STEADY HANDS run: one piece too many has gone off the pasture.
+      // What ends a STEADY HANDS run: a horse has gone off the map. One is enough.
       //
-      // This replaced a "every piece has fallen off" rule, which sounded equivalent and was
-      // not. A collapse scatters pieces across the grass where they stay stackable, and each
-      // run ACCUMULATES that clutter, so the pasture emptying got less likely the longer you
-      // played — measured over a 40 placement run that built to 11.5m and collapsed, it never
-      // fired once. Counting what leaves fires cleanly and reads off the HUD.
-      if (mode === 'steady' && horsesDropped > STEADY_HANDS_ALLOWANCE) {
+      // It ran on a three-strike allowance first. Three strikes made the mode forgiving in
+      // the one place it should not be: the whole proposition is "how high can you go
+      // without dropping a horse", and an allowance answers a different question — how high
+      // can you go having dropped two. With one horse ending it, every placement near the
+      // edge is a decision, which is the tension the mode exists for.
+      //
+      // It also replaced a "every piece has fallen off" rule, which sounded equivalent and
+      // was not. A collapse scatters pieces across the grass where they stay stackable, and
+      // each run ACCUMULATES that clutter, so the pasture emptying got less likely the
+      // longer you played — measured over a 40 placement run that built to 11.5m and
+      // collapsed, it never fired once.
+      if (mode === 'steady' && horsesDropped > 0) {
         // Straight to the result. Nothing is waiting to settle, and the TIME UP beat would be
         // the wrong words over a round that had nothing to do with a clock. The fanfare still
         // fires, because the count-up is starting either way.

@@ -114,6 +114,28 @@ export interface GroundProfile {
 }
 
 /**
+ * The ground height under a point, interpolated between samples. Without a profile this is
+ * the flat pasture, which is the same fallback createHorseStackWorld makes — so every caller
+ * agrees on where the floor is whether or not the farm mesh was available.
+ *
+ * This is what stops a piece being HELD inside the grass. The collider follows the terrain,
+ * but placement, the landing indicator and the "has this fallen off" test all used to assume
+ * the flat pasture, and the modelled ground runs up to 26mm above it and 55mm below: pieces
+ * aimed at the "floor" over the high ground were drawn buried in it.
+ */
+export function getGroundY(ground: GroundProfile | undefined, x: number): number {
+  if (ground === undefined || ground.heights.length === 0) return PASTURE_TOP_Y;
+  const position = (x - ground.minX) / ground.step;
+  const last = ground.heights.length - 1;
+  if (position <= 0) return ground.heights[0] ?? PASTURE_TOP_Y;
+  if (position >= last) return ground.heights[last] ?? PASTURE_TOP_Y;
+  const index = Math.floor(position);
+  const y0 = ground.heights[index] ?? PASTURE_TOP_Y;
+  const y1 = ground.heights[index + 1] ?? PASTURE_TOP_Y;
+  return y0 + (y1 - y0) * (position - index);
+}
+
+/**
  * Builds the round's physics world. `ground` makes the floor follow the modelled terrain;
  * without it the floor is the flat box this used to have, which is the right fallback for the
  * headless validation scripts (they have no farm mesh to sample) and for a model whose ground

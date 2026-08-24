@@ -376,7 +376,6 @@ function renderFrame(): void {
     nextPieceGlyph: PIECE_GLYPHS[game.nextKind],
     mode: game.mode,
     muted: audio.muted,
-    horsesDropped: game.horsesDropped,
     screen: getUiScreen(),
     secondsLeft: game.secondsLeft,
     timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup' ? 1 : game.timeUpProgress,

@@ -3,8 +3,8 @@
 //
 //   time    — a 30 second clock, then the pile is given FINAL_SETTLE_SECONDS to fall over
 //             and whatever is standing is the score.
-//   steady  — no clock and no music. It runs until you have lost STEADY_HANDS_ALLOWANCE
-//             pieces off the pasture, and scores the tallest the tower ever stood.
+//   steady  — no clock and no music. It ends the moment a horse goes off the map, and
+//             scores the tallest the tower ever stood.
 //
 // Two pressures on one verb, which is the whole point of having two: `time` asks how high
 // you can get in half a minute, `steady` asks how high you can get without dropping any.

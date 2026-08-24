@@ -98,7 +98,11 @@ export const GAME_DURATION_MS = 30_000;
 export const MIN_RESULT_COUNT_DURATION_MS = 2_200;
 export const MAX_RESULT_COUNT_DURATION_MS = 4_000;
 export const RESULT_TICK_INTERVAL_MS = 32;
-export const RESULT_TICK_POOL_SIZE = 8;
+// How long the farm keeps murmuring after you stop playing, and how long it then takes to
+// die away. Long enough that stepping away between rounds does not kill the atmosphere;
+// short enough that a tab left open all afternoon eventually goes quiet.
+export const AMBIENCE_FADE_AFTER_MS = 45_000;
+export const AMBIENCE_FADE_MS = 6_000;
 export const HORSE_WHINNY_MIN_INTERVAL_MS = 9_000;
 export const HORSE_WHINNY_INTERVAL_JITTER_MS = 6_000;
 export const FINAL_WHINNY_CHANCE = 0.28;

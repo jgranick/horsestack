@@ -47,7 +47,7 @@ export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
 
 export interface UiButton {
   height: number;
-  id: 'time' | 'steady' | 'again' | 'menu' | 'fullscreen' | 'credits';
+  id: 'time' | 'steady' | 'again' | 'menu' | 'fullscreen' | 'credits' | 'mute';
   width: number;
   x: number;
   y: number;
@@ -68,6 +68,8 @@ export interface UiModel {
   bestThisRunText: string;
   /** The kind coming up next, as an emoji for the NEXT readout. */
   nextPieceGlyph: string;
+  /** Whether sound is muted, for the speaker control. */
+  muted: boolean;
   /** Horses dropped this round, drawn as spent strike dots. Ignored in Time Challenge. */
   horsesDropped: number;
   // Empty when there is nothing worth showing: a first ever round, or one that set a new
@@ -213,6 +215,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   });
   const fullscreenPill = createShape();
   const fullscreenText = label('⛶', 15, INK, SANS);
+  const mutePill = createShape();
+  const muteText = label('🔊', 14, INK, SANS);
 
   for (const node of [
     titleText, timePill, timeText, steadyPill, steadyText, timeBlurb, steadyBlurb,
@@ -223,6 +227,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
     creditsBody, creditsCopy, creditsPill, creditsText, fullscreenPill, fullscreenText,
+    mutePill, muteText,
     menuFromResultPill, menuFromResultText,
   ]) {
     addNodeChild(root, node);
@@ -584,6 +589,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1dff, 0.42);
     }
     pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1dff, 0.42);
+    // Beside fullscreen, and on every screen: the moment you want to mute is whenever the
+    // sound is bothering you, which is not a moment the game gets to choose.
+    setText(muteText, model.muted ? '🔇' : '🔊');
+    pill(mutePill, muteText, 'mute', width - 92, height - 54, 30, 30, 0x1f2d1dff, 0.42);
 
     const creditsShowing = onResult && model.creditsOpen;
     show(creditsBody, creditsShowing);

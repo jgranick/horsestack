@@ -262,6 +262,11 @@ function handleUiPress(event: PointerEvent): boolean {
       toggleFullscreen();
       return true;
     }
+    if (button.id === 'mute') {
+      audio.setMuted(!audio.muted);
+      renderRequested = true;
+      return true;
+    }
     if (button.id === 'time' && screen === 'title') {
       startGame('time', event);
       return true;
@@ -367,6 +372,7 @@ function renderFrame(): void {
     bestThisRunText: formatMeters(getStackHeightMeters(game.peakHeight)),
     nextPieceGlyph: PIECE_GLYPHS[game.nextKind],
     mode: game.mode,
+    muted: audio.muted,
     horsesDropped: game.horsesDropped,
     screen: getUiScreen(),
     secondsLeft: game.secondsLeft,
@@ -400,6 +406,9 @@ function enterFrame(now: number): void {
     if (gameIsMoving) renderRequested = true;
 
     if (windmill?.update(deltaTime) === true) renderRequested = true;
+    // The ambience fade is time-based, not event-based, so it needs a heartbeat rather than
+    // a callback at the moment play stops.
+    audio.update(now, game.isRunning);
 
     const screen = getUiScreen();
     const wantsBackdrop = screen === 'title' || screen === 'result' ? 1 : 0;

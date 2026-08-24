@@ -1,6 +1,9 @@
-import type { ImportDiagnostic, Mesh, Node3D } from '@flighthq/sdk';
+import type { ImportDiagnostic, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
 import { getNodeChildren } from '@flighthq/sdk/core';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
+import { createNode3D, Node3DKind } from '@flighthq/sdk';
+import { mountFarm } from '../src/scene/modelLoader';
+import { sampleFarmTerrain } from '../src/scene/terrainProfile';
 import { MeshKind } from '@flighthq/sdk/scene3d';
 import {
   FARM_PROP_SCENE_SCALE,
@@ -59,10 +62,35 @@ for (const model of models) {
   if (model.name === 'farm') {
     validateFarmProps(nodesByName);
     validateWindmillSails(nodesByName);
+    validateGroundProfile(scene);
   }
 
   console.log(
     `${model.name}: ${meshCount} meshes, ${nodeCount} nodes, ${Math.round(vertexCount).toLocaleString('en-US')} vertices`,
+  );
+}
+
+// The physics floor follows the modelled ground rather than sitting flat (see
+// src/scene/terrainProfile.ts). Checked here because it is the sampler's only headless
+// exercise: if the ground meshes are ever renamed or re-materialled, this is what notices,
+// and a silently flat profile would put the floor back where it was without any other symptom.
+function validateGroundProfile(scene: Readonly<Scene3D>): void {
+  // Mounted the same way main.ts mounts it: the sampler reads world matrices, so the wrapper
+  // transform has to be in place or every height comes back in the model's own space.
+  const root = createNode3D(Node3DKind);
+  mountFarm(scene, root);
+
+  const profile = sampleFarmTerrain(scene);
+  if (profile === null) throw new Error('farm ground could not be sampled');
+  const lowest = Math.min(...profile.heights);
+  const highest = Math.max(...profile.heights);
+  const spread = highest - lowest;
+  if (!Number.isFinite(spread) || spread <= 0) {
+    throw new Error(`farm ground sampled flat (spread ${spread}); the floor would not follow it`);
+  }
+  console.log(
+    `farm ground: ${profile.heights.length} samples across the pasture, physics Y ` +
+      `${lowest.toFixed(4)} to ${highest.toFixed(4)} (spread ${spread.toFixed(4)})`,
   );
 }
 

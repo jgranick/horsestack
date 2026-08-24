@@ -60,9 +60,11 @@ export function sampleFarmTerrain(farm: Readonly<Scene3D>): TerrainProfile | nul
 
   const minX = -PASTURE_HALF_WIDTH;
   const step = (PASTURE_HALF_WIDTH * 2) / (SAMPLE_COUNT - 1);
-  // Start from the flat height so any sample the mesh does not cover keeps the old behaviour
-  // rather than dropping to zero and opening a hole in the floor.
-  const heights = new Array<number>(SAMPLE_COUNT).fill(PASTURE_TOP_Y);
+  // NaN means "no triangle found over this sample yet". Filled in from the neighbours at the
+  // end rather than defaulting to the flat height: an uncovered sample sitting at
+  // PASTURE_TOP_Y next to a covered one 26mm higher is a step in the floor, and a step is
+  // exactly the thing a rolling hay bale catches on.
+  const heights = new Array<number>(SAMPLE_COUNT).fill(Number.NaN);
 
   const a = createVector3(0, 0, 0);
   const b = createVector3(0, 0, 0);
@@ -97,6 +99,19 @@ export function sampleFarmTerrain(farm: Readonly<Scene3D>): TerrainProfile | nul
       b.x = worldX[i1] ?? 0; b.y = worldY[i1] ?? 0; b.z = worldZ[i1] ?? 0;
       c.x = worldX[i2] ?? 0; c.y = worldY[i2] ?? 0; c.z = worldZ[i2] ?? 0;
 
+      // Only surfaces you could stand on. The Ground meshes include the floating island's
+      // sloping sides and its underside, and those are geometrically "under" a sample near
+      // the pasture edge just as much as the grass is — without this the floor dived to the
+      // side of the island at the ends, an 80mm drop where the top surface ran out.
+      //
+      // Upward-facing is the normal's Y against the whole normal's length; 0.5 is a 60 degree
+      // slope, far steeper than the grass rolls and far shallower than the island's flank.
+      const nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y);
+      const ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+      const nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      const nLength = Math.hypot(nx, ny, nz);
+      if (nLength < 1e-12 || Math.abs(ny) / nLength < 0.5) continue;
+
       // Cheap reject: the play line is at a single world X, so a triangle that does not span
       // it cannot be under any sample. This is what keeps the whole scan fast.
       const triMinX = Math.min(a.x, b.x, c.x);
@@ -115,13 +130,36 @@ export function sampleFarmTerrain(farm: Readonly<Scene3D>): TerrainProfile | nul
         // heightAt answers in WORLD y; everything downstream of here is physics y, and the
         // two differ by STACK_BASE_Y (see stackObjectVisual.setTransform).
         const height = worldHeight - STACK_BASE_Y;
-        const current = heights[sample] ?? PASTURE_TOP_Y;
-        if (height > current) heights[sample] = height;
+        const current = heights[sample];
+        if (current === undefined || Number.isNaN(current) || height > current) {
+          heights[sample] = height;
+        }
       }
     }
   }
 
-  return { heights, minX, step };
+  return fillGaps(heights) ? { heights, minX, step } : null;
+}
+
+/**
+ * Replaces uncovered samples with the nearest covered one, so the surface runs flat out to
+ * the edges instead of falling off a cliff where the modelled ground stops. Returns false if
+ * nothing was covered at all, which means we did not find the ground and the caller should
+ * keep its flat floor.
+ */
+function fillGaps(heights: number[]): boolean {
+  const firstCovered = heights.findIndex((height) => !Number.isNaN(height));
+  if (firstCovered === -1) return false;
+
+  for (let index = firstCovered - 1; index >= 0; index -= 1) {
+    heights[index] = heights[index + 1] ?? PASTURE_TOP_Y;
+  }
+  for (let index = firstCovered + 1; index < heights.length; index += 1) {
+    if (Number.isNaN(heights[index] ?? Number.NaN)) {
+      heights[index] = heights[index - 1] ?? PASTURE_TOP_Y;
+    }
+  }
+  return true;
 }
 
 /**

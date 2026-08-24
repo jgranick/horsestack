@@ -142,9 +142,14 @@ export const FIXED_STEP_LIMIT = 6;
 // exists to fade in a damping assist and is loose enough that a horse pivoting slowly onto
 // the grass reads as "still". At these thresholds that pivot does not: one step of gravity
 // alone puts a falling piece at 0.18 units/s.
+//
+// The hold was 0.25s and was too forgiving — horses that had plainly been standing on the
+// pile before it went were not counting. It is a floor on "was ever still", not a settling
+// time, so it only has to outlast the single frame after placement in which the solver has
+// zeroed a piece's velocity; one step of gravity then carries it well past the threshold.
 export const HORSE_REST_LINEAR = 0.05;
 export const HORSE_REST_ANGULAR = 0.2;
-export const HORSE_REST_SECONDS = 0.25;
+export const HORSE_REST_SECONDS = 0.12;
 // The clearance left above a piece the preview has had to lift, and the step it lifts by
 // when searching. Small enough that the lift is never further than it needs to be, large
 // enough that "resting exactly on" does not read as an overlap to the solver.

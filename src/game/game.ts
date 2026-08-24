@@ -357,13 +357,27 @@ export function createGame(deps: GameDeps): Game {
     angle: number,
   ): number | null {
     if (!isPlacementBlocked(kind, x, fromY, angle)) return fromY;
-    const onTop =
-      getLandingSurfaceY(x, kind) +
-      getStackObjectVerticalExtent(kind, angle) +
-      PLACEMENT_LIFT_STEP;
-    // Never below the cursor, and never into something a neighbouring column overhangs.
-    if (onTop <= fromY || isPlacementBlocked(kind, x, onTop, angle)) return null;
-    return onTop;
+    const extent = getStackObjectVerticalExtent(kind, angle);
+    const onTop = getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP;
+    // Never below the cursor.
+    if (onTop <= fromY) return null;
+    // Then clear whatever the reported surface did not account for, rather than giving up.
+    //
+    // Landing surfaces come from each piece's SILHOUETTE extents, but its collider was
+    // re-centred on its area centroid, and for a horse those differ by 14mm — the back of
+    // the collider stands that much higher than getStackBodySupportExtent reports. Aiming a
+    // chicken between a horse's legs therefore lifted it to 14mm INSIDE the horse's back,
+    // the shape test refused that too, and the whole thing came back as "nowhere to put
+    // it": no placement, and a marker still sitting between the legs.
+    //
+    // A short climb from the destination, never a search from the cursor — so it still
+    // cannot wander off into a gap somewhere up the pile.
+    const step = extent * 0.25;
+    const limit = onTop + extent * 2;
+    for (let y = onTop; y <= limit; y += step) {
+      if (!isPlacementBlocked(kind, x, y, angle)) return y;
+    }
+    return null;
   }
 
   function setAim(targetX: number, targetY: number, now: number): void {
@@ -438,8 +452,17 @@ export function createGame(deps: GameDeps): Game {
     // puts it exactly where you were looking at it. Without this the marker sits refused
     // inside the pile and the piece then appears somewhere else.
     const placeableY = findPlaceableY(current.kind, current.x, heldY, current.angle);
-    current.y = placeableY ?? heldY;
     aimBlocked = placeableY === null;
+    if (placeableY === null) {
+      // Nowhere to put it. Show NOTHING rather than a marker at the cursor: with the refused
+      // state gone the marker is drawn solid, so leaving it there states that a click will
+      // place the piece where you are looking, and then the click does nothing. An empty
+      // space says the same thing as a dead click, and says it before you click.
+      current.y = heldY;
+      indicator.hide();
+      return;
+    }
+    current.y = placeableY;
     indicator.update(current.kind, current.x, current.y, current.angle, now);
   }
 

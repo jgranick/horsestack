@@ -556,15 +556,18 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(nextGlyph, playing);
     if (playing) {
       const w = 62;
-      const x = width - w - 24;
+      // Right edge flush with the readout above it, which sits 24 in from the window edge.
+      // (This used to add the difference between the two pill widths on top of an x that was
+      // already right-aligned, and pushed itself off the screen.)
+      const x = width - 24 - w;
       const drop = (1 - pop) * 40;
-      const y = (steadyPlaying ? STEADY_PILL_HEIGHT : 62) + 26 - drop;
-      fill(nextPill, 0x1f2d1dff, 0.62, 0, 0, w, 44, 14);
-      place(nextPill, x + (104 - w), y);
+      const y = 18 + (steadyPlaying ? STEADY_PILL_HEIGHT : 62) + 8 - drop;
+      fill(nextPill, 0x1f2d1dff, 0.62, 0, 0, w, 42, 14);
+      place(nextPill, x, y);
       setTextLabelWidth(nextCaption, w);
-      place(nextCaption, x + (104 - w), y + 6);
+      place(nextCaption, x, y + 6);
       setTextLabelWidth(nextGlyph, w);
-      place(nextGlyph, x + (104 - w), y + 16);
+      place(nextGlyph, x, y + 15);
       setText(nextGlyph, model.nextPieceGlyph);
     }
 

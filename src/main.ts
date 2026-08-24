@@ -1,100 +1,47 @@
 import type {
   Material,
   StandardPbrMaterial,
-  RenderEffect,
-  VertexAttributeLayout,
-  Camera3D,
   ImportDiagnostic,
   Mesh,
   MeshGeometry,
   Node3D,
-  ParticleEmitter3D,
-  ParticleEmitterConfig,
-  ParticleEmitterState,
   Physics2DWorld,
-  PointLight,
   RigidBody2D,
   Scene3D,
-  Scene3DLightsLike,
 } from '@flighthq/sdk';
 import {
   addNodeChild,
-  addNodeChildAt,
-  beginGlRenderPass,
-  beginGlRenderEffectPipeline,
   clamp,
-  clearParticleEmitter3D,
   cloneMeshGeometry,
   cloneMaterial,
   cloneMesh,
   cloneNode3DSubtree,
   compactMeshGeometryVertices,
-  configureDirectionalShadowCamera3DTightFit,
-  createAabb,
-  createAmbientLight,
-  createCamera3D,
-  createDirectionalLight,
-  createGlCanvasElement,
-  createGlRenderEffectPipeline,
-  createBlurEffect,
-  createGlRenderState,
-  createVignetteEffect,
   createMesh,
   createNode3D,
-  createOrbitCameraController,
-  createOrthographicProjection,
-  createParticleEmitter3D,
-  buildParticleCurve,
-  createParticleEmitterConfig,
-  createParticleEmitterState,
-  createPerspectiveProjection,
-  createPointLight,
   createRingMeshGeometry,
   createStandardPbrMaterial,
   createVector3,
-  registerGlVertexColorMaterial,
-  srgbChannelToLinear,
-  setMeshGeometryVertexColor0,
-  getMeshGeometryVertexPosition,
-  getMeshGeometryVertexCount,
-  createVertexColorMaterial,
-  createSphereMeshGeometry,
-  convertMeshGeometryLayout,
   easeOutCubic,
-  emitParticleBurst3D,
-  endGlRenderPass,
-  enableFlightDiagnostics,
-  endGlRenderEffectPipeline,
   findNodeByName,
   getCamera3DWorldToScreen,
   getMaterialOfKind,
-  getNodeParent,
   getNodeLocalMatrix4,
   invalidateNodeLocalTransform,
   isMesh,
   isNodeLocalMatrix4Detached,
   Node3DKind,
   StandardPbrMaterialKind,
-  normalizeVector3,
-  registerGlBlurEffect,
-  registerGlStandardPbrMaterial,
-  registerGlVignetteEffect,
-  registerStandardGlTextureResolvers,
   refreshMeshGeometryBounds,
-  removeNodeChild,
   removeNodeChildren,
   removePhysics2DBody,
-  renderGlBackground,
   setNode3DAlpha,
   setMeshGeometrySubsets,
   setNodeLocalMatrix4,
   setNodeTransform3D,
   setQuaternionFromEuler,
-  stepParticleEmitter3D,
-  updateOrbitCameraController,
 } from '@flighthq/sdk';
 import { createScene3DFromGltf } from '@flighthq/sdk/formats';
-import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import { createGameUi2D } from './ui/gameUi';
 import type { UiScreen } from './ui/gameUi';
 import {
@@ -116,7 +63,6 @@ import {
   getStackHeightMeters,
   getStackObjectVerticalExtent,
   getSupportedStackHeight,
-  HORSE_HALF_HEIGHT,
   PASTURE_HALF_WIDTH,
   PASTURE_TOP_Y,
   PHYSICS_STEP,
@@ -125,15 +71,6 @@ import {
 } from './physics/horseStackPhysics';
 import type { StackObjectKind } from './physics/horseStackPhysics';
 import {
-  CAMERA_HEIGHT_COLLAPSE_RATE,
-  CAMERA_HEIGHT_DEADBAND,
-  CAMERA_HEIGHT_FALL_RATE,
-  CAMERA_HEIGHT_RISE_RATE,
-  CAMERA_MAX_DISTANCE,
-  CAMERA_MIN_DISTANCE,
-  CAMERA_PILE_FILL,
-  CAMERA_PILE_FILL_AT_HEIGHT,
-  CAMERA_TOP_BIAS,
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
   HORSE_SCALE,
@@ -152,6 +89,10 @@ import {
   WINDMILL_RADIANS_PER_SECOND,
 } from './game/gameConfig';
 import { createAudioManager } from './audio/audioManager';
+import { createCameraRig } from './scene/cameraRig';
+import { createParticleEffects } from './scene/particleEffects';
+import { createSceneRenderer } from './scene/sceneRenderer';
+import { createSceneGraph } from './scene/sceneGraph';
 import { prefersReducedMotion } from './reducedMotion';
 import './styles.css';
 
@@ -171,52 +112,7 @@ interface StackedObject {
   node: Node3D;
 }
 
-// The title and score screens used to sit behind a flat black wash. The scene is the nicest
-// thing on screen, so instead of hiding it the pipeline defocuses it: a real blur, plus a
-// vignette to pull the eye to the middle and keep light text legible over bright grass.
-// Both are Flight render effects, which is what the effect list on endGlRenderEffectPipeline
-// is for — the game ran it empty until now.
-const BACKDROP_BLUR_MAX = 13;
-const backdropBlurEffect = createBlurEffect({ blurX: 0, blurY: 0 });
-const backdropVignetteEffect = createVignetteEffect({
-  color: 0x0d1622,
-  intensity: 0,
-  radius: 0.5,
-  softness: 0.85,
-});
-// Just defocus, and nothing else. A colour grade behind the blur — desaturation, an
-// exposure drop, a warm tint — all read as a filter laid over the game rather than as depth
-// of field, so the scene keeps its own colour and the vignette alone does the separating.
-// It buys the type less contrast than a grade would; the scene staying itself is worth it.
-const NO_EFFECTS: readonly RenderEffect[] = [];
-// Rebuilt only while the ramp is moving: brightness/contrast bake their matrix at
-// construction, so a mutated field would not take.
-let backdropEffects: RenderEffect[] = [];
-let backdropEffectsAt = -1;
-
-function getBackdropEffects(focus: number): readonly RenderEffect[] {
-  const quantized = Math.round(focus * 60);
-  if (quantized === backdropEffectsAt) return backdropEffects;
-  backdropEffectsAt = quantized;
-  const amount = quantized / 60;
-  backdropBlurEffect.blurX = BACKDROP_BLUR_MAX * amount;
-  backdropBlurEffect.blurY = BACKDROP_BLUR_MAX * amount;
-  backdropVignetteEffect.intensity = 0.7 * amount;
-  backdropEffects = [backdropBlurEffect, backdropVignetteEffect];
-  return backdropEffects;
-}
-
 let backdropFocus = 0;
-const GAME_VIEW = {
-  azimuth: Math.PI / 2,
-  distance: 0.82,
-  maxDistance: 7.8,
-  minDistance: 0.68,
-  minPolar: 0.02,
-  polar: 0.08,
-  smoothTime: 0.2,
-  target: createVector3(STACK_X, 0.1, STACK_Z),
-} as const;
 
 const viewer = requireElement<HTMLDivElement>('viewer');
 const loadingPanel = requireElement<HTMLDivElement>('loading-panel');
@@ -233,7 +129,8 @@ const soundRoot = new URL(soundPathFromModule, import.meta.url).href;
 const audio = createAudioManager(soundRoot);
 
 retryButton.addEventListener('click', () => window.location.reload());
-const { canvas, pipeline, renderState } = initializeRenderer();
+const sceneRenderer = createSceneRenderer(viewer);
+const { canvas, renderState } = sceneRenderer;
 const gameUi = createGameUi2D(renderState, renderState.pixelRatio);
 let creditsOpen = false;
 // Where the pointer is and whether it is held, so 2D controls can light up and press in.
@@ -241,94 +138,14 @@ let pointerX = -1;
 let pointerY = -1;
 let pointerDown = false;
 
-const scene = createNode3D(Node3DKind);
-// The sky, in Flight rather than in CSS. It used to be a linear-gradient on the viewer
-// showing through a transparent canvas, which meant the game's own background lived
-// outside the renderer and could not travel with it. It is now a vertex-coloured dome
-// inside the scene: an inverted sphere big enough to sit outside the farm and inside the
-// camera's far plane, lit by nothing (createVertexColorMaterial is unlit), with the
-// gradient written into color0 by height. The forward pass renders with culling off, so
-// looking at the sphere from inside shows its back faces normally.
-//
-// The canonical mesh layout has no color0, so the geometry is converted to one that does.
-const SKY_RADIUS = 40;
-const SKY_LAYOUT = {
-  attributes: [
-    { byteOffset: 0, format: 'float32x3', semantic: 'position' },
-    { byteOffset: 12, format: 'float32x3', semantic: 'normal' },
-    { byteOffset: 24, format: 'float32x4', semantic: 'tangent' },
-    { byteOffset: 40, format: 'float32x2', semantic: 'uv0' },
-    { byteOffset: 48, format: 'float32x4', semantic: 'color0' },
-  ],
-  stride: 64,
-} as const satisfies VertexAttributeLayout;
-// A deeper blue overhead easing to a pale, almost warm horizon. The stylesheet's original
-// stops are still in here in the middle, but the ramp now RESOLVES over the band the camera
-// actually sees: mapping it pole to pole spent almost all of it below the island, and the
-// visible sliver above the horizon came out as one flat blue.
-const SKY_STOPS = [
-  { at: 0, color: [0x2b8ce0] },
-  { at: 0.42, color: [0x49a6ea] },
-  { at: 0.74, color: [0x74c1f1] },
-  { at: 1, color: [0xa6dbf8] },
-] as const;
-
-function sampleSkyGradient(t: number): readonly [number, number, number] {
-  for (let index = 1; index < SKY_STOPS.length; index += 1) {
-    const previous = SKY_STOPS[index - 1];
-    const next = SKY_STOPS[index];
-    if (previous === undefined || next === undefined || t > next.at) continue;
-    const span = next.at - previous.at;
-    const mix = span > 0 ? (t - previous.at) / span : 0;
-    const from = previous.color[0];
-    const to = next.color[0];
-    return [16, 8, 0].map((shift) => {
-      const a = (from >>> shift) & 0xff;
-      const b = (to >>> shift) & 0xff;
-      // The stops are sRGB; the scene composites linear, so decode rather than lerp bytes.
-      return srgbChannelToLinear((a + (b - a) * mix) / 255);
-    }) as unknown as readonly [number, number, number];
-  }
-  return [1, 1, 1];
-}
-
-function createSkyDome(): Mesh {
-  const geometry = convertMeshGeometryLayout(
-    createSphereMeshGeometry(SKY_RADIUS, 32, 20),
-    SKY_LAYOUT,
-  );
-  const position = { x: 0, y: 0, z: 0 };
-  const vertexCount = getMeshGeometryVertexCount(geometry);
-  for (let index = 0; index < vertexCount; index += 1) {
-    getMeshGeometryVertexPosition(position, geometry, index);
-    // The stylesheet ran its gradient top to bottom, so t is 0 at the zenith.
-    // Zenith at 0, horizon at 1: the whole ramp lands in the band above the island, and
-    // everything below the horizon — which the island covers — holds the last stop.
-    const height = position.y / SKY_RADIUS;
-    const [r, g, b] = sampleSkyGradient(clamp(1 - height * 1.35, 0, 1));
-    setMeshGeometryVertexColor0(geometry, index, r, g, b, 1);
-  }
-  // Double-sided because the camera lives INSIDE this sphere: the forward pass culls back
-  // faces, and every face of a dome seen from within is a back face. Without this the mesh
-  // is present, correct and completely invisible — which is what it was, and why the blur
-  // was fringing every silhouette with the transparent background behind it.
-  const dome = createMesh(geometry, [
-    createVertexColorMaterial({ doubleSided: true, tint: 0xffffffff }),
-  ]);
-  dome.name = 'sky';
-  return dome;
-}
-
-const skyDome = createSkyDome();
-addNodeChild(scene, skyDome);
-const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
-addNodeChild(scene, stackLayer);
-// The hovering preview and its halo ring share one parent so a single detach keeps both
-// out of the shadow pass. They must LEAVE the graph to be excluded: drawGlScene3DShadowMap
-// walks every descendant carrying geometry and never consults `enabled`, `visible`, or the
-// material's alpha mode, so hiding a node does not stop it casting. That is why the halo
-// used to lay a ring of shadow across the pasture despite being switched off for the pass.
-const previewLayer = createNode3D(Node3DKind, { name: 'landing-preview-layer' });
+// One scene, built in scene/sceneGraph.ts, and the two emitters that live in it. Both were
+// ~230 lines of construction inline here; what main.ts needs from them is the handful of
+// nodes below.
+const sceneGraph = createSceneGraph();
+const scene = sceneGraph.root;
+const { camera, indicatorLight, previewLayer, stackLayer } = sceneGraph;
+const particles = createParticleEffects(scene);
+const cameraRig = createCameraRig();
 const landingGhostMaterial = createStandardPbrMaterial({
   alphaMode: 'opaque',
   baseColor: 0xe2b83fff,
@@ -348,150 +165,12 @@ const landingHaloMaterial = createStandardPbrMaterial({
   roughness: 0.42,
 });
 
-const dustEmitter: ParticleEmitter3D = createParticleEmitter3D({
-  blendMode: 'normal',
-  data: { worldSpace: true },
-  name: 'horse-impact-dust',
-});
-addNodeChild(scene, dustEmitter);
-const celebrationEmitter: ParticleEmitter3D = createParticleEmitter3D({
-  blendMode: 'normal',
-  data: { worldSpace: true },
-  name: 'horse-confetti',
-});
-addNodeChild(scene, celebrationEmitter);
-const celebrationConfig: ParticleEmitterConfig = createParticleEmitterConfig({
-  // Paper, not sparks. Four things separate the two, and the old burst had all four wrong:
-  // confetti keeps its size (scaleEnd is a MULTIPLIER, so the old 0.02 shrank every piece
-  // to nothing), holds its colour until it lands rather than dimming from the first frame,
-  // tumbles fast, and falls slowly enough to hang in the air and flutter.
-  alphaCurve: buildParticleCurve((t) => (t < 0.74 ? 1 : 1 - (t - 0.74) / 0.26)),
-  alphaEnd: 1,
-  alphaStart: 1,
-  colorEndB: 1,
-  colorEndG: 1,
-  colorEndR: 1,
-  colorStartB: 1,
-  colorStartG: 1,
-  colorStartR: 1,
-  directionX: 0,
-  directionY: 1,
-  directionZ: 0,
-  duration: 0,
-  // Nearly a hemisphere: a party popper sprays sideways as much as up, where the old
-  // narrower cone threw a fountain.
-  emitterConeAngle: 2.5,
-  emitterRadius: 0.22,
-  emitterShape: 'cone3d',
-  gravityY: -1.15,
-  lifetimeMax: 4.4,
-  lifetimeMin: 2.4,
-  loop: false,
-  maxParticles: 760,
-  rotationSpeedMax: 17,
-  rotationSpeedMin: -17,
-  scaleEnd: 1,
-  // Small and many. At 0.26 the pieces read as sheets of paper rather than confetti,
-  // especially early on when the camera is still close to the pile.
-  scaleMax: 0.135,
-  scaleMin: 0.05,
-  spawnRate: 0,
-  speedMax: 3.4,
-  speedMin: 1.5,
-  worldSpace: true,
-});
-
-const dustConfig: ParticleEmitterConfig = createParticleEmitterConfig({
-  alphaEnd: 0,
-  alphaStart: 0.42,
-  colorEndB: 0.58,
-  colorEndG: 0.69,
-  colorEndR: 0.76,
-  colorStartB: 0.72,
-  colorStartG: 0.8,
-  colorStartR: 0.86,
-  directionX: 0,
-  directionY: 1,
-  directionZ: 0,
-  duration: 0,
-  emitterConeAngle: 1.35,
-  emitterRadius: 0.012,
-  emitterShape: 'cone3d',
-  gravityY: -0.5,
-  lifetimeMax: 0.42,
-  lifetimeMin: 0.18,
-  loop: false,
-  maxParticles: 96,
-  rotationSpeedMax: 2,
-  rotationSpeedMin: -2,
-  scaleEnd: 0.002,
-  scaleMax: 0.036,
-  scaleMin: 0.008,
-  spawnRate: 0,
-  speedMax: 0.35,
-  speedMin: 0.08,
-  worldSpace: true,
-});
-
-let celebrationState: ParticleEmitterState = createParticleEmitterState();
-let dustState: ParticleEmitterState = createParticleEmitterState();
-
-const camera: Camera3D = createCamera3D({
-  far: 90,
-  near: 0.1,
-  projection: createPerspectiveProjection({ aspect: 1, fovY: Math.PI / 5.4 }),
-});
-const cameraController = createOrbitCameraController(GAME_VIEW);
-
-const sunDirection = createVector3(-0.75, -1, -0.5);
-normalizeVector3(sunDirection, sunDirection);
-const directionalLight = createDirectionalLight({
-  castsShadow: true,
-  color: 0xfff1d4ff,
-  direction: sunDirection,
-  intensity: 2.8,
-  normalBias: 0.65,
-  pcfRadius: 1,
-  shadowBias: 0.001,
-});
-const indicatorLight: PointLight = createPointLight({
-  color: 0xffd56aff,
-  intensity: 0,
-  position: createVector3(STACK_X + 0.16, 0.2, STACK_Z),
-  range: 0.68,
-});
-const lights: Scene3DLightsLike = {
-  ambient: createAmbientLight({ color: 0xbdd0b5ff, intensity: 0.72 }),
-  directional: directionalLight,
-  point: [indicatorLight],
-};
-const shadowCamera = createCamera3D({
-  far: 55,
-  near: 0.1,
-  projection: createOrthographicProjection({ halfHeight: 15, halfWidth: 9 }),
-});
-// Flight's directional shadow map is a fixed 1024x1024 (DIRECTIONAL_SHADOW_MAP_SIZE),
-// so sharpness is entirely a question of how much world those texels cover. The farm's
-// own world bounds are only about 3.7 x 3.7 x 3.6, and the pile lives inside them, so
-// the shadow volume is that plus a margin — not the far larger box a whole-level scene
-// would need. Underside geometry below y=-0.7 is excluded: it casts nothing visible.
-// Tight-fit rather than the bounding-sphere fit, because it fits the light-space X and Y
-// extents independently and keeps noticeably more texel density. These are static bounds
-// fitted once, so there is no per-frame refit to shimmer.
-configureDirectionalShadowCamera3DTightFit(
-  shadowCamera,
-  sunDirection,
-  createAabb(-1.95, -0.7, -4.05, 1.95, 2.25, -0.35),
-  1.05,
-);
-
 let phase: GamePhase = 'loading';
 // Placement input is refused until this moment, measured on the INPUT clock
 // (Event.timeStamp) rather than the render clock: startGame() has to build a physics
 // world and clone a model, and on a slow first frame that work alone can outlast the
 // guard. Comparing input to input keeps the window honest whatever the frame costs.
 let placementArmedAt = 0;
-let cameraStackHeight = 0;
 let swayClock = 0;
 let horseTemplate: Scene3D | null = null;
 const farmPropTemplates: Partial<Record<StackObjectKind, Node3D[]>> = {};
@@ -550,7 +229,7 @@ async function start(): Promise<void> {
     mountFarm(farm);
     horseTemplate = horse;
     phase = 'ready';
-    updateCamera(1, cachedStackHeight);
+    cameraRig.update(camera, 1, cachedStackHeight, objectsDropped);
     renderFrame();
     loadingPanel.classList.add('is-hidden');
     statusCopy.textContent = 'Stable enough';
@@ -875,13 +554,10 @@ function startGame(startedFrom?: Event): void {
   landingRadiance = createLandingRadiance();
   addNodeChild(previewLayer, landingRadiance);
   indicatorLight.intensity = 0;
-  clearParticleEmitter3D(dustEmitter);
-  clearParticleEmitter3D(celebrationEmitter);
-  dustState = createParticleEmitterState();
-  celebrationState = createParticleEmitterState();
+  particles.reset();
 
   phase = 'playing';
-  cameraStackHeight = 0;
+  cameraRig.resetHeight();
   placementArmedAt = (startedFrom?.timeStamp ?? now) + START_INPUT_GUARD_MS;
   spawnObject(now);
   renderRequested = true;
@@ -1075,22 +751,7 @@ function recordFinalHeight(meters: number): void {
 function celebrateFinalHeight(): void {
   const burstY = STACK_BASE_Y + Math.max(0.8, finalHeight);
   // One popper per colour, strung out across the pile.
-  const colors = [
-    0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff, 0xb08fd8ff,
-  ];
-  for (let index = 0; index < colors.length; index++) {
-    const horizontalOffset = -1.8 + (index / (colors.length - 1)) * 3.6;
-    emitParticleBurst3D(
-      celebrationEmitter,
-      celebrationState,
-      celebrationConfig,
-      92,
-      STACK_X + (Math.random() - 0.5) * 0.16,
-      burstY,
-      STACK_Z - horizontalOffset,
-      colors[index],
-    );
-  }
+  particles.burstCelebration(burstY);
   renderRequested = true;
 }
 
@@ -1112,16 +773,7 @@ function handlePhysicsContacts(now: number): void {
   if (point === undefined) return;
 
   lastImpactAt = now;
-  emitParticleBurst3D(
-    dustEmitter,
-    dustState,
-    dustConfig,
-    8,
-    STACK_X,
-    STACK_BASE_Y + point.y,
-    STACK_Z - point.x,
-    0xe8d6a9cc,
-  );
+  particles.burstDust(point.x, STACK_BASE_Y + point.y);
   audio.maybePlayCollisionWhinny(now);
 }
 
@@ -1232,60 +884,6 @@ function setStackObjectVisualTransform(node: Node3D, x: number, physicsY: number
   node.position.z = STACK_Z - x;
   setQuaternionFromEuler(node.rotation, angle, 0, 0);
   invalidateNodeLocalTransform(node);
-}
-
-function followStackHeight(measured: number, deltaTime: number): number {
-  const difference = measured - cameraStackHeight;
-  if (Math.abs(difference) <= CAMERA_HEIGHT_DEADBAND) return cameraStackHeight;
-  const fallRate = CAMERA_HEIGHT_FALL_RATE + Math.abs(difference) * CAMERA_HEIGHT_COLLAPSE_RATE;
-  const limit = (difference > 0 ? CAMERA_HEIGHT_RISE_RATE : fallRate) * deltaTime;
-  cameraStackHeight += difference > 0 ? Math.min(difference, limit) : Math.max(difference, -limit);
-  return cameraStackHeight;
-}
-
-function updateCamera(deltaTime: number, measuredHeight: number): void {
-  const height = followStackHeight(measuredHeight, deltaTime);
-  const rise = clamp(height / 1.1, 0, 1);
-  const herdProgress = clamp(objectsDropped / 50, 0, 1);
-  const restingHorseTop = PASTURE_TOP_Y + HORSE_HALF_HEIGHT * 1.2;
-  // Frame the whole tower, not its top. Tracking the top left the pile hanging off the
-  // bottom of a frame whose upper half held nothing, and it got worse the more the pile
-  // tumbled: a shorter tower simply sat lower. So the camera fits the span from the
-  // pasture to the pile top into CAMERA_PILE_FILL of the frame height and centres on its
-  // middle, nudged up by CAMERA_TOP_BIAS to leave the drop some room. Distance falls out
-  // of the fit rather than being a curve of its own, so a collapse zooms back in.
-  const tanHalfFov =
-    camera.projection.kind === 'perspective' ? Math.tan(camera.projection.fovY / 2) : 1;
-  const visibleHalfHeight = cameraController.distance * tanHalfFov;
-  const pileBottomY = STACK_BASE_Y + PASTURE_TOP_Y;
-  const pileTopY = STACK_BASE_Y + Math.max(restingHorseTop, height + HORSE_HALF_HEIGHT * 0.2);
-  const pileSpan = Math.max(pileTopY - pileBottomY, 0.0001);
-  const desiredTargetY =
-    (pileBottomY + pileTopY) / 2 + CAMERA_TOP_BIAS * visibleHalfHeight;
-  if (Math.abs(desiredTargetY - cameraController.target.y) > 0.001) renderRequested = true;
-  const follow = 1 - Math.exp(-deltaTime * 2.4);
-  cameraController.target.y += (desiredTargetY - cameraController.target.y) * follow;
-  cameraController.target.x += (STACK_X - cameraController.target.x) * follow;
-  cameraController.target.z = STACK_Z;
-  cameraController.goalAzimuth = Math.PI / 2 + rise * 0.18 + herdProgress * 0.04;
-  // Pitch down harder as the pile grows. A near-level camera high above a tall stack
-  // frames the top and loses everything under it, which is worst exactly when the pile
-  // collapses and the action moves downward. Measured over played runs, on samples with
-  // a pile above 0.5 units, the base of the pile is inside the frame in 26 of 34 samples
-  // at this rate against 4 of 27 at the old 0.14, and the pile top stays around a fifth
-  // of the way above centre either way. At rest the tilt is unchanged.
-  // Pitch down through the low and middle heights, where a level camera loses the base of
-  // the pile, then ease back off once the pile is tall — otherwise the view ends up aimed
-  // at the grass with the barn and silo out of frame entirely.
-  cameraController.goalPolar =
-    0.06 + 0.6 * Math.min(rise, 0.45) - 0.34 * Math.max(0, rise - 0.45);
-  const fill = CAMERA_PILE_FILL + (CAMERA_PILE_FILL_AT_HEIGHT - CAMERA_PILE_FILL) * rise;
-  cameraController.goalDistance = clamp(
-    pileSpan / (2 * fill) / tanHalfFov,
-    CAMERA_MIN_DISTANCE,
-    CAMERA_MAX_DISTANCE,
-  );
-  updateOrbitCameraController(cameraController, camera, deltaTime);
 }
 
 function getCurrentStackHeight(): number {
@@ -1488,7 +1086,7 @@ function setAimOffset(targetX: number, horizontalLimit: number, now: number): vo
 function getAimHalfWidth(): number {
   if (camera.projection.kind !== 'perspective') return 0.36;
   const visibleHalfWidth =
-    cameraController.distance *
+    cameraRig.controller.distance *
     Math.tan(camera.projection.fovY / 2) *
     camera.projection.aspect;
   const activeHalfWidth =
@@ -1505,19 +1103,7 @@ function resizeCanvas(): void {
   const height = Math.max(1, Math.round(bounds.height));
   inputBounds.left = bounds.left;
   inputBounds.width = Math.max(bounds.width, 1);
-  const backingWidth = Math.round(width * nextPixelRatio);
-  const backingHeight = Math.round(height * nextPixelRatio);
-
-  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-    renderState.pixelRatio = nextPixelRatio;
-    canvas.width = backingWidth;
-    canvas.height = backingHeight;
-    // Deliberately NOT setting canvas.style.width/height. The backing store has to be a
-    // whole number of device pixels, but pinning the CSS size to that rounded value leaves
-    // the canvas a fraction of a pixel short of a viewer whose own width is fractional —
-    // which happens with browser zoom or a HiDPI window — and the page shows through as a
-    // hairline stripe along the edge. The `.viewer canvas` rule sizes it at 100%/100%
-    // instead, so it always covers exactly, and the slight sampling stretch is invisible.
+  if (sceneRenderer.resize(width, height, nextPixelRatio)) {
     gameUi.resize(width, height, nextPixelRatio);
     if (camera.projection.kind === 'perspective') camera.projection.aspect = width / height;
     renderRequested = true;
@@ -1530,38 +1116,7 @@ function setLoadingState(copy: string): void {
 }
 
 function renderFrame(): void {
-  // Lift the preview and its halo out of the graph for the depth pass, then put them back
-  // at the index they held so forward draw order is untouched. See previewLayer above for
-  // why switching them off is not enough.
-  const previewParent = getNodeParent(previewLayer);
-  const skyParent = getNodeParent(skyDome);
-  if (previewParent !== null) removeNodeChild(previewParent, previewLayer);
-  // The sky has to come out too, and for a sharper reason than the halo: the shadow pass
-  // draws every node with geometry, and a dome that ENCLOSES the shadow camera would write
-  // depth in front of the whole farm and shadow all of it.
-  if (skyParent !== null) removeNodeChild(skyParent, skyDome);
-  drawGlScene3DShadowMap(renderState, scene, shadowCamera, directionalLight);
-  if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
-  if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
-  beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
-  renderGlBackground(renderState);
-  // The pipeline opens its pass preserving BOTH aspects, so last frame's depth is still in
-  // the target and the scene has to start from a cleared one. A nested pass that spares
-  // only the colour does exactly that, using the target's own clear values — the same job
-  // three raw depthMask/clearDepth/clear calls used to do by hand.
-  const sceneTarget = pipeline.sceneTarget;
-  if (sceneTarget !== null) {
-    beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
-    drawGlScene3D(renderState, scene, camera, lights);
-    endGlRenderPass(renderState);
-  }
-  // An empty list is the fast path: no ping-pong targets are acquired and no pass runs, so
-  // the game pays for the defocus only on the screens that show it.
-  endGlRenderEffectPipeline(
-    renderState,
-    pipeline,
-    backdropFocus > 0.002 ? getBackdropEffects(backdropFocus) : NO_EFFECTS,
-  );
+  sceneRenderer.drawScene(sceneGraph, backdropFocus);
   const countProgress =
     resultAnimationStart === 0
       ? phase === 'finished' ? 1 : 0
@@ -1639,24 +1194,14 @@ function enterFrame(now: number): void {
       renderRequested = true;
     }
 
-    const dustIsMoving = dustEmitter.data.particleCount > 0;
-    const celebrationIsMoving = celebrationEmitter.data.particleCount > 0;
-    const particlesAreMoving = dustIsMoving || celebrationIsMoving;
-    if (dustIsMoving) {
-      stepParticleEmitter3D(dustEmitter, dustState, dustConfig, deltaTime);
-      renderRequested = true;
-    }
-    if (celebrationIsMoving) {
-      stepParticleEmitter3D(celebrationEmitter, celebrationState, celebrationConfig, deltaTime);
-      renderRequested = true;
-    }
+    const particlesAreMoving = particles.step(deltaTime);
+    if (particlesAreMoving) renderRequested = true;
 
     const displayedHeight = phase === 'finished' ? finalHeight : cachedStackHeight;
-    updateCamera(deltaTime, displayedHeight);
-    const cameraIsMoving =
-      Math.abs(cameraController.distance - cameraController.goalDistance) > 0.001 ||
-      Math.abs(cameraController.polar - cameraController.goalPolar) > 0.0001 ||
-      Math.abs(cameraController.azimuth - cameraController.goalAzimuth) > 0.0001;
+    if (cameraRig.update(camera, deltaTime, displayedHeight, objectsDropped)) {
+      renderRequested = true;
+    }
+    const cameraIsMoving = cameraRig.isMoving();
     if (renderRequested || gameIsMoving || particlesAreMoving || cameraIsMoving) {
       renderFrame();
       renderRequested = false;
@@ -1664,46 +1209,6 @@ function enterFrame(now: number): void {
   }
 
   requestAnimationFrame(enterFrame);
-}
-
-function initializeRenderer() {
-  const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const nextCanvas = createGlCanvasElement(1, 1, initialPixelRatio);
-  nextCanvas.setAttribute(
-    'aria-label',
-    'Farm Stacker game. Move with the pointer or arrow keys, then click, tap, Space, or Enter to place the next random farm object.',
-  );
-  nextCanvas.tabIndex = 0;
-  // createGlCanvasElement writes an inline pixel size, which would beat the stylesheet's
-  // 100%/100%. Set it to fill once, here, so resizeCanvas never has to touch the CSS size
-  // and can never round it a fraction short of the viewer (see the note there).
-  nextCanvas.style.width = '100%';
-  nextCanvas.style.height = '100%';
-  viewer.prepend(nextCanvas);
-
-  try {
-    const nextRenderState = createGlRenderState(nextCanvas, {
-      pixelRatio: initialPixelRatio,
-      backgroundColor: 0x00000000,
-      contextAttributes: { alpha: true, antialias: false },
-      powerPreference: 'high-performance',
-    });
-    if (import.meta.env.DEV) enableFlightDiagnostics(nextRenderState);
-    registerStandardGlTextureResolvers(nextRenderState);
-    registerGlStandardPbrMaterial(nextRenderState);
-    registerGlVertexColorMaterial(nextRenderState);
-    registerGlBlurEffect(nextRenderState);
-    registerGlVignetteEffect(nextRenderState);
-    const nextPipeline = createGlRenderEffectPipeline(nextRenderState, {
-      sampleCount: 4,
-      format: 'rgba16f',
-      depth: 'depth-stencil',
-    });
-    return { canvas: nextCanvas, pipeline: nextPipeline, renderState: nextRenderState };
-  } catch (error) {
-    showSceneError('Unable to initialize WebGL2.', error);
-    throw error;
-  }
 }
 
 function bindRenderingLifecycle(): void {
@@ -1777,11 +1282,11 @@ if (import.meta.env.DEV) {
         return getCamera3DWorldToScreen(probe, camera, point, aspect) ? probe.y : NaN;
       };
       return {
-        distance: cameraController.distance,
-        followed: cameraStackHeight,
+        distance: cameraRig.controller.distance,
+        followed: cameraRig.followedHeight(),
         measured: cachedStackHeight,
         preview: ndcY(previewTopY),
-        targetY: cameraController.target.y,
+        targetY: cameraRig.controller.target.y,
         top: ndcY(cachedStackHeight),
       };
     },

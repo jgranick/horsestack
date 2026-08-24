@@ -33,6 +33,7 @@ import {
   getRandomStackObjectKind,
 } from '../physics/stackObjectKind';
 import type { StackObjectKind } from '../physics/stackObjectKind';
+import type { GroundProfile } from '../physics/stackPhysics';
 import {
   STACK_OBJECT_PROFILES,
   getStackBodyHalfWidth,
@@ -138,8 +139,11 @@ export interface Game {
   /** The record as it stood when the round began, or null if there was none. */
   readonly recordBeforeRound: number | null;
 
-  /** Models are in; leave the loading phase for the title screen. */
-  markReady: () => void;
+  /**
+   * Models are in; leave the loading phase for the title screen. `ground` is the sampled
+   * terrain the floor should follow — omitted, the floor stays flat.
+   */
+  markReady: (ground?: GroundProfile) => void;
   /** The GL context went away; there is nothing to run until the page reloads. */
   markLost: () => void;
   /**
@@ -198,6 +202,8 @@ export function createGame(deps: GameDeps): Game {
   // guard. Comparing input to input keeps the window honest whatever the frame costs.
   let placementArmedAt = 0;
   let swayClock = 0;
+  // Undefined until the farm has loaded and been sampled; see markReady.
+  let groundProfile: GroundProfile | undefined;
   let physicsWorld: Physics2DWorld = createHorseStackWorld();
   let activeObject: ActiveStackObject | null = null;
   let stackedObjects: StackedObject[] = [];
@@ -648,7 +654,11 @@ export function createGame(deps: GameDeps): Game {
       return recordBeforeRound;
     },
 
-    markReady() {
+    markReady(ground) {
+      groundProfile = ground;
+      // The world built at construction has the flat floor; rebuild it now the real one is
+      // known, so the title screen and the first round both stand on the modelled terrain.
+      physicsWorld = createHorseStackWorld(groundProfile);
       phase = 'ready';
     },
 
@@ -662,7 +672,7 @@ export function createGame(deps: GameDeps): Game {
       mode = nextMode;
       const now = performance.now();
       audio.startRound(now, mode);
-      physicsWorld = createHorseStackWorld();
+      physicsWorld = createHorseStackWorld(groundProfile);
       physicsAccumulator = 0;
       activeObject = null;
       stackedObjects = [];
@@ -741,7 +751,7 @@ export function createGame(deps: GameDeps): Game {
       horsesDropped = 0;
       objectsDropped = 0;
       stackedObjects = [];
-      physicsWorld = createHorseStackWorld();
+      physicsWorld = createHorseStackWorld(groundProfile);
       cameraRig.resetHeight();
     },
 

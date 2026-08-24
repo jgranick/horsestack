@@ -43,6 +43,9 @@ export const PHYSICS_STEP = 1 / 60;
 export const FINAL_SETTLE_SECONDS = 2.35;
 
 const PHYSICS_GRID_CELL_SIZE = 0.2;
+// How far the terrain colliders extend below their surface. Only has to be deeper than any
+// piece could travel in one step; it is never seen.
+const GROUND_SKIRT = 0.35;
 // The pile is meant to be improbable, not fair. Restitution is effectively nil so nothing
 // keeps bouncing after it lands, and friction is generous so a piece shifts and leans
 // rather than sliding straight off.
@@ -103,7 +106,20 @@ const PASTURE_MATERIAL: Physics2DMaterial = {
   restitution: 0.035,
 };
 
-export function createHorseStackWorld(): Physics2DWorld {
+/** Ground heights across the pasture, in physics coordinates. See scene/terrainProfile.ts. */
+export interface GroundProfile {
+  minX: number;
+  step: number;
+  heights: readonly number[];
+}
+
+/**
+ * Builds the round's physics world. `ground` makes the floor follow the modelled terrain;
+ * without it the floor is the flat box this used to have, which is the right fallback for the
+ * headless validation scripts (they have no farm mesh to sample) and for a model whose ground
+ * cannot be found.
+ */
+export function createHorseStackWorld(ground?: GroundProfile): Physics2DWorld {
   const world = createPhysics2DWorld(
     0,
     -PHYSICS_GRAVITY,
@@ -129,22 +145,56 @@ export function createHorseStackWorld(): Physics2DWorld {
   world.config.penetrationSlop = 0.009;
   world.config.positionCorrection = 0.28;
   world.config.restitutionThreshold = 2.5;
-  const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
-  pasture.colliders.push(
-    createPhysics2DCollider(
-      {
-        kind: 'aabb',
-        minX: -PASTURE_HALF_WIDTH,
-        minY: -0.02,
-        maxX: PASTURE_HALF_WIDTH,
-        maxY: 0.02,
-      },
-      PASTURE_MATERIAL,
-    ),
-  );
-  addPhysics2DBody(world, pasture);
+  // The flat floor is built EXACTLY as it always was — body positioned at the surface, box
+  // hanging below it in body-relative coordinates. Re-expressing the same geometry in
+  // absolute coordinates gives the same corners to within a last bit, and over 64 placements
+  // the solver amplifies that into a visibly different pile: it moved one gameplay-validation
+  // scenario from 13.48m to 11.99m while the other two stayed identical. The headless scripts
+  // take this path, so it is left alone and the terrain path gets its own body.
+  if (ground === undefined || ground.heights.length < 2) {
+    const pasture = createRigidBody2D('static', 0, PASTURE_TOP_Y - 0.02);
+    pasture.colliders.push(
+      createPhysics2DCollider(
+        {
+          kind: 'aabb',
+          minX: -PASTURE_HALF_WIDTH,
+          minY: -0.02,
+          maxX: PASTURE_HALF_WIDTH,
+          maxY: 0.02,
+        },
+        PASTURE_MATERIAL,
+      ),
+    );
+    addPhysics2DBody(world, pasture);
+    return world;
+  }
+
+  // Terrain-following floor: one convex quad per span, anchored at the origin so the sampled
+  // heights can be used as written. Sloped rather than stepped, because a staircase of boxes
+  // gives a rolling hay bale a lip to catch on at every sample and the pile creeps down it.
+  //
+  // The skirt is deep enough that a piece cannot tunnel under the floor in one step, and
+  // neighbouring quads share their end edges exactly, so there is no seam to fall through.
+  const terrain = createRigidBody2D('static', 0, 0);
+  for (let index = 0; index + 1 < ground.heights.length; index += 1) {
+    const x0 = ground.minX + ground.step * index;
+    const x1 = x0 + ground.step;
+    const y0 = ground.heights[index] ?? PASTURE_TOP_Y;
+    const y1 = ground.heights[index + 1] ?? PASTURE_TOP_Y;
+    const floor = Math.min(y0, y1) - GROUND_SKIRT;
+    terrain.colliders.push(
+      createPhysics2DCollider(
+        // Counter-clockwise from the bottom-left, which is the winding the polygon collider
+        // expects; reversed, every contact normal points into the ground.
+        { kind: 'polygon', points: [x0, floor, x1, floor, x1, y1, x0, y0] },
+        PASTURE_MATERIAL,
+      ),
+    );
+  }
+  addPhysics2DBody(world, terrain);
   return world;
 }
+
 
 export function addStackObjectBody(
   world: Physics2DWorld,

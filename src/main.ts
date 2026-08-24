@@ -22,6 +22,7 @@ import { createSceneGraph } from './scene/sceneGraph';
 import type { PlayPlanePoint } from './scene/playPlane';
 import { unprojectToPlayPlane } from './scene/playPlane';
 import { createSceneRenderer } from './scene/sceneRenderer';
+import { sampleFarmTerrain } from './scene/terrainProfile';
 import { createStackObjectVisuals } from './scene/stackObjectVisual';
 import { createWindmill } from './scene/windmill';
 import type { Windmill } from './scene/windmill';
@@ -119,7 +120,9 @@ async function start(): Promise<void> {
     visuals.setTemplates(extractFarmPropTemplates(farm), horse);
     windmill = createWindmill(farm);
     mountFarm(farm, scene);
-    game.markReady();
+    // Sampled AFTER mounting: the sampler reads each ground mesh's world matrix, and until
+    // the farm is under the scene wrapper that matrix is the model's own, not the game's.
+    game.markReady(sampleFarmTerrain(farm) ?? undefined);
     cameraRig.update(camera, 1, game.displayedHeight, game.objectsDropped);
     renderFrame();
     loadingPanel.classList.add('is-hidden');

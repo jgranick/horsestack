@@ -22,10 +22,12 @@ import {
   addNodeChildAt,
   beginGlRenderPass,
   beginGlRenderEffectPipeline,
+  clamp,
   clearParticleEmitter3D,
   cloneMeshGeometry,
   cloneMaterial,
   cloneMesh,
+  cloneNode3DSubtree,
   compactMeshGeometryVertices,
   configureDirectionalShadowCamera3DTightFit,
   createAabb,
@@ -63,10 +65,10 @@ import {
   endGlRenderPass,
   enableFlightDiagnostics,
   endGlRenderEffectPipeline,
+  findNodeByName,
   getCamera3DWorldToScreen,
   getMaterialOfKind,
   getNodeParent,
-  getNodeChildren,
   getNodeLocalMatrix4,
   invalidateNodeLocalTransform,
   isMesh,
@@ -712,7 +714,7 @@ function createStackObjectVisual(
     const templates = farmPropTemplates[kind];
     const template = templates?.[variantIndex] ?? templates?.[0];
     if (template === undefined) throw new Error(`${STACK_OBJECT_PROFILES[kind].label} is not loaded`);
-    addNodeChild(pivot, cloneNode3DHierarchy(template, materialOverride));
+    addNodeChild(pivot, cloneNode3DSubtree(template, materialOverride === null ? null : toPreviewMaterial));
     return pivot;
   }
 
@@ -724,7 +726,10 @@ function createStackObjectVisual(
   modelTransform.position.y = -HORSE_VISUAL_CENTER_Y;
   setQuaternionFromEuler(modelTransform.rotation, 0, 0, 0);
   invalidateNodeLocalTransform(modelTransform);
-  addNodeChild(modelTransform, cloneNode3DHierarchy(horseTemplate.root, materialOverride));
+  addNodeChild(
+    modelTransform,
+    cloneNode3DSubtree(horseTemplate.root, materialOverride === null ? null : toPreviewMaterial),
+  );
   addNodeChild(pivot, modelTransform);
   return pivot;
 }
@@ -881,15 +886,6 @@ function filterFarmPropGeometry(
   return compact;
 }
 
-function findNodeByName(root: Readonly<Node3D>, name: string): Node3D | null {
-  if (root.name === name) return root as Node3D;
-  for (const child of getNodeChildren(root)) {
-    const match = findNodeByName(child, name);
-    if (match !== null) return match;
-  }
-  return null;
-}
-
 function createLandingRadiance(): Node3D {
   const root = createNode3D(Node3DKind, { name: 'landing-radiance' });
   const halo = createMesh(createRingMeshGeometry(0.105, 0.132, 28), [landingHaloMaterial]);
@@ -899,37 +895,6 @@ function createLandingRadiance(): Node3D {
   invalidateNodeLocalTransform(halo);
   addNodeChild(root, halo);
   return root;
-}
-
-function cloneNode3DHierarchy(
-  source: Readonly<Node3D>,
-  materialOverride: ReturnType<typeof createStandardPbrMaterial> | null = null,
-): Node3D {
-  const clone = isMesh(source)
-    ? cloneMesh(source)
-    : createNode3D(source.kind, {
-        alpha: source.alpha,
-        enabled: source.enabled,
-        name: source.name,
-        visible: source.visible,
-      });
-
-  clone.alpha = source.alpha;
-  clone.visible = source.visible;
-  if (materialOverride !== null && isMesh(clone)) {
-    clone.materials = clone.materials.map((material) => toPreviewMaterial(material));
-  }
-  if (!isMesh(source)) {
-    setNodeTransform3D(clone, source);
-    if (isNodeLocalMatrix4Detached(source)) {
-      setNodeLocalMatrix4(clone, getNodeLocalMatrix4(source));
-    }
-  }
-
-  for (const child of getNodeChildren(source)) {
-    addNodeChild(clone, cloneNode3DHierarchy(child, materialOverride));
-  }
-  return clone;
 }
 
 async function loadGltfScene(basePath: string): Promise<Scene3D> {
@@ -1985,10 +1950,6 @@ function formatHeight(height: number): string {
 
 function formatMeters(meters: number): string {
   return `${meters.toFixed(2)} m`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 // The HUD used to double as a test surface — harnesses read the placed count and height

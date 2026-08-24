@@ -4,7 +4,8 @@ import {
   createPhysics2DCollider,
   createPhysics2DWorld,
   createRigidBody2D,
-  createUniformGridSpatialBackend,
+  createUniformGridSpatialBackend2D,
+  saturate,
   stepPhysics2D,
 } from '@flighthq/sdk';
 
@@ -167,7 +168,7 @@ export function createHorseStackWorld(): Physics2DWorld {
   const world = createPhysics2DWorld(
     0,
     -PHYSICS_GRAVITY,
-    createUniformGridSpatialBackend(PHYSICS_GRID_CELL_SIZE),
+    createUniformGridSpatialBackend2D(PHYSICS_GRID_CELL_SIZE),
   );
   world.config.velocityIterations = 18;
   world.config.positionIterations = 9;
@@ -272,8 +273,8 @@ function applyStackAssist(world: Physics2DWorld): void {
       ),
     );
     stackBodyQuiet.set(body, quiet);
-    const settled = clamp01((quiet - SETTLE_DELAY) / SETTLE_RAMP);
-    const carried = clamp01((body.y - PASTURE_TOP_Y) / STABILITY_FULL_HEIGHT) * 0.75;
+    const settled = saturate((quiet - SETTLE_DELAY) / SETTLE_RAMP);
+    const carried = saturate((body.y - PASTURE_TOP_Y) / STABILITY_FULL_HEIGHT) * 0.75;
     const assist = Math.max(settled, carried);
     body.linearDamping = base.linear + assist * ASSIST_LINEAR;
     body.angularDamping = base.angular + assist * ASSIST_ANGULAR;
@@ -307,10 +308,6 @@ function applyAssistInertia(body: RigidBody2D, assist: number): void {
   const stiffened = solved * (1 + assist * ASSIST_INERTIA);
   body.inertia = stiffened;
   body.inverseInertia = 1 / stiffened;
-}
-
-function clamp01(value: number): number {
-  return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
 export function getRandomStackObjectKind(random = Math.random): StackObjectKind {

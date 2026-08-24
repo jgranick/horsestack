@@ -1,32 +1,30 @@
 // The game's UI, drawn with Flight's 2D renderer instead of DOM and CSS.
 //
 // One canvas. The UI is drawn into its own offscreen render target using a SECOND render
-// state over the SAME GL context, then composited onto the finished 3D frame as a single
+// state over the SAME GL context, then presented onto the finished 3D frame as a single
 // blended quad.
 //
-// WHY THE COMPOSITE IS NOT FLIGHT-ONLY. Everything here except the final blend is public
-// SDK: beginGlRenderPass/endGlRenderPass own the target, its clear, and the save/restore of
-// enclosing state. The last step — lay a finished sRGB target over the canvas with alpha —
-// has no public equivalent, and the alternatives were tried and measured, not assumed:
+// This is all public SDK now. beginGlRenderPass/endGlRenderPass own the target, its clear,
+// and the save/restore of enclosing state; presentGlRenderTarget lays the finished target
+// over the canvas and destroyGlRenderTarget hands its GL objects back. present reads the
+// target's DECLARED colour space, so an 'srgb' target (which a 2D scene is — Flight's 2D
+// tower composites in the encoded domain by policy, render/SCENE2D_WORKING_COLOR_SPACE)
+// is copied straight through with premultiplied blending rather than being gamma-encoded a
+// second time. That seam is the reason the alternatives failed and is worth recording:
 //   - rendering 2D straight at the canvas after the pipeline presents draws nothing;
 //   - rendering it into the pipeline's own target, nested pass or not, destroys the 3D;
 //   - handing the UI target to the pipeline as a DestinationOver CompositeEffect backdrop
-//     DOES work and is entirely public API — but the pipeline composites in linear while
-//     Flight's 2D tower composites in the encoded domain by policy
-//     (render/SCENE2D_WORKING_COLOR_SPACE = 'srgb', whose own note says flipping it is not
-//     sufficient because the premultiply would have to move off upload too). Our own
-//     colours can be converted on the way in; sRGB texture content cannot, so the emoji
-//     tally came out washed. Correctness beat purity.
-// presentGlRenderTarget exists for this and is not exported (and copies rather than
-// blends); destroyGlRenderTarget is not exported either, which is why releaseTarget below
-// frees the GL objects by hand.
+//     works and is public API too — but the pipeline composites in LINEAR, and while our
+//     own colours can be converted on the way in, sRGB texture content cannot, so the
+//     emoji tally came out washed.
 //
 // Two more things make this work, each of which broke an earlier attempt:
 //   - the second state comes from createGlOffscreenRenderState, so its renderer/material
 //     registrations and per-frame batch state are its own. Sharing one state with the 3D
 //     pipeline corrupts the 3D — props lose their textures.
-//   - the composite restores the blend state and bindings it touches, so nothing leaks
-//     into the next frame's 3D pass.
+//   - present runs immediately after the 2D pass closes, which is where renderGlScene2D has
+//     already left blending on and depth/cull off — the state the blend needs. It also owns
+//     its own VAO and unbinds what it sampled, so nothing leaks into the next frame's 3D.
 import type { DisplayObject, GlRenderState, GlRenderTarget, RichText, Shape, TextLabel } from '@flighthq/sdk';
 import {
   addNodeChild,
@@ -39,6 +37,7 @@ import {
   createDisplayObject,
   createGlOffscreenRenderState,
   createGlRenderTarget,
+  destroyGlRenderTarget,
   endGlRenderPass,
   createRichText,
   createMatrix,
@@ -56,11 +55,13 @@ import {
   invalidateNodeRender,
   invalidateNodeLocalTransform,
   prepareScene2DRender,
+  presentGlRenderTarget,
   registerGlShapeCommands,
   registerGlShapeRasterizer,
   registerGlStandardMaterial,
   registerRenderer,
   renderGlScene2D,
+  saturate,
   setGlRenderTransform2D,
   RichTextKind,
   setRichTextDefaultTextFormat,
@@ -124,15 +125,16 @@ const HANDS_PER_EMOJI_COLUMN = 7;
 // columns for a poor run, a dozen for a good one — and does not saturate until about 26m,
 // which nothing has reached.
 const HANDS_PER_EMOJI = 2;
-const GOLD = 0xffd166;
+// Every colour in this file is 0xRRGGBBAA — Flight's packed colour word, alpha in the low
+// byte. The trailing ff is load-bearing, not decoration: a bare 0xRRGGBB is read as
+// 0x00RRGGBB, which shifts the channels one place (gold arrives as cyan) AND lands the blue
+// byte in alpha, where the fill commands MULTIPLY it into the alpha argument. Dropping it
+// therefore misses twice over, and the second miss is the quiet one.
+const GOLD = 0xffd166ff;
 
 // The DOM original eased each of these with CSS keyframes; recreated here on Flight's
 // easing primitives so the beats survive the move to Flight 2D, and so the curves are the
 // library's rather than four hand-rolled polynomials. See docs/result-screen-reference.png.
-function clamp01(value: number): number {
-  return value < 0 ? 0 : value > 1 ? 1 : value;
-}
-
 // time-up-arrive: 1.18 -> 0.97 at 55% -> 1.0, with the panel fading in.
 const timeUpScale = easePiecewise([
   { ease: easeScaleOutput(easeOutCubic, 1.18, 0.97), weight: 0.55 },
@@ -151,7 +153,7 @@ function slamScale(t: number): number {
   return t <= 0 ? 1 : slamCurve(t);
 }
 
-const INK = 0xfbf7ec;
+const INK = 0xfbf7ecff;
 const SERIF = 'Georgia, "Times New Roman", serif';
 const SANS = 'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif';
 
@@ -189,11 +191,9 @@ function fill(shape: Shape, colour: number, alpha: number, x: number, y: number,
 }
 
 export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): UiState {
-  const gl = screenState.gl;
   const state: GlRenderState = createGlOffscreenRenderState(screenState);
   let target: GlRenderTarget | null = null;
   let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  const composite = createCompositor(gl);
   registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
   registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
   registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
@@ -206,9 +206,9 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   // screens read as one family. Upright rather than tilted — the tilt is TIME UP's.
   const titleText = label('Horse Stacker', 96, GOLD, SERIF, true);
   const playPill = createShape();
-  const playText = label('PLAY', 13, 0x252420, SANS, true);
+  const playText = label('PLAY', 13, 0x252420ff, SANS, true);
   const timerPill = createShape();
-  const timerCaption = label('TIME LEFT', 9, 0xd8e0d2, SANS, true);
+  const timerCaption = label('TIME LEFT', 9, 0xd8e0d2ff, SANS, true);
   const timerValue = label('30', 34, INK, SERIF);
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', 112, GOLD, SERIF, true);
@@ -222,18 +222,18 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     tallyHorses.push(label('🐴', 15, INK, SANS));
   }
   const horseAppearedAt = new Float64Array(TALLY_CAPACITY);
-  const resultHeight = label('0.00 m', 74, 0xffd166, SERIF);
+  const resultHeight = label('0.00 m', 74, 0xffd166ff, SERIF);
   // The badge is a container so the pill and its text tilt and pulse as one piece. The
   // alternative — transforming both nodes about matching pivots — has to reconcile the
   // pill's box with the text's own line box, and drifts apart the moment either changes.
   const recordBadge = createDisplayObject();
   const recordPill = createShape();
-  const recordText = label('NEW RECORD!', 12, 0x3a2c07, SANS, true);
+  const recordText = label('NEW RECORD!', 12, 0x3a2c07ff, SANS, true);
   addNodeChild(recordBadge, recordPill);
   addNodeChild(recordBadge, recordText);
   const bestLabel = label('', 11, GOLD, SANS, true);
   const againPill = createShape();
-  const againText = label('PLAY AGAIN', 13, 0x252420, SANS, true);
+  const againText = label('PLAY AGAIN', 13, 0x252420ff, SANS, true);
   const creditsPill = createShape();
   const creditsText = label('i', 15, INK, SERIF);
   const creditsBody = createShape();
@@ -241,7 +241,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   setRichTextMultiline(creditsCopy, true);
   setRichTextWordWrap(creditsCopy, true);
   setRichTextDefaultTextFormat(creditsCopy, {
-    align: 'left', color: 0xd8e0d2, font: SANS, leading: 3, size: 11,
+    align: 'left', color: 0xd8e0d2ff, font: SANS, leading: 3, size: 11,
   });
   const fullscreenPill = createShape();
   const fullscreenText = label('⛶', 15, INK, SANS);
@@ -297,7 +297,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       screenShownAt = model.now;
     }
     // 0..1 as the current screen arrives; `pop` overshoots so things land with a bounce.
-    const intro = clamp01((model.now - screenShownAt) / 380);
+    const intro = saturate((model.now - screenShownAt) / 380);
     const pop = easeOutBack(intro);
     buttons.length = 0;
     const onTitle = model.screen === 'title';
@@ -333,7 +333,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     if (onTimeUp) {
       const t = Math.min(1, Math.max(0, model.timeUpProgress));
       const scale = timeUpScale(t);
-      fill(timeUpScrim, 0x7e311f, 0.88 * Math.min(1, t * 3), 0, 0, width, height, 0);
+      fill(timeUpScrim, 0x7e311fff, 0.88 * Math.min(1, t * 3), 0, 0, width, height, 0);
       place(timeUpScrim, 0, 0);
       setTextLabelWidth(timeUpText, width);
       timeUpText.scaleX = scale;
@@ -396,7 +396,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       }
       // The count runs at rest scale so the number stays readable, then the height itself
       // pops on the beat the points used to arrive on.
-      const settle = clamp01((model.countProgress - 0.86) / 0.14);
+      const settle = saturate((model.countProgress - 0.86) / 0.14);
       const slam = slamScale(settle);
       setTextLabelWidth(resultHeight, width);
       setText(resultHeight, model.heightText);
@@ -428,7 +428,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         recordBadge.scaleY = arrive;
         recordBadge.pivotX = badgeWidth / 2;
         recordBadge.pivotY = badgeHeight / 2;
-        recordBadge.alpha = clamp01(settle * 2.2);
+        recordBadge.alpha = saturate(settle * 2.2);
         // Rounded so the bob lands on whole pixels and the text stays crisp through it.
         place(recordBadge, width / 2, badgeY + badgeHeight / 2 + Math.round(swagger * 2));
         invalidateNodeAppearance(recordBadge);
@@ -438,7 +438,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         setText(bestLabel, model.bestText);
         // Quiet, but not invisible: it sits over the blurred scene rather than a dark wash
         // now, so it cannot afford to give away opacity as well as size and colour.
-        bestLabel.alpha = clamp01(settle * 1.6);
+        bestLabel.alpha = saturate(settle * 1.6);
         place(bestLabel, 0, badgeY + 8 + (1 - easeOutCubic(settle)) * 10);
         invalidateNodeAppearance(bestLabel);
       }
@@ -460,13 +460,13 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       const drop = (1 - pop) * 40;
       // Under ten seconds the pill turns hot and jitters; each new second gives the number
       // a kick, so the clock reads as running rather than just counting.
-      const urgent = clamp01((10 - model.secondsLeft) / 4);
+      const urgent = saturate((10 - model.secondsLeft) / 4);
       const fraction = model.secondsLeft - Math.floor(model.secondsLeft);
       const kick = Math.max(0, 1 - (1 - fraction) * 7);
       const shake = urgent * Math.sin(model.now * 0.045) * 2.5;
       fill(
         timerPill,
-        urgent > 0 ? 0x8c3a24 : 0x1f2d1d,
+        urgent > 0 ? 0x8c3a24ff : 0x1f2d1dff,
         0.72 + urgent * 0.14,
         0, 0, w, 62, 18,
       );
@@ -489,16 +489,16 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(creditsPill, onResult);
     show(creditsText, onResult);
     if (onResult) {
-      pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1d, 0.42);
+      pill(creditsPill, creditsText, 'credits', 24, height - 54, 30, 30, 0x1f2d1dff, 0.42);
     }
-    pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1d, 0.42);
+    pill(fullscreenPill, fullscreenText, 'fullscreen', width - 54, height - 54, 30, 30, 0x1f2d1dff, 0.42);
 
     const creditsShowing = onResult && model.creditsOpen;
     show(creditsBody, creditsShowing);
     show(creditsCopy, creditsShowing);
     if (creditsShowing) {
       const w = Math.min(420, width - 48);
-      fill(creditsBody, 0x182217, 0.9, 0, 0, w, 82, 16);
+      fill(creditsBody, 0x182217ff, 0.9, 0, 0, w, 82, 16);
       place(creditsBody, 24, height - 148);
       setRichTextWidth(creditsCopy, w - 32);
       setRichTextString(
@@ -531,7 +531,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     // pixels and stays crisp rather than being resampled by the composite. Resizing
     // allocates a new one, so the old one has to go back or every resize leaks a
     // screen-sized texture.
-    if (target !== null) releaseTarget(gl, target);
+    if (target !== null) destroyGlRenderTarget(state, target);
     target = createGlRenderTarget(state, {
       width: Math.round(width * nextPixelRatio),
       height: Math.round(height * nextPixelRatio),
@@ -556,89 +556,11 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     renderGlScene2D(state, root);
     endGlRenderPass(state);
 
-    // 2. Lay it over that frame. This is the one step with no public equivalent; see the
-    //    note at the top of the file. Only the state this draw touches is saved.
-    const previousVertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
-    const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
-    const blendWasOn = gl.isEnabled(gl.BLEND);
-    const depthWasOn = gl.isEnabled(gl.DEPTH_TEST);
-    composite.draw(surface.textures[0] ?? null);
-    gl.bindVertexArray(previousVertexArray);
-    gl.useProgram(previousProgram);
-    if (blendWasOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
-    if (depthWasOn) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
+    // Lay it over that frame. The target declares itself sRGB, so present copies it straight
+    // through — no second gamma encode — with premultiplied blending, which is exactly what
+    // the UI's own transparent target needs. See the note at the top of the file.
+    presentGlRenderTarget(state, surface);
   }
 
   return { buttons, render, resize, update };
-}
-
-// destroyGlRenderTarget is not on the SDK's public surface, so the GL objects go back by
-// hand. Without this every resize would strand a screen-sized texture and its framebuffer.
-function releaseTarget(gl: WebGL2RenderingContext, target: GlRenderTarget): void {
-  gl.deleteFramebuffer(target.framebuffer);
-  if (target.resolveFramebuffer !== null) gl.deleteFramebuffer(target.resolveFramebuffer);
-  for (const texture of target.textures) gl.deleteTexture(texture);
-}
-
-// A full-screen triangle sampling the UI target. The UI is drawn into a transparent target
-// with ordinary source-alpha blending, which leaves premultiplied colour, so it composites
-// with ONE / ONE_MINUS_SRC_ALPHA.
-function createCompositor(gl: WebGL2RenderingContext): { draw: (texture: WebGLTexture | null) => void } {
-  const program = gl.createProgram();
-  const attach = (type: number, source: string): void => {
-    const shader = gl.createShader(type);
-    if (shader === null) throw new Error('UI compositor: could not create shader');
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      throw new Error(`UI compositor: ${gl.getShaderInfoLog(shader) ?? 'shader failed to compile'}`);
-    }
-    gl.attachShader(program, shader);
-    gl.deleteShader(shader);
-  };
-  attach(gl.VERTEX_SHADER, `#version 300 es
-layout(location = 0) in vec2 a_position;
-out vec2 v_uv;
-void main() {
-  v_uv = a_position * 0.5 + 0.5;
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}`);
-  attach(gl.FRAGMENT_SHADER, `#version 300 es
-precision mediump float;
-uniform sampler2D u_ui;
-in vec2 v_uv;
-out vec4 fragColor;
-void main() {
-  fragColor = texture(u_ui, v_uv);
-}`);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error(`UI compositor: ${gl.getProgramInfoLog(program) ?? 'program failed to link'}`);
-  }
-  const sampler = gl.getUniformLocation(program, 'u_ui');
-  const vertexArray = gl.createVertexArray();
-  const buffer = gl.createBuffer();
-  gl.bindVertexArray(vertexArray);
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.bindVertexArray(null);
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-
-  return {
-    draw(texture) {
-      if (texture === null) return;
-      gl.useProgram(program);
-      gl.bindVertexArray(vertexArray);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(sampler, 0);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.CULL_FACE);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    },
-  };
 }

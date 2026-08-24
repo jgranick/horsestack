@@ -176,7 +176,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const heightPill = createShape();
   // BEST, not HEIGHT: the number is the run's high-water mark, which is the score. The current
   // height needs no readout — it is the tower, right there.
-  const heightCaption = label('HEIGHT', 9, 0xd8e0d2ff, SANS, true);
+  const heightCaption = label('STACK HEIGHT', 9, 0xd8e0d2ff, SANS, true);
   const heightValue = label('0.00 m', 22, INK, SERIF);
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', TIME_UP_MAX_SIZE, GOLD, SERIF, true);

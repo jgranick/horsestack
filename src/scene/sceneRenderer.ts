@@ -86,7 +86,11 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   const renderState = createGlRenderState(canvas, {
     pixelRatio: initialPixelRatio,
     backgroundColor: 0x00000000,
-    contextAttributes: { alpha: true, antialias: false },
+    // Antialiasing left at the context default (on). It used to be switched off on the
+    // grounds that the 3D pipeline does its own multisampling and the canvas need not pay
+    // for a second lot; that is true of the 3D, but the UI is drawn by the shape rasterizer,
+    // which has no coverage blending of its own.
+    contextAttributes: { alpha: true },
     powerPreference: 'high-performance',
   });
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);

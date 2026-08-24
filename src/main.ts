@@ -166,9 +166,9 @@ function bindGameControls(): void {
   });
 
   canvas.addEventListener('keydown', (event: KeyboardEvent) => {
-    // Escape is the endless run's other way out, matching the MENU pill. A timed round ends
-    // on its own, so it keeps Escape's browser-default meaning.
-    if (event.key === 'Escape' && game.mode === 'endless' && game.isRunning) {
+    // Escape is the STEADY HANDS run's other way out, matching the MENU pill. A timed round
+    // ends on its own, so it keeps Escape's browser-default meaning.
+    if (event.key === 'Escape' && game.mode === 'steady' && game.isRunning) {
       returnToMenu();
       event.preventDefault();
       return;
@@ -229,8 +229,8 @@ function handleUiPress(event: PointerEvent): boolean {
       startGame('time', event);
       return true;
     }
-    if (button.id === 'endless' && screen === 'title') {
-      startGame('endless', event);
+    if (button.id === 'steady' && screen === 'title') {
+      startGame('steady', event);
       return true;
     }
     // PLAY AGAIN replays whatever was just played rather than always the timed game.
@@ -327,6 +327,7 @@ function renderFrame(): void {
     heightText: formatMeters(countProgress >= 1 ? finalMeters : shownMeters),
     heightNowText: formatMeters(getStackHeightMeters(game.displayedHeight)),
     mode: game.mode,
+    piecesLost: game.piecesLost,
     screen: getUiScreen(),
     secondsLeft: game.secondsLeft,
     timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup' ? 1 : game.timeUpProgress,

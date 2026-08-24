@@ -8,6 +8,7 @@
 // names, and returns whether anything is still animating. There is no retained widget tree
 // and no diffing — the nodes are built once, and each frame decides afresh what is shown.
 import type { GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
+import { STEADY_HANDS_ALLOWANCE } from '../game/gameConfig';
 import type { GameMode } from '../game/gameMode';
 import {
   addNodeChild,
@@ -45,7 +46,7 @@ export type UiScreen = 'loading' | 'title' | 'playing' | 'timeup' | 'result';
 
 export interface UiButton {
   height: number;
-  id: 'time' | 'endless' | 'again' | 'menu' | 'fullscreen' | 'credits';
+  id: 'time' | 'steady' | 'again' | 'menu' | 'fullscreen' | 'credits';
   width: number;
   x: number;
   y: number;
@@ -62,8 +63,10 @@ export interface UiState {
 export interface UiModel {
   /** Which game is being played, which decides the playing screen's HUD. */
   mode: GameMode;
-  /** The pile's height right now, for the endless readout. Ignored in Time Challenge. */
+  /** The pile's height right now, for the STEADY HANDS readout. Ignored in Time Challenge. */
   heightNowText: string;
+  /** Pieces lost off the pasture, drawn as spent strike dots. Ignored in Time Challenge. */
+  piecesLost: number;
   // Empty when there is nothing worth showing: a first ever round, or one that set a new
   // record (where the height on screen already IS the record).
   bestText: string;
@@ -100,6 +103,9 @@ const TITLE_PIVOT_RATIO = 60 / 96;
 // Wide enough for "TIME CHALLENGE" at 13px with room either side; narrowed on a phone by
 // the gutter, which is why the pills read their width rather than carrying a fixed one.
 const MODE_PILL_WIDTH = 216;
+// The STEADY HANDS readout is the timed pill plus a row of strike dots, so it stands taller.
+const STEADY_PILL_HEIGHT = 82;
+const DOT_SIZE = 9;
 
 const HANDS_PER_EMOJI_COLUMN = 7;
 // One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
@@ -141,17 +147,19 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const titleText = label('Horse Stacker', TITLE_MAX_SIZE, GOLD, SERIF, true);
   const timePill = createShape();
   const timeText = label('TIME CHALLENGE', 13, 0x252420ff, SANS, true);
-  const endlessPill = createShape();
-  const endlessText = label('ENDLESS', 13, 0x252420ff, SANS, true);
+  const steadyPill = createShape();
+  const steadyText = label('STEADY HANDS', 13, 0x252420ff, SANS, true);
   const menuPill = createShape();
   const menuText = label('MENU', 12, INK, SANS, true);
   const timerPill = createShape();
   const timerCaption = label('TIME LEFT', 9, 0xd8e0d2ff, SANS, true);
   const timerValue = label('30', 34, INK, SERIF);
-  // Endless replaces the clock with the same pill reading the pile instead.
+  // STEADY HANDS replaces the clock with the same pill reading the pile instead, plus a row
+  // of dots for the pieces it can still afford to lose.
   const heightPill = createShape();
   const heightCaption = label('HEIGHT', 9, 0xd8e0d2ff, SANS, true);
   const heightValue = label('0.00 m', 22, INK, SERIF);
+  const strikeDots = Array.from({ length: STEADY_HANDS_ALLOWANCE }, () => createShape());
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', TIME_UP_MAX_SIZE, GOLD, SERIF, true);
   // One label per hand, like the DOM original's one span per hand: it is what lets each
@@ -191,9 +199,9 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const fullscreenText = label('⛶', 15, INK, SANS);
 
   for (const node of [
-    titleText, timePill, timeText, endlessPill, endlessText,
+    titleText, timePill, timeText, steadyPill, steadyText,
     timerPill, timerCaption, timerValue,
-    heightPill, heightCaption, heightValue, menuPill, menuText,
+    heightPill, heightCaption, heightValue, ...strikeDots, menuPill, menuText,
     timeUpScrim, timeUpText,
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
@@ -257,8 +265,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(titleText, onTitle);
     show(timePill, onTitle);
     show(timeText, onTitle);
-    show(endlessPill, onTitle);
-    show(endlessText, onTitle);
+    show(steadyPill, onTitle);
+    show(steadyText, onTitle);
     if (onTitle) {
       // Drops in with an overshoot, then breathes so the screen is never quite still.
       const breathe = Math.sin(model.now * 0.0016) * 4;
@@ -291,7 +299,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       // Both wear the same fill. They are two ways to play the same game, not a primary
       // action and a secondary one, and styling one of them down said otherwise.
       pill(timePill, timeText, 'time', menuX, menuY, menuWidth, 44, INK, intro);
-      pill(endlessPill, endlessText, 'endless', menuX, menuY + 56, menuWidth, 44, INK, intro);
+      pill(steadyPill, steadyText, 'steady', menuX, menuY + 56, menuWidth, 44, INK, intro);
     }
 
     show(timeUpScrim, onTimeUp);
@@ -433,7 +441,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     }
 
     const timedPlaying = playing && model.mode === 'time';
-    const endlessPlaying = playing && model.mode === 'endless';
+    const steadyPlaying = playing && model.mode === 'steady';
     show(timerPill, timedPlaying);
     show(timerCaption, timedPlaying);
     show(timerValue, timedPlaying);
@@ -468,22 +476,48 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
 
     // Endless: the clock's slot holds a live height instead, and the corner carries the way
     // out — with no clock to end the round, leaving has to be something the player can see.
-    show(heightPill, endlessPlaying);
-    show(heightCaption, endlessPlaying);
-    show(heightValue, endlessPlaying);
-    show(menuPill, endlessPlaying);
-    show(menuText, endlessPlaying);
-    if (endlessPlaying) {
+    show(heightPill, steadyPlaying);
+    show(heightCaption, steadyPlaying);
+    show(heightValue, steadyPlaying);
+    show(menuPill, steadyPlaying);
+    show(menuText, steadyPlaying);
+    for (const dot of strikeDots) show(dot, steadyPlaying);
+    if (steadyPlaying) {
       const w = 104;
       const x = width - w - 24;
       const drop = (1 - pop) * 40;
-      fill(heightPill, 0x1f2d1dff, 0.72, 0, 0, w, 62, 18);
+      fill(heightPill, 0x1f2d1dff, 0.72, 0, 0, w, STEADY_PILL_HEIGHT, 18);
       place(heightPill, x, 18 - drop);
       setTextLabelWidth(heightCaption, w);
       place(heightCaption, x, 26 - drop);
       setTextLabelWidth(heightValue, w);
       place(heightValue, x, 44 - drop);
       setText(heightValue, model.heightNowText);
+
+      // One dot per piece you are allowed to lose, filling left to right as you lose them.
+      // A count would be smaller, but the row says "three of these and you are done" at a
+      // glance without being read, and a dot lighting up is the thing you feel when a piece
+      // rolls off the edge.
+      //
+      // All three lit means the allowance is spent and the NEXT loss ends the round — which
+      // is exactly the state that should look alarming, so they light in the timer's red
+      // rather than going dark.
+      const spacing = 15;
+      const dotsWidth = (strikeDots.length - 1) * spacing;
+      for (let index = 0; index < strikeDots.length; index += 1) {
+        const dot = strikeDots[index];
+        if (dot === undefined) continue;
+        const spent = index < model.piecesLost;
+        fill(
+          dot, spent ? 0x8c3a24ff : INK, spent ? 0.95 : 0.26,
+          0, 0, DOT_SIZE, DOT_SIZE, DOT_SIZE / 2,
+        );
+        place(
+          dot,
+          x + w / 2 - dotsWidth / 2 - DOT_SIZE / 2 + index * spacing,
+          STEADY_PILL_HEIGHT - 4 - DOT_SIZE + 18 - drop,
+        );
+      }
       pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);
     }
 

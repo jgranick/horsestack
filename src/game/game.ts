@@ -62,6 +62,7 @@ import {
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
   START_INPUT_GUARD_MS,
+  STEADY_HANDS_ALLOWANCE,
 } from './gameConfig';
 import type { GameMode } from './gameMode';
 import type { GamePhase } from './gamePhase';
@@ -111,6 +112,8 @@ export interface Game {
   readonly timeUpProgress: number;
   readonly secondsLeft: number;
   readonly resultHandsShown: number;
+  /** Pieces lost off the pasture this round, for the STEADY HANDS strike dots. */
+  readonly piecesLost: number;
   readonly beatTheRecord: boolean;
   /** The record as it stood when the round began, or null if there was none. */
   readonly recordBeforeRound: number | null;
@@ -125,8 +128,8 @@ export interface Game {
    */
   startRound: (nextMode: GameMode, startedFrom?: Event) => void;
   /**
-   * Abandon the round and go back to the title. Endless has no ending of its own to wait
-   * for, so this is how a player who is done with a tower leaves it.
+   * Abandon the round and go back to the title. STEADY HANDS has no clock to wait out, so
+   * this is how a player who is done with a tower leaves it.
    */
   leaveRound: () => void;
   /** Advance the round by one frame. */
@@ -154,7 +157,10 @@ export interface Game {
 // endless run. The timed key is left at its original name so existing records survive.
 const BEST_HEIGHT_KEYS: Readonly<Record<GameMode, string>> = {
   time: 'horse-stacker.best-height',
-  endless: 'horse-stacker.best-height.endless',
+  // Deliberately NOT the '.endless' key the sandbox build wrote. Those numbers came from a
+  // mode that never ended, so they are however long someone kept clicking rather than a
+  // score — carrying them over would leave an unbeatable record on a game they never played.
+  steady: 'horse-stacker.best-height.steady',
 };
 
 export function createGame(deps: GameDeps): Game {
@@ -190,9 +196,13 @@ export function createGame(deps: GameDeps): Game {
   // collapse leaves the measured height at zero, and the run was still worth what it built.
   // A timed round finishes with the pile standing, so for it this equals the final height.
   let peakHeight = 0;
+  // Pieces that have left the pasture this round. STEADY HANDS ends when this passes its
+  // allowance; the timed round counts them too, but only so the HUD has nothing special to
+  // do, and never acts on the number.
+  let piecesLost = 0;
   const bestMeters: Record<GameMode, number | null> = {
     time: readBestMeters('time'),
-    endless: readBestMeters('endless'),
+    steady: readBestMeters('steady'),
   };
   // The record as it stood when the round began, which is what the result screen reports.
   // Reading bestMeters there would be wrong: by then this round has already been folded in,
@@ -337,13 +347,13 @@ export function createGame(deps: GameDeps): Game {
   function finishGame(now: number): void {
     phase = 'finished';
     // Put the queued piece away HERE rather than trusting the caller. The timed round comes
-    // in through beginSettling, which already did it; an endless collapse comes straight
-    // here, and without this the hovering ghost and its halo hang over the result screen.
+    // in through beginSettling, which already did it; a STEADY HANDS run comes straight here,
+    // and without this the hovering ghost and its halo hang over the result screen.
     activeObject = null;
     indicator.hide();
     // The peak, not the height at this instant. They are the same for a timed round, which
-    // ends with the pile standing; an endless run ends BECAUSE the pile fell, and scoring
-    // the rubble at zero would throw away the whole run.
+    // ends with the pile standing; a STEADY HANDS run ends BECAUSE pieces fell, often taking
+    // the top of the tower with them, and scoring the rubble would throw away the whole run.
     finalHeight = Math.max(peakHeight, getCurrentStackHeight());
     cachedStackHeight = finalHeight;
     recordFinalHeight(getStackHeightMeters(finalHeight));
@@ -416,6 +426,7 @@ export function createGame(deps: GameDeps): Game {
         object.lost = true;
         object.node.enabled = false;
         removePhysics2DBody(physicsWorld, body);
+        piecesLost++;
         continue;
       }
 
@@ -446,17 +457,17 @@ export function createGame(deps: GameDeps): Game {
         beginSettling(now);
         return;
       }
-      // What ends an endless run: every piece placed has fallen off the pasture, so there is
-      // no tower left to add to.
+      // What ends a STEADY HANDS run: one piece too many has gone off the pasture.
       //
-      // `peakHeight > 0` is the part that matters. getSupportedStackHeight returns 0 for a
-      // pile with nothing resting on it, so a non-zero peak means a tower genuinely existed
-      // at some point. Without it, fumbling the very first piece off the edge would end the
-      // run before it started — a collapse you never had is not a collapse.
-      if (mode === 'endless' && stackedObjects.length === 0 && peakHeight > 0) {
-        // Straight to the result. There is nothing left to settle, and the TIME UP beat
-        // would be the wrong words over a collapse that had nothing to do with a clock.
-        // The fanfare still fires, because the count-up is starting either way.
+      // This replaced a "every piece has fallen off" rule, which sounded equivalent and was
+      // not. A collapse scatters pieces across the grass where they stay stackable, and each
+      // run ACCUMULATES that clutter, so the pasture emptying got less likely the longer you
+      // played — measured over a 40 placement run that built to 11.5m and collapsed, it never
+      // fired once. Counting what leaves fires cleanly and reads off the HUD.
+      if (mode === 'steady' && piecesLost > STEADY_HANDS_ALLOWANCE) {
+        // Straight to the result. Nothing is waiting to settle, and the TIME UP beat would be
+        // the wrong words over a round that had nothing to do with a clock. The fanfare still
+        // fires, because the count-up is starting either way.
         audio.beginResultCount();
         finishGame(now);
         return;
@@ -504,13 +515,16 @@ export function createGame(deps: GameDeps): Game {
       return clamp(1 - (finishAt - performance.now()) / (FINAL_SETTLE_SECONDS * 1000), 0, 1) * 2.6;
     },
     get secondsLeft() {
-      // Endless sets gameEndsAt to Infinity, and an Infinity reaching the UI model would be
-      // formatted and shown. There is no clock to report, so report none.
+      // STEADY HANDS sets gameEndsAt to Infinity, and an Infinity reaching the UI model would
+      // be formatted and shown. There is no clock to report, so report none.
       if (!Number.isFinite(gameEndsAt)) return 0;
       return Math.max(0, (gameEndsAt - performance.now()) / 1000);
     },
     get resultHandsShown() {
       return resultHandsShown;
+    },
+    get piecesLost() {
+      return piecesLost;
     },
     get beatTheRecord() {
       return beatTheRecord;
@@ -542,14 +556,15 @@ export function createGame(deps: GameDeps): Game {
       indicator.resetTeeter(now);
       lastAimAt = now;
       nextObjectAt = 0;
-      // Endless has no clock at all rather than a very long one: the timer HUD reads
+      // STEADY HANDS has no clock at all rather than a very long one: the timer HUD reads
       // gameEndsAt, and Infinity keeps every "is the round over" test honest without a
       // second flag to forget.
-      gameEndsAt = mode === 'endless' ? Infinity : now + GAME_DURATION_MS;
+      gameEndsAt = mode === 'steady' ? Infinity : now + GAME_DURATION_MS;
       finishAt = 0;
       finalHeight = 0;
       cachedStackHeight = 0;
       peakHeight = 0;
+      piecesLost = 0;
       resultAnimationStart = 0;
       resultAnimationDuration = 0;
       resultHands = 0;
@@ -604,6 +619,7 @@ export function createGame(deps: GameDeps): Game {
       // The pile is gone, so the camera must not keep framing where it used to be.
       cachedStackHeight = 0;
       peakHeight = 0;
+      piecesLost = 0;
       objectsDropped = 0;
       stackedObjects = [];
       physicsWorld = createHorseStackWorld();

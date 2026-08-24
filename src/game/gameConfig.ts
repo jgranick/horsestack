@@ -115,3 +115,12 @@ export const INDICATOR_DAMPING = 6.2;
 export const INDICATOR_MAX_ANGLE = 0.65;
 export const INDICATOR_MAX_SPIN = 5.5;
 export const FIXED_STEP_LIMIT = 6;
+
+// How many pieces STEADY HANDS lets you lose before the run is over. The fourth ends it.
+//
+// Not sudden death, and the reason is the physics rather than mercy: a piece can be nudged
+// off the pasture seconds after the placement that doomed it, while the pile settles. Ending
+// on the first loss would regularly end a run on a wobble the player did not cause and could
+// not see coming. Three is enough slack to absorb that and still short enough that every
+// loss is felt.
+export const STEADY_HANDS_ALLOWANCE = 3;

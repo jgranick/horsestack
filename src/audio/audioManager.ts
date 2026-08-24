@@ -42,8 +42,9 @@ export interface AudioManager {
   maybePlayCollisionWhinny: (now: number) => void;
   /**
    * A round is starting: re-arm the effects and bring the sound up. The soundtrack is a
-   * TIME CHALLENGE thing — endless runs get the farm's ambience and nothing else, because a
-   * three minute song under an open-ended session turns into a loop you notice.
+   * TIME CHALLENGE thing — a STEADY HANDS run gets the farm's ambience and nothing else,
+   * because that mode has no clock and a three minute song under an open-ended session turns
+   * into a loop you notice.
    */
   startRound: (now: number, mode: GameMode) => void;
   /** The player left a round for the title screen: music out, ambience stays. */
@@ -161,7 +162,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       nextHorseWhinnyAt =
         now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
       if (farmAmbience.paused) playAudioTrack(farmAmbience, 'Farm ambience');
-      if (mode === 'endless') {
+      if (mode === 'steady') {
         // Not just "do not start it": the previous round may have been a timed one whose
         // music is still playing when PLAY AGAIN or MENU lands here.
         stopAudioTrack(soundtrack);

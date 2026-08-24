@@ -400,18 +400,25 @@ function applyAssistInertia(body: RigidBody2D, assist: number): void {
 
 
 
+export const STACK_CONTACT_GROUND = 1;
+export const STACK_CONTACT_PIECE = 2;
+
 /**
- * Is this piece in contact with the FLOOR — the ground itself, not another piece?
+ * What this piece is currently touching, as STACK_CONTACT_GROUND | STACK_CONTACT_PIECE.
  *
- * Identified as "the thing it is touching that is not a stacked piece", which is what
- * findStackBodyKind's undefined case is for. That is steadier than remembering which body
- * the floor is: the world is rebuilt every round, and the flat fallback and the terrain
- * follow different paths through createHorseStackWorld.
+ * The two are told apart by findStackBodyKind's undefined case — anything in the world that
+ * is not a stacked piece is the floor. That is steadier than remembering which body the
+ * floor is: the world is rebuilt every round, and the flat fallback and the terrain follow
+ * different paths through createHorseStackWorld.
+ *
+ * Both flags come from ONE walk of the contact list, because the dropped-horse rule needs
+ * both every frame for every piece in the pile.
  */
-export function isStackBodyTouchingGround(
+export function getStackBodyContacts(
   world: Readonly<Physics2DWorld>,
   body: Readonly<RigidBody2D>,
-): boolean {
+): number {
+  let contacts = 0;
   for (const contact of world.contacts) {
     if (!contact.touching || contact.sensor) continue;
     const other =
@@ -422,9 +429,13 @@ export function isStackBodyTouchingGround(
           : -1;
     if (other === -1) continue;
     const otherBody = world.bodyByIndex.get(other);
-    if (otherBody !== undefined && findStackBodyKind(otherBody) === undefined) return true;
+    if (otherBody === undefined) continue;
+    contacts |= findStackBodyKind(otherBody) === undefined
+      ? STACK_CONTACT_GROUND
+      : STACK_CONTACT_PIECE;
+    if (contacts === (STACK_CONTACT_GROUND | STACK_CONTACT_PIECE)) break;
   }
-  return false;
+  return contacts;
 }
 
 export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {

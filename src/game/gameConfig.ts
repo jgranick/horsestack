@@ -129,15 +129,16 @@ export const INDICATOR_MAX_SPIN = 5.5;
 export const FIXED_STEP_LIMIT = 6;
 
 
-// How long a piece must have been in play before reaching the floor counts as a fall
-// rather than a placement. See the dropped-horse rule in game.ts.
+// How long after being placed a piece may reach the floor and still count as having been
+// PUT there rather than having fallen there. See the dropped-horse rule in game.ts.
 //
-// Set from how fast things actually fall here. Gravity is 10.8 and the play space is small
-// — a 20 metre tower stands only 1.9 units tall — so the longest free fall the game can
-// produce takes under 600ms, and a horse set down on the grass meets the floor in about 60.
-// A second is clear of both: past it, a piece that arrives at the floor cannot have been
-// falling the whole time, so it was resting on something that has since given way.
-export const HORSE_DROP_GRACE_MS = 1000;
+// Short, because it is no longer carrying the whole test. What separates a dropped horse
+// from a placed one is whether it had touched another piece first; this only has to outlast
+// the frame a piece is set down in, so that a horse placed leaning on something — touching
+// that thing and the grass at once — is not read as having fallen off it. Anything slower
+// than this really did come down afterwards: a horse balanced half on a bale swings its
+// other end to the ground in two or three times this and is unmistakably a dropped horse.
+export const HORSE_DROP_GRACE_MS = 200;
 
 // The clearance left above a piece the preview has had to lift, and the step it lifts by
 // when searching. Small enough that the lift is never further than it needs to be, large

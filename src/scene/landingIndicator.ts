@@ -64,15 +64,14 @@ export interface LandingIndicator {
    * surface for this module to lift off — the marker shows where the piece IS, not where it
    * would fall to.
    *
-   * `blocked` means the pose overlaps something already placed and cannot be committed; the
-   * marker says so by going pale and dropping its halo.
+   * There is no refused state to draw. The pose handed in has already been lifted clear of
+   * anything in the way, so the marker is always showing a placement that will happen.
    */
   update: (
     kind: StackObjectKind,
     x: number,
     y: number,
     angle: number,
-    blocked: boolean,
     now: number,
   ) => void;
   /** Switch the whole marker off — between rounds, and while the pile settles. */
@@ -91,7 +90,6 @@ const PREVIEW_TINT_MIX = 0.42;
 const PREVIEW_GLOW_MIX = 0.22;
 // How solid a piece looks where it cannot be put down. Faint enough to read as unavailable,
 // solid enough to still show what it is and how it is turned.
-const BLOCKED_GHOST_ALPHA = 0.3;
 
 export function createLandingIndicator(
   visuals: StackObjectVisuals,
@@ -246,7 +244,7 @@ export function createLandingIndicator(
       angle = clamp(angle + angularVelocity * deltaTime, -INDICATOR_MAX_ANGLE, INDICATOR_MAX_ANGLE);
     },
 
-    update(kind, x, y, pieceAngle, blocked, now) {
+    update(kind, x, y, pieceAngle, now) {
       if (ghost === null) return;
       ghost.enabled = x >= PASTURE_MIN_X && x <= PASTURE_MAX_X;
       if (!ghost.enabled) {
@@ -256,14 +254,6 @@ export function createLandingIndicator(
       }
       previewTopY = y + getStackObjectVerticalExtent(kind, pieceAngle);
       visuals.setTransform(ghost, kind, x, y, pieceAngle);
-      // Blocked reads as "this is not a real option": the piece goes ghostly and the marker
-      // furniture — halo and light, which say "here" — switches off entirely.
-      setNode3DAlpha(ghost, blocked ? BLOCKED_GHOST_ALPHA : 1);
-      if (blocked) {
-        if (radiance !== null) radiance.enabled = false;
-        indicatorLight.intensity = 0;
-        return;
-      }
       updateRadiance(x, y, now);
     },
 

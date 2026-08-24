@@ -63,8 +63,12 @@ export interface UiState {
 export interface UiModel {
   /** Which game is being played, which decides the playing screen's HUD. */
   mode: GameMode;
-  /** The best settled height so far this run — the score the HUD reports. */
-  bestThisRunText: string;
+  /**
+   * The pile's height right now, for the Steady Hands readout. Live rather than best-so-far:
+   * with no clock, this number is the only thing on screen that moves, and a best-so-far
+   * reading sits still exactly when you are building. The best is still what the run SCORES.
+   */
+  liveHeightText: string;
   /** The kind coming up next, as an emoji for the NEXT readout. */
   nextPieceGlyph: string;
   /** Whether sound is muted, for the speaker control. */
@@ -156,7 +160,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   // question "what is the difference between these two" is the moment they are looking at
   // the two buttons, and a line here answers it without a screen or a click in the way.
   const timeBlurb = label('Stack as high as you can in 30 seconds', 11, INK, SANS);
-  const steadyBlurb = label('No clock. Drop one horse off the map and you are done', 11, INK, SANS);
+  const steadyBlurb = label("No clock. Drop one horse and you're done", 11, INK, SANS);
   const menuPill = createShape();
   const menuText = label('MENU', 12, INK, SANS, true);
   // What is coming after the piece in hand.
@@ -171,7 +175,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const heightPill = createShape();
   // BEST, not HEIGHT: the number is the run's high-water mark, which is the score. The current
   // height needs no readout — it is the tower, right there.
-  const heightCaption = label('BEST', 9, 0xd8e0d2ff, SANS, true);
+  const heightCaption = label('HEIGHT', 9, 0xd8e0d2ff, SANS, true);
   const heightValue = label('0.00 m', 22, INK, SERIF);
   const timeUpScrim = createShape();
   const timeUpText = label('TIME UP!', TIME_UP_MAX_SIZE, GOLD, SERIF, true);
@@ -548,7 +552,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       place(heightCaption, x, 26 - drop);
       setTextLabelWidth(heightValue, w);
       place(heightValue, x, 44 - drop);
-      setText(heightValue, model.bestThisRunText);
+      setText(heightValue, model.liveHeightText);
 
       pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);
     }

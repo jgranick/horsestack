@@ -372,7 +372,7 @@ function renderFrame(): void {
     pointerX,
     pointerY,
     heightText: formatMeters(countProgress >= 1 ? finalMeters : shownMeters),
-    bestThisRunText: formatMeters(getStackHeightMeters(game.peakHeight)),
+    liveHeightText: formatMeters(getStackHeightMeters(game.displayedHeight)),
     nextPieceGlyph: PIECE_GLYPHS[game.nextKind],
     mode: game.mode,
     muted: audio.muted,

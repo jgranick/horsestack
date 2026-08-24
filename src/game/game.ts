@@ -52,7 +52,9 @@ import {
   createHorseStackWorld,
   doesStackPlacementOverlap,
   getSupportedStackHeight,
-  isStackBodyTouchingGround,
+  STACK_CONTACT_GROUND,
+  STACK_CONTACT_PIECE,
+  getStackBodyContacts,
   stepHorseStack,
 } from '../physics/stackPhysics';
 import { prefersReducedMotion } from '../reducedMotion';
@@ -100,11 +102,14 @@ interface StackedObject {
   /** When it was placed, on the game clock. Half of the dropped-horse test; see below. */
   placedAt: number;
   /**
-   * Set the first time it meets the floor. The test that follows is an EVENT — it asks how
-   * long the piece had been in play when it arrived — so it must be asked once, on arrival,
-   * and never again while the piece sits there.
+   * Set the first time it meets the floor. The test that follows is an EVENT — it asks what
+   * the piece had been doing when it arrived — so it must be asked once, on arrival, and
+   * never again while the piece sits there. Without the latch, every horse standing on the
+   * grass would trip the rule a moment later.
    */
   touchedGround: boolean;
+  /** Set once it has touched another piece. Half of the dropped-horse test; see below. */
+  touchedPiece: boolean;
   node: Node3D;
 }
 
@@ -434,7 +439,7 @@ export function createGame(deps: GameDeps): Game {
     const placeableY = findPlaceableY(current.kind, current.x, heldY, current.angle);
     current.y = placeableY ?? heldY;
     aimBlocked = placeableY === null;
-    indicator.update(current.kind, current.x, current.y, current.angle, aimBlocked, now);
+    indicator.update(current.kind, current.x, current.y, current.angle, now);
   }
 
   function spawnObject(now: number): void {
@@ -487,6 +492,7 @@ export function createGame(deps: GameDeps): Game {
       node,
       placedAt: now,
       touchedGround: false,
+      touchedPiece: false,
     });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
@@ -601,35 +607,33 @@ export function createGame(deps: GameDeps): Game {
       if (object.lost) continue;
       const body = object.body;
 
-      // THE RULE: a horse reaching the floor LATE has been dropped.
+      // THE RULE: a horse that had been resting on something and then reaches the floor
+      // has been dropped.
       //
-      // Not where it landed, and not how far it fell — how long it had been in play when it
-      // got there. The two cases separate cleanly on that and on nothing else:
+      // Two conditions, and it needs both. It must have touched ANOTHER PIECE at some
+      // point — that is what says it was part of the pile rather than standing on the grass
+      // — and it must not have arrived at the floor in the same breath as being placed.
       //
-      //   placed on the grass      touches the floor at once, inside 100ms
-      //   let go in mid-air        touches the floor after its own fall and no longer
-      //   fell out of the tower    touches the floor after however long the tower stood
+      // The collision is what does the real work here. Timing alone was tried and it was
+      // far too blunt: it had to allow a whole second, because that was the only way to be
+      // sure a horse set down on the grass was not counted, and a second is an age. Put
+      // half a horse on a bale and let its other end swing down and it is on the ground in
+      // a third of that, plainly dropped and plainly not counted. With the collision doing
+      // the discriminating, the window only has to outlast the frame a piece is placed in,
+      // so it can be short enough to catch those short falls.
       //
-      // and the whole play space is small enough that a free fall is quick. Gravity is 10.8
-      // and a 20 metre tower is only 1.9 units tall, so falling its entire height takes
-      // under 600ms. Anything still in the air after a second was therefore NOT falling for
-      // that second — it was resting on something, and that something has given way.
-      //
-      // Two rules preceded this. "Must stay on the map" never fired at all: 34 placements
-      // aimed at the rim over two runs, piles of 5.09m and 9.03m, and no horse ever left.
-      // Then "ends up on the bare grass, if it was placed above the ground" fired far too
-      // readily — placement follows the cursor, so setting a horse down on the grass leaves
-      // it a centimetre up, which counted as placing it in the tower, and it then fell its
-      // centimetre and ended the round. Timing sidesteps both: it needs no guess about what
-      // the player meant by a position.
-      if (
-        !object.touchedGround &&
-        isStackBodyTouchingGround(physicsWorld, body)
-      ) {
+      // Two earlier rules for the record. "Must stay on the map" never fired at all — 34
+      // placements aimed at the rim over two runs, piles of 5.09m and 9.03m, no horse ever
+      // left. "Ends up on bare grass, if placed above the ground" fired constantly, because
+      // placement follows the cursor and setting a horse down leaves it a centimetre up.
+      const contacts = getStackBodyContacts(physicsWorld, body);
+      if ((contacts & STACK_CONTACT_PIECE) !== 0) object.touchedPiece = true;
+      if (!object.touchedGround && (contacts & STACK_CONTACT_GROUND) !== 0) {
         object.touchedGround = true;
         if (
           object.kind === 'horse' &&
           !object.dropped &&
+          object.touchedPiece &&
           now - object.placedAt > HORSE_DROP_GRACE_MS
         ) {
           object.dropped = true;

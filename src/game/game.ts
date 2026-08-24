@@ -63,6 +63,7 @@ import {
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
   START_INPUT_GUARD_MS,
+  HORSE_DROP_FALL,
   STEADY_HANDS_ALLOWANCE,
 } from './gameConfig';
 import type { GameMode } from './gameMode';
@@ -78,12 +79,21 @@ interface ActiveStackObject {
   y: number;
 }
 
-/** A piece that has been dropped: its body, its node, and whether it has fallen off. */
+/** A piece that has been placed: its body, its node, and how it has fared since. */
 interface StackedObject {
   body: RigidBody2D;
   kind: StackObjectKind;
+  /** Left the pasture entirely; removed from the world and hidden. */
   lost: boolean;
+  /**
+   * Counted against the player as a dropped horse. Separate from `lost` because a horse that
+   * falls onto the grass is still physically in the pile — it has been dropped, not removed —
+   * and because the count must happen exactly once however far it goes on to roll.
+   */
+  dropped: boolean;
   node: Node3D;
+  /** Where it was let go, which is what a fall is measured against. */
+  placedY: number;
 }
 
 export interface GameDeps {
@@ -109,14 +119,24 @@ export interface Game {
   readonly finalHeight: number;
   /** finalHeight once the round is over, the live measurement before that. */
   readonly displayedHeight: number;
+  /**
+   * The best settled height reached this run, which is what the round will score. Shown live
+   * rather than the current height: the current height is already on screen as a tower, and
+   * this is the number the player is actually playing for. It only ever goes up, so a run
+   * that peaks at 30m and then collapses still scores 30m — losing the tower ends your chance
+   * to add to it, it does not take back what you built.
+   */
+  readonly peakHeight: number;
+  /** The piece that will be handed over next, so the player can plan for it. */
+  readonly nextKind: StackObjectKind;
   /** 0..1 across the result count-up. 1 once it has landed, 0 before it starts. */
   readonly countProgress: number;
   /** Ramps past 1 over the TIME UP arrival, which the UI uses to overshoot the panel. */
   readonly timeUpProgress: number;
   readonly secondsLeft: number;
   readonly resultHandsShown: number;
-  /** Pieces lost off the pasture this round, for the STEADY HANDS strike dots. */
-  readonly piecesLost: number;
+  /** Horses dropped this round, for the STEADY HANDS strike dots. */
+  readonly horsesDropped: number;
   readonly beatTheRecord: boolean;
   /** The record as it stood when the round began, or null if there was none. */
   readonly recordBeforeRound: number | null;
@@ -208,10 +228,18 @@ export function createGame(deps: GameDeps): Game {
   // collapse leaves the measured height at zero, and the run was still worth what it built.
   // A timed round finishes with the pile standing, so for it this equals the final height.
   let peakHeight = 0;
-  // Pieces that have left the pasture this round. STEADY HANDS ends when this passes its
-  // allowance; the timed round counts them too, but only so the HUD has nothing special to
-  // do, and never acts on the number.
-  let piecesLost = 0;
+  // Horses dropped this round. STEADY HANDS ends when this passes its allowance; the timed
+  // round counts them too, but only so the HUD has nothing special to do, and never acts on
+  // the number.
+  //
+  // HORSES ONLY, deliberately. Hay, cows and chickens are scaffolding you are meant to spend:
+  // making everything count would punish the very thing that lets you build a base worth
+  // standing a horse on. It is called Horse Stacker.
+  let horsesDropped = 0;
+  // Drawn one ahead so the HUD can show what is coming. Planning is the whole point of
+  // STEADY HANDS, and you cannot plan a structure for a piece you have not been told about;
+  // the timed mode gets it too, where it buys a moment of preparation instead.
+  let queued = drawPiece();
   const bestMeters: Record<GameMode, number | null> = {
     time: readBestMeters('time'),
     steady: readBestMeters('steady'),
@@ -328,8 +356,8 @@ export function createGame(deps: GameDeps): Game {
 
     indicator.resetTeeter(now);
     lastAimAt = now;
-    const kind = getRandomStackObjectKind();
-    const variantIndex = kind === 'horse' ? 0 : getRandomFarmPropVariantIndex(kind);
+    const { kind, variantIndex } = queued;
+    queued = drawPiece();
     // Opens resting on whatever is under the middle of the pasture, so the first frame shows
     // a plausible pose before the pointer has said anything.
     aimX = 0;
@@ -360,7 +388,14 @@ export function createGame(deps: GameDeps): Game {
     const node = visuals.create(current.kind, current.variantIndex);
     visuals.setTransform(node, current.x, landingY, current.angle);
     addNodeChild(stackLayer, node);
-    stackedObjects.push({ body, kind: current.kind, lost: false, node });
+    stackedObjects.push({
+      body,
+      dropped: false,
+      kind: current.kind,
+      lost: false,
+      node,
+      placedY: landingY,
+    });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
     indicator.hide();
@@ -476,12 +511,29 @@ export function createGame(deps: GameDeps): Game {
       if (object.lost) continue;
       const body = object.body;
 
+      // A horse that has fallen a full horse-height below where it was let go has been
+      // dropped, wherever it ends up — onto the grass is as bad as off the map, because the
+      // thing that went wrong is the same. Counted the moment it has fallen that far rather
+      // than once it settles, so the strike lands while the tumble is on screen.
+      //
+      // This also covers releasing one in mid-air: placement is free, so a horse let go above
+      // the pile and allowed to drop IS a dropped horse. That is the rule doing its job.
+      if (!object.dropped && object.kind === 'horse' && body.y < object.placedY - HORSE_DROP_FALL) {
+        object.dropped = true;
+        horsesDropped++;
+      }
+
       // Leave enough void beyond the collider for the whole tumble to remain visible.
       if (body.y < -1 || Math.abs(body.x) > PASTURE_HALF_WIDTH + 1.5) {
         object.lost = true;
         object.node.enabled = false;
         removePhysics2DBody(physicsWorld, body);
-        piecesLost++;
+        // A horse can leave sideways without ever falling far — off the edge of the pasture
+        // at the height it was placed — so the fall test above will not have caught it.
+        if (object.kind === 'horse' && !object.dropped) {
+          object.dropped = true;
+          horsesDropped++;
+        }
         continue;
       }
 
@@ -519,7 +571,7 @@ export function createGame(deps: GameDeps): Game {
       // run ACCUMULATES that clutter, so the pasture emptying got less likely the longer you
       // played — measured over a 40 placement run that built to 11.5m and collapsed, it never
       // fired once. Counting what leaves fires cleanly and reads off the HUD.
-      if (mode === 'steady' && piecesLost > STEADY_HANDS_ALLOWANCE) {
+      if (mode === 'steady' && horsesDropped > STEADY_HANDS_ALLOWANCE) {
         // Straight to the result. Nothing is waiting to settle, and the TIME UP beat would be
         // the wrong words over a round that had nothing to do with a clock. The fanfare still
         // fires, because the count-up is starting either way.
@@ -559,6 +611,12 @@ export function createGame(deps: GameDeps): Game {
     get displayedHeight() {
       return phase === 'finished' ? finalHeight : cachedStackHeight;
     },
+    get peakHeight() {
+      return phase === 'finished' ? finalHeight : peakHeight;
+    },
+    get nextKind() {
+      return queued.kind;
+    },
     get countProgress() {
       if (resultAnimationStart === 0) return phase === 'finished' ? 1 : 0;
       return clamp((performance.now() - resultAnimationStart) / resultAnimationDuration, 0, 1);
@@ -578,8 +636,8 @@ export function createGame(deps: GameDeps): Game {
     get resultHandsShown() {
       return resultHandsShown;
     },
-    get piecesLost() {
-      return piecesLost;
+    get horsesDropped() {
+      return horsesDropped;
     },
     get beatTheRecord() {
       return beatTheRecord;
@@ -612,6 +670,7 @@ export function createGame(deps: GameDeps): Game {
       aimBlocked = false;
       indicator.resetTeeter(now);
       lastAimAt = now;
+      queued = drawPiece();
       nextObjectAt = 0;
       // STEADY HANDS has no clock at all rather than a very long one: the timer HUD reads
       // gameEndsAt, and Infinity keeps every "is the round over" test honest without a
@@ -621,7 +680,7 @@ export function createGame(deps: GameDeps): Game {
       finalHeight = 0;
       cachedStackHeight = 0;
       peakHeight = 0;
-      piecesLost = 0;
+      horsesDropped = 0;
       resultAnimationStart = 0;
       resultAnimationDuration = 0;
       resultHands = 0;
@@ -676,7 +735,7 @@ export function createGame(deps: GameDeps): Game {
       // The pile is gone, so the camera must not keep framing where it used to be.
       cachedStackHeight = 0;
       peakHeight = 0;
-      piecesLost = 0;
+      horsesDropped = 0;
       objectsDropped = 0;
       stackedObjects = [];
       physicsWorld = createHorseStackWorld();
@@ -705,6 +764,12 @@ export function createGame(deps: GameDeps): Game {
       setAim(aimX + deltaX, aimY + deltaY, now);
     },
   };
+}
+
+/** One weighted draw: the kind, and which of that kind's variants. */
+function drawPiece(): { kind: StackObjectKind; variantIndex: number } {
+  const kind = getRandomStackObjectKind();
+  return { kind, variantIndex: kind === 'horse' ? 0 : getRandomFarmPropVariantIndex(kind) };
 }
 
 function readBestMeters(mode: GameMode): number | null {

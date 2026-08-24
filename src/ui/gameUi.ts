@@ -64,10 +64,12 @@ export interface UiState {
 export interface UiModel {
   /** Which game is being played, which decides the playing screen's HUD. */
   mode: GameMode;
-  /** The pile's height right now, for the STEADY HANDS readout. Ignored in Time Challenge. */
-  heightNowText: string;
-  /** Pieces lost off the pasture, drawn as spent strike dots. Ignored in Time Challenge. */
-  piecesLost: number;
+  /** The best settled height so far this run — the score the HUD reports. */
+  bestThisRunText: string;
+  /** The kind coming up next, as an emoji for the NEXT readout. */
+  nextPieceGlyph: string;
+  /** Horses dropped this round, drawn as spent strike dots. Ignored in Time Challenge. */
+  horsesDropped: number;
   // Empty when there is nothing worth showing: a first ever round, or one that set a new
   // record (where the height on screen already IS the record).
   bestText: string;
@@ -150,15 +152,26 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const timeText = label('TIME CHALLENGE', 13, 0x252420ff, SANS, true);
   const steadyPill = createShape();
   const steadyText = label('STEADY HANDS', 13, 0x252420ff, SANS, true);
+  // One line under each option. This is where the rules go: the moment the player has the
+  // question "what is the difference between these two" is the moment they are looking at
+  // the two buttons, and a line here answers it without a screen or a click in the way.
+  const timeBlurb = label('Stack as high as you can in 30 seconds', 11, INK, SANS);
+  const steadyBlurb = label('No clock. Drop three horses and you are done', 11, INK, SANS);
   const menuPill = createShape();
   const menuText = label('MENU', 12, INK, SANS, true);
+  // What is coming after the piece in hand.
+  const nextPill = createShape();
+  const nextCaption = label('NEXT', 8, 0xd8e0d2ff, SANS, true);
+  const nextGlyph = label('', 20, INK, SANS);
   const timerPill = createShape();
   const timerCaption = label('TIME LEFT', 9, 0xd8e0d2ff, SANS, true);
   const timerValue = label('30', 34, INK, SERIF);
   // STEADY HANDS replaces the clock with the same pill reading the pile instead, plus a row
   // of dots for the pieces it can still afford to lose.
   const heightPill = createShape();
-  const heightCaption = label('HEIGHT', 9, 0xd8e0d2ff, SANS, true);
+  // BEST, not HEIGHT: the number is the run's high-water mark, which is the score. The current
+  // height needs no readout — it is the tower, right there.
+  const heightCaption = label('BEST', 9, 0xd8e0d2ff, SANS, true);
   const heightValue = label('0.00 m', 22, INK, SERIF);
   const strikeDots = Array.from({ length: STEADY_HANDS_ALLOWANCE }, () => createShape());
   const timeUpScrim = createShape();
@@ -200,9 +213,10 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
   const fullscreenText = label('⛶', 15, INK, SANS);
 
   for (const node of [
-    titleText, timePill, timeText, steadyPill, steadyText,
+    titleText, timePill, timeText, steadyPill, steadyText, timeBlurb, steadyBlurb,
     timerPill, timerCaption, timerValue,
     heightPill, heightCaption, heightValue, ...strikeDots, menuPill, menuText,
+    nextPill, nextCaption, nextGlyph,
     timeUpScrim, timeUpText,
     ...tallyHorses, resultHeight,
     recordBadge, bestLabel, againPill, againText,
@@ -268,6 +282,8 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
     show(timeText, onTitle);
     show(steadyPill, onTitle);
     show(steadyText, onTitle);
+    show(timeBlurb, onTitle);
+    show(steadyBlurb, onTitle);
     if (onTitle) {
       // Drops in with an overshoot, then breathes so the screen is never quite still.
       const breathe = Math.sin(model.now * 0.0016) * 4;
@@ -299,8 +315,21 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       const menuY = height * 0.5 + 24 + (1 - intro) * 20 + nudge;
       // Both wear the same fill. They are two ways to play the same game, not a primary
       // action and a secondary one, and styling one of them down said otherwise.
+      // Each pill carries its line just beneath it, so the pair reads button-then-explanation
+      // twice rather than as two buttons and a block of prose.
+      const blurbWidth = Math.min(width - SCREEN_GUTTER * 2, MODE_PILL_WIDTH + 150);
+      const blurbX = width / 2 - blurbWidth / 2;
       pill(timePill, timeText, 'time', menuX, menuY, menuWidth, 44, INK, intro);
-      pill(steadyPill, steadyText, 'steady', menuX, menuY + 56, menuWidth, 44, INK, intro);
+      setTextLabelWidth(timeBlurb, blurbWidth);
+      timeBlurb.alpha = intro * 0.72;
+      place(timeBlurb, blurbX, menuY + 48);
+      invalidateNodeAppearance(timeBlurb);
+
+      pill(steadyPill, steadyText, 'steady', menuX, menuY + 82, menuWidth, 44, INK, intro);
+      setTextLabelWidth(steadyBlurb, blurbWidth);
+      steadyBlurb.alpha = intro * 0.72;
+      place(steadyBlurb, blurbX, menuY + 130);
+      invalidateNodeAppearance(steadyBlurb);
     }
 
     show(timeUpScrim, onTimeUp);
@@ -493,7 +522,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       place(heightCaption, x, 26 - drop);
       setTextLabelWidth(heightValue, w);
       place(heightValue, x, 44 - drop);
-      setText(heightValue, model.heightNowText);
+      setText(heightValue, model.bestThisRunText);
 
       // One dot per piece you are allowed to lose, filling left to right as you lose them.
       // A count would be smaller, but the row says "three of these and you are done" at a
@@ -508,7 +537,7 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
       for (let index = 0; index < strikeDots.length; index += 1) {
         const dot = strikeDots[index];
         if (dot === undefined) continue;
-        const spent = index < model.piecesLost;
+        const spent = index < model.horsesDropped;
         fillCircle(dot, spent ? 0x8c3a24ff : INK, spent ? 0.95 : 0.34, DOT_SIZE / 2);
         // fillCircle centres on the shape's origin, so this places the dot's middle.
         place(
@@ -518,6 +547,25 @@ export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): 
         );
       }
       pill(menuPill, menuText, 'menu', 24, 18 - drop, 84, 32, 0x1f2d1dff, 0.62);
+    }
+
+    // NEXT belongs to both modes: knowing a horse is coming is worth a moment of preparation
+    // under the clock too, not just during a careful build.
+    show(nextPill, playing);
+    show(nextCaption, playing);
+    show(nextGlyph, playing);
+    if (playing) {
+      const w = 62;
+      const x = width - w - 24;
+      const drop = (1 - pop) * 40;
+      const y = (steadyPlaying ? STEADY_PILL_HEIGHT : 62) + 26 - drop;
+      fill(nextPill, 0x1f2d1dff, 0.62, 0, 0, w, 44, 14);
+      place(nextPill, x + (104 - w), y);
+      setTextLabelWidth(nextCaption, w);
+      place(nextCaption, x + (104 - w), y + 6);
+      setTextLabelWidth(nextGlyph, w);
+      place(nextGlyph, x + (104 - w), y + 16);
+      setText(nextGlyph, model.nextPieceGlyph);
     }
 
     // Attribution belongs on the screen you land on when the round is over, not over the

@@ -124,3 +124,8 @@ export const FIXED_STEP_LIMIT = 6;
 // not see coming. Three is enough slack to absorb that and still short enough that every
 // loss is felt.
 export const STEADY_HANDS_ALLOWANCE = 3;
+
+// How far a horse must fall below where it was let go before it counts as dropped. A full
+// horse-height: far enough that nothing a settling pile does to a well-placed horse reaches
+// it, close enough that an actual fall is caught while it is still on screen.
+export const HORSE_DROP_FALL = HORSE_HALF_HEIGHT * 2;

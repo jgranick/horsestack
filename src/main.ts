@@ -12,6 +12,7 @@ import { createAudioManager } from './audio/audioManager';
 import { createGame } from './game/game';
 import type { GameMode } from './game/gameMode';
 import { STACK_BASE_Y, STACK_X, STACK_Z } from './game/gameConfig';
+import type { StackObjectKind } from './physics/stackObjectKind';
 import { getStackHeightMeters } from './physics/stackObjectProfile';
 import { createCameraRig } from './scene/cameraRig';
 import { createLandingIndicator } from './scene/landingIndicator';
@@ -72,6 +73,16 @@ const game = createGame({
 
 // How far one arrow-key press moves the held piece, in world units.
 const KEYBOARD_NUDGE = 0.05;
+
+// What each kind looks like in the NEXT readout. Emoji rather than a rendered thumbnail: the
+// HUD is the 2D layer, which has no way to draw a 3D prop, and the result screen's tally
+// already sets the precedent of standing in for a horse with one.
+const PIECE_GLYPHS: Readonly<Record<StackObjectKind, string>> = {
+  chickens: '🐔',
+  cow: '🐄',
+  hay: '🌾',
+  horse: '🐴',
+};
 
 let windmill: Windmill | null = null;
 let creditsOpen = false;
@@ -353,9 +364,10 @@ function renderFrame(): void {
     pointerX,
     pointerY,
     heightText: formatMeters(countProgress >= 1 ? finalMeters : shownMeters),
-    heightNowText: formatMeters(getStackHeightMeters(game.displayedHeight)),
+    bestThisRunText: formatMeters(getStackHeightMeters(game.peakHeight)),
+    nextPieceGlyph: PIECE_GLYPHS[game.nextKind],
     mode: game.mode,
-    piecesLost: game.piecesLost,
+    horsesDropped: game.horsesDropped,
     screen: getUiScreen(),
     secondsLeft: game.secondsLeft,
     timeUpProgress: import.meta.env.DEV && forcedScreen === 'timeup' ? 1 : game.timeUpProgress,

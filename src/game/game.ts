@@ -51,6 +51,7 @@ import {
   addStackObjectBody,
   createHorseStackWorld,
   getSupportedStackHeight,
+  isStackBodyTouchingGround,
   stepHorseStack,
 } from '../physics/stackPhysics';
 import { prefersReducedMotion } from '../reducedMotion';
@@ -62,7 +63,7 @@ import type { StackObjectVisuals } from '../scene/stackObjectVisual';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
-  GROUNDED_MARGIN,
+  HORSE_DROP_GRACE_MS,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
   STACK_BASE_Y,
@@ -93,13 +94,14 @@ interface StackedObject {
    * and because the count must happen exactly once however far it goes on to roll.
    */
   dropped: boolean;
+  /** When it was placed, on the game clock. Half of the dropped-horse test; see below. */
+  placedAt: number;
   /**
-   * True when this piece was set down ABOVE the bare ground — that is, into the tower rather
-   * than as part of its foundation. Only these can be dropped: a horse stood on the grass on
-   * purpose has not fallen off anything, and must not be counted when it is still standing
-   * exactly where it was put.
+   * Set the first time it meets the floor. The test that follows is an EVENT — it asks how
+   * long the piece had been in play when it arrived — so it must be asked once, on arrival,
+   * and never again while the piece sits there.
    */
-  placedInTower: boolean;
+  touchedGround: boolean;
   node: Node3D;
 }
 
@@ -429,9 +431,8 @@ export function createGame(deps: GameDeps): Game {
       kind: current.kind,
       lost: false,
       node,
-      placedInTower:
-        landingY - getStackObjectVerticalExtent(current.kind, current.angle) >
-        getGroundY(groundProfile, current.x) + GROUNDED_MARGIN,
+      placedAt: now,
+      touchedGround: false,
     });
     activeObject = null;
     // The prompt has served its purpose once the player has placed something.
@@ -540,37 +541,46 @@ export function createGame(deps: GameDeps): Game {
     }
   }
 
-  function synchronizeStackVisuals(): void {
+  function synchronizeStackVisuals(now: number): void {
     let retainedCount = 0;
     for (const object of stackedObjects) {
       if (object.lost) continue;
       const body = object.body;
 
-      // THE RULE: a horse that ends up on the bare grass has been dropped.
+      // THE RULE: a horse reaching the floor LATE has been dropped.
       //
-      // It is checked against the ground UNDER the horse rather than against a fixed fall
-      // distance, so what counts is where it ended up, not how far it travelled — a horse
-      // shrugged off a two-piece tower is as dropped as one that fell twenty metres, which
-      // is how it feels to play. `placedInTower` is what keeps the foundation honest: a
-      // horse stood on the grass deliberately is already on the grass and can never trip
-      // this, while every horse placed above one can.
+      // Not where it landed, and not how far it fell — how long it had been in play when it
+      // got there. The two cases separate cleanly on that and on nothing else:
       //
-      // This replaced "a horse that leaves the map". That rule was unreachable in practice:
-      // measured over 34 placements aimed deliberately at the rim across two runs, building
-      // to 5.09m and 9.03m, not one horse ever left. The floor spans the whole pasture and
-      // the aim clamps inside it, so a collapse piles up against the edge and stays there —
-      // and Steady Hands went back to being endless, the same failure the "every piece off
-      // the pasture" rule had before it. Landing on the grass is the thing that actually
-      // happens when a tower falls.
+      //   placed on the grass      touches the floor at once, inside 100ms
+      //   let go in mid-air        touches the floor after its own fall and no longer
+      //   fell out of the tower    touches the floor after however long the tower stood
+      //
+      // and the whole play space is small enough that a free fall is quick. Gravity is 10.8
+      // and a 20 metre tower is only 1.9 units tall, so falling its entire height takes
+      // under 600ms. Anything still in the air after a second was therefore NOT falling for
+      // that second — it was resting on something, and that something has given way.
+      //
+      // Two rules preceded this. "Must stay on the map" never fired at all: 34 placements
+      // aimed at the rim over two runs, piles of 5.09m and 9.03m, and no horse ever left.
+      // Then "ends up on the bare grass, if it was placed above the ground" fired far too
+      // readily — placement follows the cursor, so setting a horse down on the grass leaves
+      // it a centimetre up, which counted as placing it in the tower, and it then fell its
+      // centimetre and ended the round. Timing sidesteps both: it needs no guess about what
+      // the player meant by a position.
       if (
-        !object.dropped &&
-        object.placedInTower &&
-        object.kind === 'horse' &&
-        body.y - getStackBodyVerticalExtent(body) <=
-          getGroundY(groundProfile, body.x) + GROUNDED_MARGIN
+        !object.touchedGround &&
+        isStackBodyTouchingGround(physicsWorld, body)
       ) {
-        object.dropped = true;
-        horsesDropped++;
+        object.touchedGround = true;
+        if (
+          object.kind === 'horse' &&
+          !object.dropped &&
+          now - object.placedAt > HORSE_DROP_GRACE_MS
+        ) {
+          object.dropped = true;
+          horsesDropped++;
+        }
       }
 
       // Leave enough void beyond the collider for the whole tumble to remain visible.
@@ -773,7 +783,7 @@ export function createGame(deps: GameDeps): Game {
         updateGame(now);
         swayClock += deltaTime * 1.6;
         stepGamePhysics(now, deltaTime);
-        synchronizeStackVisuals();
+        synchronizeStackVisuals(now);
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
         peakHeight = Math.max(peakHeight, cachedStackHeight);
       }

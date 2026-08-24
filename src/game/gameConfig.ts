@@ -129,12 +129,12 @@ export const INDICATOR_MAX_SPIN = 5.5;
 export const FIXED_STEP_LIMIT = 6;
 
 
-// How close to the ground counts as ON the ground, for the dropped-horse rule.
+// How long a piece must have been in play before reaching the floor counts as a fall
+// rather than a placement. See the dropped-horse rule in game.ts.
 //
-// Two jobs, which is why it is one number: it is the slack that stops a horse set down on
-// the grass being read as placed in the tower, and the slack that lets a horse that has
-// fallen onto the grass be recognised there despite the solver letting it settle a
-// millimetre or two into the surface. 20mm is comfortably more than either, and comfortably
-// less than the shortest thing you can stand a horse on — a chicken at 62mm — so a horse
-// resting on the smallest possible support still reads as being in the tower.
-export const GROUNDED_MARGIN = 0.02;
+// Set from how fast things actually fall here. Gravity is 10.8 and the play space is small
+// — a 20 metre tower stands only 1.9 units tall — so the longest free fall the game can
+// produce takes under 600ms, and a horse set down on the grass meets the floor in about 60.
+// A second is clear of both: past it, a piece that arrives at the floor cannot have been
+// falling the whole time, so it was resting on something that has since given way.
+export const HORSE_DROP_GRACE_MS = 1000;

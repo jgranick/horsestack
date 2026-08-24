@@ -329,6 +329,33 @@ function applyAssistInertia(body: RigidBody2D, assist: number): void {
 
 
 
+/**
+ * Is this piece in contact with the FLOOR — the ground itself, not another piece?
+ *
+ * Identified as "the thing it is touching that is not a stacked piece", which is what
+ * findStackBodyKind's undefined case is for. That is steadier than remembering which body
+ * the floor is: the world is rebuilt every round, and the flat fallback and the terrain
+ * follow different paths through createHorseStackWorld.
+ */
+export function isStackBodyTouchingGround(
+  world: Readonly<Physics2DWorld>,
+  body: Readonly<RigidBody2D>,
+): boolean {
+  for (const contact of world.contacts) {
+    if (!contact.touching || contact.sensor) continue;
+    const other =
+      contact.bodyA === body.index
+        ? contact.bodyB
+        : contact.bodyB === body.index
+          ? contact.bodyA
+          : -1;
+    if (other === -1) continue;
+    const otherBody = world.bodyByIndex.get(other);
+    if (otherBody !== undefined && findStackBodyKind(otherBody) === undefined) return true;
+  }
+  return false;
+}
+
 export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {
   const reach = getStackBodyHalfWidth(body);
   return body.x >= PASTURE_MIN_X - reach && body.x <= PASTURE_MAX_X + reach;

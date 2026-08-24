@@ -335,9 +335,27 @@ export function isStackBodyWithinPasture(body: Readonly<RigidBody2D>): boolean {
 
 
 
+/**
+ * Below this a body has fallen through the floor rather than settled on it, so it is not
+ * part of the tower's height.
+ *
+ * Written as the flat threshold RELAXED by however far the ground under this body dips below
+ * the flat pasture, which is nothing at all when there is no profile. That keeps the flat
+ * path — the one the headless validation scripts take — arithmetically identical to the
+ * plain `-halfHeight` it replaced, while stopping a chicken that is resting perfectly well
+ * on the low ground near the pasture's left edge from being read as fallen: down there the
+ * terrain sits 55mm under the flat height, which is more than a chicken is tall.
+ */
+function getFallenBelowFloorY(body: Readonly<RigidBody2D>, ground: GroundProfile | undefined): number {
+  const halfHeight = STACK_OBJECT_PROFILES[getStackBodyKind(body)].halfHeight;
+  const groundDrop = Math.max(0, PASTURE_TOP_Y - getGroundY(ground, body.x));
+  return -halfHeight - groundDrop;
+}
+
 export function getSupportedStackHeight(
   world: Readonly<Physics2DWorld>,
   objects: readonly Readonly<RigidBody2D>[],
+  ground?: GroundProfile,
 ): number {
   const touchingBodies = new Set<number>();
   for (const contact of world.contacts) {
@@ -352,7 +370,7 @@ export function getSupportedStackHeight(
     if (
       !onStack ||
       !isStackBodyWithinPasture(body) ||
-      body.y < -STACK_OBJECT_PROFILES[getStackBodyKind(body)].halfHeight ||
+      body.y < getFallenBelowFloorY(body, ground) ||
       Math.abs(body.velocityY) > 1.2
     ) {
       continue;

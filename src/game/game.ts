@@ -347,7 +347,7 @@ export function createGame(deps: GameDeps): Game {
     for (const object of stackedObjects) {
       if (!object.lost) measurementBodies.push(object.body);
     }
-    return getSupportedStackHeight(physicsWorld, measurementBodies);
+    return getSupportedStackHeight(physicsWorld, measurementBodies, groundProfile);
   }
 
   function updateActiveStackObject(now: number): void {

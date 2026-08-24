@@ -116,14 +116,19 @@ const STEADY_PILL_HEIGHT = 62;
 const SHOW_NEXT_PREVIEW = false;
 
 const HANDS_PER_EMOJI_COLUMN = 7;
-// One horse per TWO hands, seven to a column. At one apiece the grid saturated at its
-// 126-emoji capacity on any decent run — a 10m tower and a 16m tower both showed the same
-// full wall, which is the opposite of what a tally is for. Four per horse fixed the top end
-// and ruined the bottom: a weak run collapsed to a single lonely column. Two per horse with
-// a shorter column keeps the block growing sideways across the whole range — roughly three
-// columns for a poor run, a dozen for a good one — and does not saturate until about 26m,
-// which nothing has reached.
-const HANDS_PER_EMOJI = 2;
+// One horse per FOUR hands, seven to a column.
+//
+// This has been tuned from both ends. At one per hand the grid saturated at its 126-emoji
+// capacity on any decent run, so a 10m tower and a 16m tower showed the same full wall —
+// the opposite of what a tally is for. Two per hand fixed that but was still far too dense
+// low down, where most rounds actually land: a 3.62m run drew eighteen horses, which is a
+// crowd rather than a score you can take in.
+//
+// Four reads as a countable little block across the range that gets played — roughly two
+// columns at 3.5m, four at 10m, seven at 20m — and does not saturate until past 50m. The
+// risk at this density is the other direction, a weak run collapsing to one lonely column,
+// which is why the column is seven tall rather than nine: two columns arrive early.
+const HANDS_PER_EMOJI = 4;
 
 // The DOM original eased each of these with CSS keyframes; recreated here on Flight's
 // easing primitives so the beats survive the move to Flight 2D, and so the curves are the

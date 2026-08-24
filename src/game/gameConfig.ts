@@ -149,15 +149,3 @@ export const HORSE_REST_SECONDS = 0.25;
 // when searching. Small enough that the lift is never further than it needs to be, large
 // enough that "resting exactly on" does not read as an overlap to the solver.
 export const PLACEMENT_LIFT_STEP = 0.002;
-// How far the preview may lift a piece before it gives up and refuses instead.
-//
-// The lift is a correction, not a search. Without a ceiling on it, aiming into a gap under
-// the pile that is too small to take the piece sent the scan climbing UP THROUGH everything
-// above — and it surfaced at the top of the tower, metres from the cursor, because that is
-// the first place a piece fits again. "Just above here" had become "somewhere else
-// entirely".
-//
-// One horse's height with a little slack: enough to step over any single piece, since a
-// horse is the tallest thing there is and clearing one from its middle takes exactly its
-// height, and nowhere near enough to climb a pile. Past that the honest answer is no.
-export const PLACEMENT_LIFT_LIMIT = HORSE_HALF_HEIGHT * 2.4;

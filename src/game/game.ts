@@ -69,7 +69,6 @@ import {
   HORSE_REST_ANGULAR,
   HORSE_REST_LINEAR,
   HORSE_REST_SECONDS,
-  PLACEMENT_LIFT_LIMIT,
   PLACEMENT_LIFT_STEP,
   MAX_RESULT_COUNT_DURATION_MS,
   MIN_RESULT_COUNT_DURATION_MS,
@@ -333,18 +332,23 @@ export function createGame(deps: GameDeps): Game {
   }
 
   /**
-   * Where a piece aimed here can actually go: the pose itself if it fits, otherwise the
-   * first one above it that does, within PLACEMENT_LIFT_LIMIT. Null when nothing in that
-   * reach fits, which is the only case where a click does nothing.
+   * Where a piece aimed here can actually go: the pose itself if it fits, otherwise on top
+   * of the stack standing over it. Null only when even that does not fit.
    *
-   * Lifting rather than refusing is the answer to "what should a click that cannot place
-   * do". A click that silently does nothing reads as the game being broken, and the cursor
-   * under free placement is a request rather than an instruction — you are saying "here",
-   * and just above here is the honest reading of that when here is full.
+   * The lift is a DESTINATION, not a search. It used to scan upward pose by pose for the
+   * first crack that happened to fit, which had two problems: the first crack can be a gap
+   * mid-pile with nothing under it, and capping how far it would scan meant that clicking
+   * into the space between the floor and a piece resting above it — too small to take
+   * anything, and the most natural thing in the world to click on — simply did nothing.
    *
-   * But only just above. Two ceilings, and the lower one wins: the top of the pile under
-   * the cursor, which always fits, and the lift limit, which is what stops a piece aimed
-   * into a gap under the pile from climbing out at the summit.
+   * Asking getLandingSurfaceY where the column above the cursor ends answers both. It is
+   * one place rather than whichever gap the step size happened to land in, it always has
+   * something underneath it, and it needs no ceiling because it cannot run away: it is the
+   * top of that stack, however tall the stack is. As a rule it is one sentence — if it will
+   * not go there, it goes on top of that — which is a thing a player can learn.
+   *
+   * Aiming under an OVERHANG still works and is untouched: a pose with room around it is
+   * not blocked, so it is returned as-is and nothing lifts.
    */
   function findPlaceableY(
     kind: StackObjectKind,
@@ -353,20 +357,13 @@ export function createGame(deps: GameDeps): Game {
     angle: number,
   ): number | null {
     if (!isPlacementBlocked(kind, x, fromY, angle)) return fromY;
-    const extent = getStackObjectVerticalExtent(kind, angle);
-    const ceiling = Math.min(
-      getLandingSurfaceY(x, kind) + extent + PLACEMENT_LIFT_STEP,
-      fromY + PLACEMENT_LIFT_LIMIT,
-    );
-    // Never below the cursor. getLandingSurfaceY ignores anything still moving fast, so a
-    // piece knocked loose mid-fall can leave the pile-top ceiling UNDER the pose being
-    // aimed — and a lift that resolves downward is not a lift.
-    if (ceiling <= fromY) return null;
-    const step = extent * 0.25;
-    for (let y = fromY + step; y < ceiling; y += step) {
-      if (!isPlacementBlocked(kind, x, y, angle)) return y;
-    }
-    return isPlacementBlocked(kind, x, ceiling, angle) ? null : ceiling;
+    const onTop =
+      getLandingSurfaceY(x, kind) +
+      getStackObjectVerticalExtent(kind, angle) +
+      PLACEMENT_LIFT_STEP;
+    // Never below the cursor, and never into something a neighbouring column overhangs.
+    if (onTop <= fromY || isPlacementBlocked(kind, x, onTop, angle)) return null;
+    return onTop;
   }
 
   function setAim(targetX: number, targetY: number, now: number): void {

@@ -401,7 +401,11 @@ export function createGame(deps: GameDeps): Game {
 
     lastImpactAt = now;
     particles.burstDust(point.x, STACK_BASE_Y + point.y);
-    audio.maybePlayCollisionWhinny(now);
+    // TIME CHALLENGE only. The whinny fires at random off collisions, which is a nice bit of
+    // life over a thirty second scramble and an irritant over a long careful build — the same
+    // reason STEADY HANDS runs without the soundtrack. The dust still puffs on every impact,
+    // so a landing is not silent, it just stops editorialising.
+    if (mode === 'time') audio.maybePlayCollisionWhinny(now);
   }
 
   function stepGamePhysics(now: number, deltaTime: number): void {

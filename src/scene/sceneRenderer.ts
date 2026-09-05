@@ -39,13 +39,15 @@ import {
   removeNodeChild,
   renderGlBackground,
 } from '@flighthq/sdk';
-import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import { drawGlScene3D, drawGlScene3DShadowMap, prepareScene3DRender } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
 import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
 
 let _sceneDiagDone = false;
+let _prepDiagDone = false;
+let _prepDiagDone2 = false;
 function diagInstanced(root: Node3D): void {
   if (_sceneDiagDone) return;
   let total = 0;
@@ -200,6 +202,18 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       const sceneTarget = pipeline.sceneTarget;
       if (sceneTarget !== null) {
         diagInstanced(root);
+        const prepList = prepareScene3DRender(renderState, root, camera, lights);
+        if (!_prepDiagDone && prepList.instancedMeshCount > 0) {
+          console.log('[PREP] instancedMeshCount:', prepList.instancedMeshCount, 'meshCount:', prepList.meshCount);
+          for (let i = 0; i < prepList.instancedMeshCount; i++) {
+            const m = prepList.visibleInstancedMeshes[i] as InstancedMesh;
+            console.log('[PREP]  visible instanced', i, 'count:', m.instanceCount, 'subsets:', m.geometry?.subsets?.length, 'materials:', m.materials?.length);
+          }
+          _prepDiagDone = true;
+        } else if (!_prepDiagDone2 && _sceneDiagDone) {
+          console.log('[PREP] instancedMeshCount: 0 (but DIAG found instanced meshes in tree!)');
+          _prepDiagDone2 = true;
+        }
         beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
         drawGlScene3D(renderState, root, camera, lights);
         endGlRenderPass(renderState);

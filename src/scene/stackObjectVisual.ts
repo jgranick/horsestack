@@ -202,6 +202,9 @@ export function createStackObjectVisuals(): StackObjectVisuals {
 
     for (const part of batch.parts) {
       multiplyMatrix4(tmpInstanceMatrix, tmpWorldMatrix, part.partMatrix);
+      if (index >= part.instancedMesh.instanceCount) {
+        setInstancedMeshInstanceCount(part.instancedMesh, index + 1);
+      }
       setInstancedMeshInstanceMatrix(part.instancedMesh, index, tmpInstanceMatrix);
     }
   }

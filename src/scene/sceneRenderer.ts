@@ -41,7 +41,37 @@ import {
 } from '@flighthq/sdk';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
+import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
+import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
+
+let _sceneDiagCount = 0;
+function diagInstanced(root: Node3D): void {
+  if (_sceneDiagCount++ > 2) return;
+  let total = 0;
+  let withCount = 0;
+  forEachNodeDescendant(root, (node) => {
+    if (isInstancedMesh(node)) {
+      const im = node as InstancedMesh;
+      total++;
+      if (im.instanceCount > 0) {
+        withCount++;
+        const m0 = im.instanceMatrices[0];
+        console.log('[DIAG] InstancedMesh', im.name ?? '?',
+          'count:', im.instanceCount,
+          'enabled:', im.enabled, 'visible:', im.visible,
+          'version:', im.version,
+          'geo:', im.geometry != null,
+          'subsets:', im.geometry?.subsets?.length,
+          'materials:', im.materials?.length,
+          'pos:', im.position.x.toFixed(2), im.position.y.toFixed(2), im.position.z.toFixed(2),
+          'm0[12-14]:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
+        );
+      }
+    }
+  });
+  console.log('[DIAG] total instanced:', total, 'with instances:', withCount);
+}
 
 export interface SceneRenderer {
   canvas: HTMLCanvasElement;
@@ -166,6 +196,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       // same job three raw depthMask/clearDepth/clear calls used to do by hand.
       const sceneTarget = pipeline.sceneTarget;
       if (sceneTarget !== null) {
+        diagInstanced(root);
         beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
         drawGlScene3D(renderState, root, camera, lights);
         endGlRenderPass(renderState);

@@ -149,10 +149,13 @@ export function createStackObjectVisuals(): StackObjectVisuals {
 
   function buildBatch(templateRoot: Node3D, key: string): Batch {
     const meshParts = collectMeshParts(templateRoot);
-    const parts: MeshPart[] = meshParts.map(part => ({
-      instancedMesh: createInstancedMesh(part.geometry, part.materials, INITIAL_CAPACITY),
-      partMatrix: part.localMatrix,
-    }));
+    const parts: MeshPart[] = meshParts.map(part => {
+      const im = createInstancedMesh(part.geometry, part.materials, INITIAL_CAPACITY);
+      im.position.x = STACK_X;
+      im.position.z = STACK_Z;
+      invalidateNodeLocalTransform(im);
+      return { instancedMesh: im, partMatrix: part.localMatrix };
+    });
     for (const part of parts) {
       setInstancedMeshInstanceCount(part.instancedMesh, 0);
       allInstancedNodes.push(part.instancedMesh);
@@ -188,9 +191,9 @@ export function createStackObjectVisuals(): StackObjectVisuals {
   }
 
   function applyPieceTransform(batch: Batch, index: number, kind: StackObjectKind, x: number, physicsY: number, angle: number): void {
-    tmpPosition.x = STACK_X;
+    tmpPosition.x = 0;
     tmpPosition.y = STACK_BASE_Y + physicsY + (VISUAL_OFFSET_Y[kind] ?? 0);
-    tmpPosition.z = STACK_Z - x;
+    tmpPosition.z = -x;
     setQuaternionFromEuler(tmpRotation, kind === 'chickens' ? 0 : angle, 0, 0);
     tmpScale.x = 1;
     tmpScale.y = 1;

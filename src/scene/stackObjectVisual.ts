@@ -289,7 +289,23 @@ export function createStackObjectVisuals(): StackObjectVisuals {
     },
 
     flush() {
-      for (const batch of batches.values()) {
+      for (const [key, batch] of batches.entries()) {
+        if (batch.frameCount > 0 && frameNumber < 3) {
+          console.log('[FLUSH]', key, 'frameCount:', batch.frameCount, 'parts:', batch.parts.length);
+          for (let pi = 0; pi < batch.parts.length; pi++) {
+            const part = batch.parts[pi]!;
+            const im = part.instancedMesh;
+            const m0 = im.instanceMatrices[0];
+            console.log('[FLUSH]  part', pi,
+              'countBefore:', im.instanceCount,
+              'version:', im.version,
+              'geo:', im.geometry != null,
+              'geoBounds:', im.geometry?.bounds?.min?.x, im.geometry?.bounds?.max?.x,
+              'matrix[0].m12-14:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
+              'partMatrix.m12-14:', part.partMatrix.m[12]?.toFixed(4), part.partMatrix.m[13]?.toFixed(4), part.partMatrix.m[14]?.toFixed(4),
+            );
+          }
+        }
         for (const part of batch.parts) {
           setInstancedMeshInstanceCount(part.instancedMesh, batch.frameCount);
           invalidateInstancedMesh(part.instancedMesh);

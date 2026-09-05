@@ -13,17 +13,13 @@
 // every play call is a no-op until its resource lands. That is why the whole surface is
 // fire-and-forget: nothing here returns a promise, and a sound that is not ready yet is
 // simply not heard rather than queued to arrive late and out of context.
-import type { AudioBus, AudioChannel, AudioDeviceHandle, AudioMixer, AudioResource } from '@flighthq/sdk';
+import type { AudioChannel, AudioDeviceHandle, AudioResource } from '@flighthq/sdk';
 import { loadAudioResourceFromUrl } from '@flighthq/sdk';
 import {
-  addAudioBusToMixer,
-  createAudioBus,
-  createAudioMixer,
-  fadeAudioBusGain,
+  fadeAudioChannelGain,
   playAudioResource,
-  routeAudioChannelToMixerBus,
-  setAudioBusGain,
-  setAudioMixerMasterMuted,
+  setAudioChannelGain,
+  setAudioChannelMuted,
   stopAudioChannel,
 } from '@flighthq/sdk/media';
 import { webAudioDeviceBackend, webHostNet } from '@flighthq/host-web';
@@ -111,10 +107,6 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   // confusing possible version of this bug.
   let context: AudioContext | null = null;
   let deviceHandle: AudioDeviceHandle | null = null;
-  let mixer: AudioMixer | null = null;
-  let musicBus: AudioBus | null = null;
-  let ambienceBus: AudioBus | null = null;
-  let effectsBus: AudioBus | null = null;
 
   const resources = new Map<SoundName, AudioResource>();
   let soundtrackChannel: AudioChannel | null = null;
@@ -142,16 +134,10 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       if (Ctor === undefined) return null;
       context = new Ctor();
       deviceHandle = webAudioDeviceBackend.createDevice(context.sampleRate);
-      mixer = createAudioMixer(context, { masterMuted: muted });
-      musicBus = createAudioBus({ gain: 1, name: 'music' });
-      ambienceBus = createAudioBus({ gain: 1, name: 'ambience' });
-      effectsBus = createAudioBus({ gain: 1, name: 'effects' });
-      addAudioBusToMixer(mixer, musicBus);
-      addAudioBusToMixer(mixer, ambienceBus);
-      addAudioBusToMixer(mixer, effectsBus);
       void loadAll(context);
     }
     if (context.state === 'suspended') void context.resume().catch(() => undefined);
+    if (deviceHandle !== null) webAudioDeviceBackend.resumeDevice(deviceHandle);
     return context;
   }
 
@@ -168,17 +154,17 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     );
   }
 
-  function play(name: SoundName, bus: AudioBus | null, loops = 0, startAt = 0): AudioChannel | null {
+  function play(name: SoundName, loops = 0, startAt = 0): AudioChannel | null {
     ensureContext();
     const resource = resources.get(name);
-    if (deviceHandle === null || resource === undefined || mixer === null || bus === null) return null;
+    if (deviceHandle === null || resource === undefined) return null;
     const channel = playAudioResource(webAudioDeviceBackend, deviceHandle, resource, {
       currentTime: startAt,
       gain: GAIN[name],
       loops,
     });
     if (channel === null) return null;
-    routeAudioChannelToMixerBus(mixer, channel, bus);
+    if (muted) setAudioChannelMuted(channel, true);
     return channel;
   }
 
@@ -204,7 +190,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     if (cue === undefined) return;
     // Quiet regions in the source sample separate four calls; playing from an offset and
     // stopping after its length picks one out without shipping four derived files.
-    whinnyChannel = play('whinny', effectsBus, 0, cue.start);
+    whinnyChannel = play('whinny', 0, cue.start);
     whinnyStopTimer = window.setTimeout(() => {
       whinnyStopTimer = null;
       whinnyChannel = stop(whinnyChannel);
@@ -212,12 +198,14 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   }
 
   function raiseAmbience(): void {
-    if (ambienceBus === null) return;
-    setAudioBusGain(ambienceBus, 1);
     ambienceFaded = false;
     idleSince = 0;
     wantAmbience = true;
-    if (ambienceChannel === null) ambienceChannel = play('ambience', ambienceBus, Infinity);
+    if (ambienceChannel !== null) {
+      setAudioChannelGain(ambienceChannel, GAIN.ambience);
+    } else {
+      ambienceChannel = play('ambience', Infinity);
+    }
   }
 
   /**
@@ -239,10 +227,10 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
    */
   function reconcileLoops(): void {
     if (wantAmbience && ambienceChannel === null) {
-      ambienceChannel = play('ambience', ambienceBus, Infinity);
+      ambienceChannel = play('ambience', Infinity);
     }
     if (wantSoundtrack && soundtrackChannel === null) {
-      soundtrackChannel = play('soundtrack', musicBus, 0, SOUNDTRACK_SKIP_SECONDS);
+      soundtrackChannel = play('soundtrack', 0, SOUNDTRACK_SKIP_SECONDS);
     }
   }
 
@@ -253,10 +241,10 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
 
     setMuted(next) {
       muted = next;
-      // Touching the context here as well as in play(): the mute button is a user gesture,
-      // and it is a perfectly reasonable first thing to press.
       ensureContext();
-      if (mixer !== null) setAudioMixerMasterMuted(mixer, muted);
+      if (soundtrackChannel !== null) setAudioChannelMuted(soundtrackChannel, muted);
+      if (ambienceChannel !== null) setAudioChannelMuted(ambienceChannel, muted);
+      if (whinnyChannel !== null) setAudioChannelMuted(whinnyChannel, muted);
       try {
         window.localStorage.setItem(MUTED_KEY, muted ? '1' : '0');
       } catch {
@@ -265,13 +253,13 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     },
 
     playStackThud() {
-      play('thud', effectsBus);
+      play('thud');
     },
 
     beginResultCount() {
       wantSoundtrack = false;
       soundtrackChannel = stop(soundtrackChannel);
-      play('fanfare', effectsBus);
+      play('fanfare');
     },
 
     armResultTicks(now) {
@@ -283,11 +271,11 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       nextResultTickAt = now + RESULT_TICK_INTERVAL_MS;
       // No pool any more. Each tick is its own channel off the shared buffer, so ticks 32ms
       // apart overlap instead of cutting each other off.
-      play('tick', effectsBus);
+      play('tick');
     },
 
     celebrateResult() {
-      play('tada', effectsBus);
+      play('tada');
       // Not every round — a whinny on all of them stops reading as a flourish.
       if (Math.random() >= FINAL_WHINNY_CHANCE) return;
       scheduledWhinnyTimer = window.setTimeout(() => {
@@ -318,7 +306,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       if (!wantSoundtrack) return;
       // The track opens on two seconds of near-silence, which reads as the music failing to
       // start on the very beat the player pressed PLAY.
-      soundtrackChannel = play('soundtrack', musicBus, 0, SOUNDTRACK_SKIP_SECONDS);
+      soundtrackChannel = play('soundtrack', 0, SOUNDTRACK_SKIP_SECONDS);
     },
 
     leaveRound() {
@@ -348,8 +336,8 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       }
       if (now - idleSince < AMBIENCE_FADE_AFTER_MS) return;
       ambienceFaded = true;
-      if (mixer !== null && ambienceBus !== null) {
-        fadeAudioBusGain(mixer, ambienceBus, 0, AMBIENCE_FADE_MS);
+      if (ambienceChannel !== null) {
+        fadeAudioChannelGain(ambienceChannel, 0, AMBIENCE_FADE_MS);
       }
     },
   };

@@ -54,7 +54,7 @@ import {
   ShapeKind,
   TextLabelKind,
 } from '@flighthq/sdk';
-import { webCanvasRenderSurfaceCreator } from '@flighthq/host-web';
+import { webCanvasRenderSurfaceCreator, webRaster2DSurfaceProvider } from '@flighthq/host-web';
 
 export interface UiRenderer {
   /** The offscreen state the UI's nodes are prepared and drawn against. */
@@ -69,7 +69,9 @@ export function createUiRenderer(
   screenState: GlRenderState,
   pixelRatio: number,
 ): UiRenderer {
-  const state: GlRenderState = createGlOffscreenRenderState(screenState.contextState, scene2dGlPipeline);
+  const state: GlRenderState = createGlOffscreenRenderState(screenState.contextState, scene2dGlPipeline, {
+    raster2DSurfaceProvider: webRaster2DSurfaceProvider,
+  });
   let target: GlRenderTarget | null = null;
   let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
 

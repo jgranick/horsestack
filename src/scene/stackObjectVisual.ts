@@ -104,6 +104,7 @@ export function createStackObjectVisuals(): StackObjectVisuals {
   const batches = new Map<string, Batch>();
   const allInstancedNodes: Node3D[] = [];
   let frameNumber = 0;
+  let flushDiagCount = 0;
 
   const tmpPosition = createVector3();
   const tmpRotation = createQuaternion();
@@ -290,7 +291,8 @@ export function createStackObjectVisuals(): StackObjectVisuals {
 
     flush() {
       for (const [key, batch] of batches.entries()) {
-        if (batch.frameCount > 0 && frameNumber < 3) {
+        if (batch.frameCount > 0 && flushDiagCount < 3) {
+          flushDiagCount++;
           console.log('[FLUSH]', key, 'frameCount:', batch.frameCount, 'parts:', batch.parts.length);
           for (let pi = 0; pi < batch.parts.length; pi++) {
             const part = batch.parts[pi]!;

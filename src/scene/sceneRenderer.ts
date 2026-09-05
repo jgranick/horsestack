@@ -45,9 +45,9 @@ import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
 
-let _sceneDiagCount = 0;
+let _sceneDiagDone = false;
 function diagInstanced(root: Node3D): void {
-  if (_sceneDiagCount++ > 2) return;
+  if (_sceneDiagDone) return;
   let total = 0;
   let withCount = 0;
   forEachNodeDescendant(root, (node) => {
@@ -70,7 +70,10 @@ function diagInstanced(root: Node3D): void {
       }
     }
   });
-  console.log('[DIAG] total instanced:', total, 'with instances:', withCount);
+  if (withCount > 0) {
+    console.log('[DIAG] total instanced:', total, 'with instances:', withCount);
+    _sceneDiagDone = true;
+  }
 }
 
 export interface SceneRenderer {

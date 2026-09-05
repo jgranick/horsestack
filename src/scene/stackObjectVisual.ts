@@ -32,6 +32,7 @@ import {
   isMesh,
   multiplyMatrix4,
   Node3DKind,
+  refreshMeshGeometryBounds,
   setInstancedMeshInstanceCount,
   setInstancedMeshInstanceMatrix,
   setQuaternionFromEuler,
@@ -154,6 +155,16 @@ export function createStackObjectVisuals(): StackObjectVisuals {
       im.position.x = STACK_X;
       im.position.z = STACK_Z;
       invalidateNodeLocalTransform(im);
+      // The geometry vertices sit at their authored farm-scene coordinates (e.g. x=-25 for hay),
+      // not at the origin. The partMatrix re-centers them for rendering, but the SDK's frustum
+      // check only transforms the raw geometry bounds by the node's world matrix — so the culling
+      // bounds land far from the camera and every instanced mesh is rejected. Stamp the bounds
+      // version and then invert the AABB so ensureMeshGeometryBounds returns null, which makes
+      // isInstancedMeshVisible unconditionally return true.
+      refreshMeshGeometryBounds(im.geometry);
+      if (im.geometry.bounds !== null) {
+        im.geometry.bounds.min.x = Infinity;
+      }
       return { instancedMesh: im, partMatrix: part.localMatrix };
     });
     for (const part of parts) {

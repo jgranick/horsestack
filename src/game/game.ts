@@ -21,7 +21,7 @@ import {
   removeNodeChildren,
   removePhysics2DBody,
 } from '@flighthq/sdk';
-import type { Node3D, Physics2DWorld, RigidBody2D } from '@flighthq/sdk';
+import type { Physics2DWorld, RigidBody2D } from '@flighthq/sdk';
 import type { AudioManager } from '../audio/audioManager';
 import { getRandomFarmPropVariantIndex } from '../data/farmPropGeometry';
 import {
@@ -63,7 +63,7 @@ import type { CameraRig } from '../scene/cameraRig';
 import type { LandingIndicator } from '../scene/landingIndicator';
 import type { ParticleEffects } from '../scene/particleEffects';
 import type { SceneGraph } from '../scene/sceneGraph';
-import type { StackObjectVisuals } from '../scene/stackObjectVisual';
+import type { StackObjectVisuals, StackVisualHandle } from '../scene/stackObjectVisual';
 import {
   FIXED_STEP_LIMIT,
   GAME_DURATION_MS,
@@ -119,7 +119,7 @@ interface StackedObject {
    * clock — see below for why that is not the moment it was placed.
    */
   collidedAt: number;
-  node: Node3D;
+  handle: StackVisualHandle;
 }
 
 export interface GameDeps {
@@ -546,15 +546,14 @@ export function createGame(deps: GameDeps): Game {
     body.velocityX = 0;
     body.velocityY = 0;
     body.angularVelocity = 0;
-    const node = visuals.create(current.kind, current.variantIndex);
-    visuals.setTransform(node, current.kind, current.x, landingY, current.angle);
-    addNodeChild(stackLayer, node);
+    const handle = visuals.addPiece(current.kind, current.variantIndex);
+    visuals.setPieceTransform(handle, current.kind, current.x, landingY, current.angle);
     stackedObjects.push({
       body,
       dropped: false,
       kind: current.kind,
       lost: false,
-      node,
+      handle,
       restSeconds: 0,
       hasSettled: false,
       touchedGround: false,
@@ -736,7 +735,6 @@ export function createGame(deps: GameDeps): Game {
       // Leave enough void beyond the collider for the whole tumble to remain visible.
       if (body.y < -1 || body.x < PASTURE_MIN_X - 1.5 || body.x > PASTURE_MAX_X + 1.5) {
         object.lost = true;
-        object.node.enabled = false;
         removePhysics2DBody(physicsWorld, body);
         // A horse can also leave sideways without ever touching down — over the edge at the
         // height it was placed — so the grass test above will not have caught it. Off the
@@ -755,8 +753,8 @@ export function createGame(deps: GameDeps): Game {
       const carried = clamp((body.y - PASTURE_TOP_Y) / 0.9, 0, 1);
       const sway = prefersReducedMotion() ? 0 : carried * carried;
       const swayPhase = swayClock + body.index * 0.7;
-      visuals.setTransform(
-        object.node,
+      visuals.setPieceTransform(
+        object.handle,
         object.kind,
         body.x + Math.sin(swayPhase) * 0.0016 * sway,
         body.y,
@@ -912,7 +910,11 @@ export function createGame(deps: GameDeps): Game {
       recordBeforeRound = null;
       lastImpactAt = 0;
       removeNodeChildren(stackLayer);
+      visuals.clearPieces();
       removeNodeChildren(previewLayer);
+      for (const instancedNode of visuals.instancedNodes) {
+        addNodeChild(stackLayer, instancedNode);
+      }
       addNodeChild(stackLayer, previewLayer);
       indicator.beginRound();
       particles.reset();
@@ -934,6 +936,7 @@ export function createGame(deps: GameDeps): Game {
         swayClock += deltaTime * 1.6;
         stepGamePhysics(now, deltaTime);
         synchronizeStackVisuals(now, deltaTime);
+        visuals.flush();
         cachedStackHeight = phase === 'finished' ? finalHeight : getCurrentStackHeight();
         // The peak is what STEADY HANDS scores, so it may only record a height the tower held.
         // It used to take the live measurement, which is the height standing at this instant —
@@ -960,9 +963,12 @@ export function createGame(deps: GameDeps): Game {
       indicator.hide();
       audio.leaveRound();
       removeNodeChildren(stackLayer);
+      visuals.clearPieces();
       removeNodeChildren(previewLayer);
+      for (const instancedNode of visuals.instancedNodes) {
+        addNodeChild(stackLayer, instancedNode);
+      }
       particles.reset();
-      // The pile is gone, so the camera must not keep framing where it used to be.
       cachedStackHeight = 0;
       peakHeight = 0;
       horsesDropped = 0;

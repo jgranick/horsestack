@@ -10,15 +10,33 @@
 //
 // The templates arrive from the network, so they are set after construction rather than
 // passed in. isReady() is what the game asks instead of reaching for a template itself.
+//
+// INSTANCING — pieces placed in the stack are drawn via InstancedMesh. One InstancedMesh per
+// mesh-part per (kind, variant) holds all placed copies of that prop, and their per-instance
+// transforms are rebuilt every frame from the physics poses. The preview (landing indicator)
+// still clones a regular Node3D, because there is only one of it at a time and it carries
+// custom materials.
 import {
   addNodeChild,
   cloneNode3DSubtree,
+  composeMatrix4,
+  createInstancedMesh,
+  createMatrix4,
   createNode3D,
+  createQuaternion,
+  createVector3,
+  getNodeChildren,
+  getNodeLocalMatrix4,
+  invalidateInstancedMesh,
   invalidateNodeLocalTransform,
+  isMesh,
+  multiplyMatrix4,
   Node3DKind,
+  setInstancedMeshInstanceCount,
+  setInstancedMeshInstanceMatrix,
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
-import type { Material, Node3D, Scene3D } from '@flighthq/sdk';
+import type { InstancedMesh, Material, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {
   HORSE_SCALE,
@@ -32,11 +50,6 @@ import { getColliderCentroidOffsetY } from '../physics/colliderGeometry';
 import { STACK_OBJECT_PROFILES } from '../physics/stackObjectProfile';
 import type { FarmPropTemplates } from './modelLoader';
 
-// Every piece's collider is re-centred on its area centroid, which for a horse sits 15mm
-// above the middle of its silhouette (head and neck). The model has to move by the same
-// amount or it is drawn 15mm below the floor it is standing on. Derived rather than typed
-// out, so a re-authored silhouette carries the drawing with it; see
-// getColliderCentroidOffsetY. Chickens are a circle centred on the body and need nothing.
 const VISUAL_OFFSET_Y: Partial<Record<StackObjectKind, number>> = {
   cow: getColliderCentroidOffsetY('cow'),
   hay: getColliderCentroidOffsetY('hay'),
@@ -46,9 +59,29 @@ const VISUAL_OFFSET_Y: Partial<Record<StackObjectKind, number>> = {
 /** Replaces each source material on a clone. Null leaves the piece's own materials alone. */
 export type MaterialMapper = (material: Material | null) => Material | null;
 
+/** Opaque handle for a placed piece's instanced visual. */
+export interface StackVisualHandle {
+  readonly kind: StackObjectKind;
+  readonly variantIndex: number;
+  readonly _batchKey: string;
+  _lastFrame: number;
+  _frameIndex: number;
+}
+
+interface MeshPart {
+  instancedMesh: InstancedMesh;
+  partMatrix: Matrix4;
+}
+
+interface Batch {
+  parts: MeshPart[];
+  frameCount: number;
+}
+
+const INITIAL_CAPACITY = 32;
+
 export interface StackObjectVisuals {
   setTemplates: (farmProps: FarmPropTemplates, horse: Scene3D) => void;
-  /** False until the models have loaded, which is the game's "can a round start" test. */
   isReady: () => boolean;
   create: (
     kind: StackObjectKind,
@@ -56,23 +89,128 @@ export interface StackObjectVisuals {
     materialMapper?: MaterialMapper | null,
     alpha?: number,
   ) => Node3D;
-  /**
-   * Place a node at a physics pose: x along the play line, physicsY above the pasture. Pass
-   * the kind so the node can be lined up with its own collider — see VISUAL_OFFSET_Y.
-   */
+  addPiece: (kind: StackObjectKind, variantIndex?: number) => StackVisualHandle;
   setTransform: (node: Node3D, kind: StackObjectKind, x: number, physicsY: number, angle: number) => void;
-  /** Screen-reader label for a queued piece. */
+  setPieceTransform: (handle: StackVisualHandle, kind: StackObjectKind, x: number, physicsY: number, angle: number) => void;
+  flush: () => void;
+  clearPieces: () => void;
+  readonly instancedNodes: Node3D[];
   label: (kind: StackObjectKind, variantIndex: number) => string;
 }
 
 export function createStackObjectVisuals(): StackObjectVisuals {
   let farmPropTemplates: FarmPropTemplates = {};
   let horseTemplate: Scene3D | null = null;
+  const batches = new Map<string, Batch>();
+  const allInstancedNodes: Node3D[] = [];
+  let frameNumber = 0;
+
+  const tmpPosition = createVector3();
+  const tmpRotation = createQuaternion();
+  const tmpScale = createVector3(1, 1, 1);
+  const tmpWorldMatrix = createMatrix4();
+  const tmpInstanceMatrix = createMatrix4();
+
+  function batchKey(kind: StackObjectKind, variantIndex: number): string {
+    return `${kind}-${variantIndex}`;
+  }
+
+  function collectMeshParts(root: Node3D): Array<{ geometry: Mesh['geometry']; materials: Mesh['materials']; localMatrix: Matrix4 }> {
+    const parts: Array<{ geometry: Mesh['geometry']; materials: Mesh['materials']; localMatrix: Matrix4 }> = [];
+    const matrixStack: Matrix4[] = [createMatrix4()];
+
+    function walk(node: Node3D, depth: number): void {
+      const parentMatrix = matrixStack[depth]!;
+      const localMatrix = getNodeLocalMatrix4(node);
+      const worldMatrix = createMatrix4();
+      multiplyMatrix4(worldMatrix, parentMatrix, localMatrix as Matrix4);
+
+      if (isMesh(node)) {
+        const mesh = node as Mesh;
+        parts.push({
+          geometry: mesh.geometry,
+          materials: [...mesh.materials],
+          localMatrix: worldMatrix,
+        });
+      }
+
+      const children = getNodeChildren(node);
+      if (children.length > 0) {
+        matrixStack[depth + 1] = worldMatrix;
+        for (const child of children) {
+          walk(child as Node3D, depth + 1);
+        }
+      }
+    }
+
+    walk(root, 0);
+    return parts;
+  }
+
+  function buildBatch(templateRoot: Node3D, key: string): Batch {
+    const meshParts = collectMeshParts(templateRoot);
+    const parts: MeshPart[] = meshParts.map(part => ({
+      instancedMesh: createInstancedMesh(part.geometry, part.materials, INITIAL_CAPACITY),
+      partMatrix: part.localMatrix,
+    }));
+    for (const part of parts) {
+      setInstancedMeshInstanceCount(part.instancedMesh, 0);
+      allInstancedNodes.push(part.instancedMesh);
+    }
+    const batch: Batch = { parts, frameCount: 0 };
+    batches.set(key, batch);
+    return batch;
+  }
+
+  function buildHorseBatch(): void {
+    if (horseTemplate === null) return;
+    const modelTransform = createNode3D(Node3DKind);
+    modelTransform.scale.x = HORSE_SCALE;
+    modelTransform.scale.y = HORSE_SCALE;
+    modelTransform.scale.z = HORSE_SCALE;
+    modelTransform.position.y = -HORSE_VISUAL_CENTER_Y;
+    setQuaternionFromEuler(modelTransform.rotation, 0, 0, 0);
+    invalidateNodeLocalTransform(modelTransform);
+    addNodeChild(modelTransform, cloneNode3DSubtree(horseTemplate.root, null));
+    buildBatch(modelTransform, batchKey('horse', 0));
+  }
+
+  function buildFarmPropBatches(): void {
+    for (const kind of ['hay', 'cow', 'chickens'] as const) {
+      const templates = farmPropTemplates[kind];
+      if (templates === undefined) continue;
+      for (let vi = 0; vi < templates.length; vi++) {
+        const template = templates[vi];
+        if (template === undefined) continue;
+        buildBatch(template, batchKey(kind, vi));
+      }
+    }
+  }
+
+  function applyPieceTransform(batch: Batch, index: number, kind: StackObjectKind, x: number, physicsY: number, angle: number): void {
+    tmpPosition.x = STACK_X;
+    tmpPosition.y = STACK_BASE_Y + physicsY + (VISUAL_OFFSET_Y[kind] ?? 0);
+    tmpPosition.z = STACK_Z - x;
+    setQuaternionFromEuler(tmpRotation, kind === 'chickens' ? 0 : angle, 0, 0);
+    tmpScale.x = 1;
+    tmpScale.y = 1;
+    tmpScale.z = 1;
+    composeMatrix4(tmpWorldMatrix, tmpPosition, tmpRotation, tmpScale);
+
+    for (const part of batch.parts) {
+      multiplyMatrix4(tmpInstanceMatrix, tmpWorldMatrix, part.partMatrix);
+      setInstancedMeshInstanceMatrix(part.instancedMesh, index, tmpInstanceMatrix);
+    }
+  }
 
   return {
+    instancedNodes: allInstancedNodes,
+
     setTemplates(farmProps, horse) {
       farmPropTemplates = farmProps;
       horseTemplate = horse;
+      buildFarmPropBatches();
+      buildHorseBatch();
     },
 
     isReady() {
@@ -106,21 +244,67 @@ export function createStackObjectVisuals(): StackObjectVisuals {
       return pivot;
     },
 
+    addPiece(kind, variantIndex = 0) {
+      const key = batchKey(kind, variantIndex);
+      if (!batches.has(key)) {
+        throw new Error(`No batch for ${key}`);
+      }
+      return {
+        kind,
+        variantIndex,
+        _batchKey: key,
+        _lastFrame: -1,
+        _frameIndex: -1,
+      };
+    },
+
     setTransform(node, kind, x, physicsY, angle) {
       node.position.x = STACK_X;
       node.position.y = STACK_BASE_Y + physicsY + (VISUAL_OFFSET_Y[kind] ?? 0);
       node.position.z = STACK_Z - x;
-      // A chicken's collider is a CIRCLE, which has no orientation at all, so drawing the
-      // hen turned reports a pose the physics is not holding: at 45 degrees the corners of
-      // its silhouette reach 13mm past the circle that is actually resting on the ground,
-      // and the hen's beak and feet go into the grass. Left upright, the drawing and the
-      // collider agree at every angle. Nothing else here is round, so nothing else cares.
       setQuaternionFromEuler(node.rotation, kind === 'chickens' ? 0 : angle, 0, 0);
       invalidateNodeLocalTransform(node);
     },
 
+    setPieceTransform(handle, kind, x, physicsY, angle) {
+      const batch = batches.get(handle._batchKey);
+      if (batch === undefined) return;
+
+      let index: number;
+      if (handle._lastFrame === frameNumber) {
+        index = handle._frameIndex;
+      } else {
+        index = batch.frameCount++;
+        handle._frameIndex = index;
+        handle._lastFrame = frameNumber;
+      }
+
+      applyPieceTransform(batch, index, kind, x, physicsY, angle);
+    },
+
+    flush() {
+      for (const batch of batches.values()) {
+        for (const part of batch.parts) {
+          setInstancedMeshInstanceCount(part.instancedMesh, batch.frameCount);
+          invalidateInstancedMesh(part.instancedMesh);
+        }
+        batch.frameCount = 0;
+      }
+      frameNumber++;
+    },
+
+    clearPieces() {
+      for (const batch of batches.values()) {
+        batch.frameCount = 0;
+        for (const part of batch.parts) {
+          setInstancedMeshInstanceCount(part.instancedMesh, 0);
+          invalidateInstancedMesh(part.instancedMesh);
+        }
+      }
+      frameNumber++;
+    },
+
     label(kind, variantIndex) {
-      // A horse has no variants, and FARM_PROP_VARIANTS has no 'horse' key to index.
       if (kind === 'horse') return STACK_OBJECT_PROFILES.horse.label;
       return FARM_PROP_VARIANTS[kind][variantIndex]?.label ?? STACK_OBJECT_PROFILES[kind].label;
     },

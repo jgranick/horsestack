@@ -14,7 +14,6 @@ import type {
   RenderEffect,
   VignetteEffect,
 } from '@flighthq/sdk';
-import type { GlContextState, GlPipeline } from '@flighthq/types/contract';
 import {
   addNodeChildAt,
   beginGlRenderEffectPipeline,
@@ -46,8 +45,6 @@ import type { SceneGraph } from './sceneGraph';
 
 export interface SceneRenderer {
   canvas: HTMLCanvasElement;
-  contextState: GlContextState;
-  glPipeline: GlPipeline;
   renderState: GlRenderState;
   pipeline: GlRenderEffectPipeline;
   /**
@@ -89,17 +86,20 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   canvas.style.height = '100%';
   viewer.prepend(canvas);
 
-  const gl = createGlContextFromCanvasElement(canvas, {
-    antialias: false,
-    contextAttributes: { alpha: true },
-    powerPreference: 'high-performance',
-  });
-  const contextState = createGlContextState(gl);
-  const glPipeline = createGlPipeline(createEmptyGlRegistries());
-  const renderState = createGlRenderState(contextState, glPipeline, {
-    pixelRatio: initialPixelRatio,
-    backgroundColor: 0x00000000,
-  });
+  const renderState = createGlRenderState(
+    createGlContextState(
+      createGlContextFromCanvasElement(canvas, {
+        antialias: false,
+        contextAttributes: { alpha: true },
+        powerPreference: 'high-performance',
+      }),
+    ),
+    createGlPipeline(createEmptyGlRegistries()),
+    {
+      pixelRatio: initialPixelRatio,
+      backgroundColor: 0x00000000,
+    },
+  );
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);
   registerStandardGlTextureResolvers(renderState);
   registerGlStandardPbrMaterial(renderState);
@@ -138,8 +138,6 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
 
   return {
     canvas,
-    contextState,
-    glPipeline,
     pipeline,
     renderState,
 

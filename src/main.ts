@@ -51,8 +51,8 @@ retryButton.addEventListener('click', () => window.location.reload());
 // which is caught below rather than inside it — the renderer does not own the error panel.
 const audio = createAudioManager(soundRoot);
 const sceneRenderer = createSceneRenderer(viewer);
-const { canvas, contextState, glPipeline, renderState } = sceneRenderer;
-const gameUi = createGameUi2D(contextState, glPipeline, renderState.pixelRatio);
+const { canvas, renderState } = sceneRenderer;
+const gameUi = createGameUi2D(renderState, renderState.pixelRatio);
 const sceneGraph = createSceneGraph();
 const scene = sceneGraph.root;
 const { camera } = sceneGraph;

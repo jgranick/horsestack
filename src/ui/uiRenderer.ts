@@ -28,7 +28,6 @@
 //     already left blending on and depth/cull off — the state the blend needs. It also owns
 //     its own VAO and unbinds what it sampled, so nothing leaks into the next frame's 3D.
 import type { DisplayObject, GlRenderState, GlRenderTarget } from '@flighthq/sdk';
-import type { GlContextState, GlPipeline } from '@flighthq/types/contract';
 import {
   beginGlRenderPass,
   createCanvasShapeRasterizer,
@@ -50,6 +49,7 @@ import {
   registerRenderer,
   renderGlScene2D,
   RichTextKind,
+  scene2dGlPipeline,
   setGlRenderTransform2D,
   ShapeKind,
   TextLabelKind,
@@ -66,11 +66,10 @@ export interface UiRenderer {
 }
 
 export function createUiRenderer(
-  contextState: GlContextState,
-  glPipeline: GlPipeline,
+  screenState: GlRenderState,
   pixelRatio: number,
 ): UiRenderer {
-  const state: GlRenderState = createGlOffscreenRenderState(contextState, glPipeline);
+  const state: GlRenderState = createGlOffscreenRenderState(screenState.contextState, scene2dGlPipeline);
   let target: GlRenderTarget | null = null;
   let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
 

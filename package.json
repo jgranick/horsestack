@@ -13,8 +13,9 @@
     "measure:settling": "node scripts/run-settling-measurement.mjs"
   },
   "dependencies": {
-    "@flighthq/host-web": "^0.5.1-next.912.289aaa0",
-    "@flighthq/sdk": "^0.5.1-next.912.289aaa0"
+    "@flighthq/entity": "^0.5.1-next.914.ed01add",
+    "@flighthq/host-web": "^0.5.1-next.914.ed01add",
+    "@flighthq/sdk": "^0.5.1-next.914.ed01add"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

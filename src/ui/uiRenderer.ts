@@ -28,6 +28,7 @@
 //     already left blending on and depth/cull off — the state the blend needs. It also owns
 //     its own VAO and unbinds what it sampled, so nothing leaks into the next frame's 3D.
 import type { DisplayObject, GlRenderState, GlRenderTarget } from '@flighthq/sdk';
+import type { GlContextState, GlPipeline } from '@flighthq/types/contract';
 import {
   beginGlRenderPass,
   createCanvasShapeRasterizer,
@@ -53,6 +54,7 @@ import {
   ShapeKind,
   TextLabelKind,
 } from '@flighthq/sdk';
+import { webCanvasRenderSurfaceCreator } from '@flighthq/host-web';
 
 export interface UiRenderer {
   /** The offscreen state the UI's nodes are prepared and drawn against. */
@@ -63,8 +65,12 @@ export interface UiRenderer {
   render: (root: DisplayObject) => void;
 }
 
-export function createUiRenderer(screenState: GlRenderState, pixelRatio: number): UiRenderer {
-  const state: GlRenderState = createGlOffscreenRenderState(screenState);
+export function createUiRenderer(
+  contextState: GlContextState,
+  glPipeline: GlPipeline,
+  pixelRatio: number,
+): UiRenderer {
+  const state: GlRenderState = createGlOffscreenRenderState(contextState, glPipeline);
   let target: GlRenderTarget | null = null;
   let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
@@ -72,7 +78,7 @@ export function createUiRenderer(screenState: GlRenderState, pixelRatio: number)
   registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
   registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
   registerGlShapeCommands(state, defaultGlShapeCommands);
-  registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers()));
+  registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers(webCanvasRenderSurfaceCreator)));
   registerGlStandardMaterial(state);
 
   return {

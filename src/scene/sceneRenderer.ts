@@ -14,12 +14,17 @@ import type {
   RenderEffect,
   VignetteEffect,
 } from '@flighthq/sdk';
+import type { GlContextState, GlPipeline } from '@flighthq/types/contract';
 import {
   addNodeChildAt,
   beginGlRenderEffectPipeline,
   beginGlRenderPass,
   createBlurEffect,
+  createEmptyGlRegistries,
   createGlCanvasElement,
+  createGlContextFromCanvasElement,
+  createGlContextState,
+  createGlPipeline,
   createGlRenderEffectPipeline,
   createGlRenderState,
   createVignetteEffect,
@@ -36,10 +41,13 @@ import {
   renderGlBackground,
 } from '@flighthq/sdk';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
 import type { SceneGraph } from './sceneGraph';
 
 export interface SceneRenderer {
   canvas: HTMLCanvasElement;
+  contextState: GlContextState;
+  glPipeline: GlPipeline;
   renderState: GlRenderState;
   pipeline: GlRenderEffectPipeline;
   /**
@@ -69,6 +77,7 @@ const NO_EFFECTS: readonly RenderEffect[] = [];
  * than this module reaching for the DOM it does not otherwise touch.
  */
 export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
+  enableHostWebGlRenderSurface();
   const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   const canvas = createGlCanvasElement(1, 1, initialPixelRatio);
   canvas.setAttribute(
@@ -76,25 +85,20 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
     'Horse Stacker game. Position the next farm object with the pointer or the arrow keys — placement is free, so you choose the height as well as the side — then click, tap, Space, or Enter to place it.',
   );
   canvas.tabIndex = 0;
-  // createGlCanvasElement writes an inline pixel size, which would beat the stylesheet's
-  // 100%/100%. Set it to fill once, here, so resize never has to touch the CSS size and can
-  // never round it a fraction short of the viewer (see the note in resize).
   canvas.style.width = '100%';
   canvas.style.height = '100%';
   viewer.prepend(canvas);
 
-  const renderState = createGlRenderState(canvas, {
+  const gl = createGlContextFromCanvasElement(canvas, {
+    antialias: false,
+    contextAttributes: { alpha: true },
+    powerPreference: 'high-performance',
+  });
+  const contextState = createGlContextState(gl);
+  const glPipeline = createGlPipeline(createEmptyGlRegistries());
+  const renderState = createGlRenderState(contextState, glPipeline, {
     pixelRatio: initialPixelRatio,
     backgroundColor: 0x00000000,
-    // Antialiasing OFF, and it has to stay off. The canvas is composited with alpha, and
-    // multisampling resolves its edge samples against transparent black, so every edge of
-    // the frame comes back fringed with a dark border. That has now been seen twice from two
-    // different directions — first from sampleCount on the UI render target, then from
-    // letting this attribute default to on — so it is the multisample resolve rather than
-    // either particular knob. The 3D does its own multisampling inside the effect pipeline,
-    // where the resolve is not against the page.
-    contextAttributes: { alpha: true, antialias: false },
-    powerPreference: 'high-performance',
   });
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);
   registerStandardGlTextureResolvers(renderState);
@@ -134,6 +138,8 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
 
   return {
     canvas,
+    contextState,
+    glPipeline,
     pipeline,
     renderState,
 

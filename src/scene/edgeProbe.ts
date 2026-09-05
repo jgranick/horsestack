@@ -38,7 +38,9 @@ const VISIBLE_DELTA = 4;
  * pass binds the canvas (`dest = null`) and leaves it bound. On a multisampled canvas
  * readPixels resolves first, so this reads what the compositor will receive.
  */
-export function probeFrameEdges(gl: WebGL2RenderingContext, label: string): void {
+import type { GlContext } from '@flighthq/sdk';
+
+export function probeFrameEdges(gl: GlContext, label: string): void {
   const width = gl.drawingBufferWidth;
   const height = gl.drawingBufferHeight;
   if (width < 2 || height < 2) return;
@@ -79,7 +81,7 @@ export function probeFrameEdges(gl: WebGL2RenderingContext, label: string): void
 }
 
 function readStrip(
-  gl: WebGL2RenderingContext,
+  gl: GlContext,
   x: number,
   y: number,
   width: number,

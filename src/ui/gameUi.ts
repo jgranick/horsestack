@@ -7,7 +7,8 @@
 // straight-line: `update` reads a UiModel snapshot, positions every node for the screen it
 // names, and returns whether anything is still animating. There is no retained widget tree
 // and no diffing — the nodes are built once, and each frame decides afresh what is shown.
-import type { GlRenderState, RichText, Shape, TextLabel } from '@flighthq/sdk';
+import type { RichText, Shape, TextLabel } from '@flighthq/sdk';
+import type { GlContextState, GlPipeline } from '@flighthq/types/contract';
 import type { GameMode } from '../game/gameMode';
 import {
   addNodeChild,
@@ -146,8 +147,8 @@ function slamScale(t: number): number {
   return t <= 0 ? 1 : slamCurve(t);
 }
 
-export function createGameUi2D(screenState: GlRenderState, pixelRatio: number): UiState {
-  const renderer = createUiRenderer(screenState, pixelRatio);
+export function createGameUi2D(contextState: GlContextState, glPipeline: GlPipeline, pixelRatio: number): UiState {
+  const renderer = createUiRenderer(contextState, glPipeline, pixelRatio);
 
   const root = createDisplayObject();
   // Same treatment as TIME UP and the result height: big gold serif, so the three

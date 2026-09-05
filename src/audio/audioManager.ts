@@ -13,7 +13,7 @@
 // every play call is a no-op until its resource lands. That is why the whole surface is
 // fire-and-forget: nothing here returns a promise, and a sound that is not ready yet is
 // simply not heard rather than queued to arrive late and out of context.
-import type { AudioBus, AudioChannel, AudioMixer, AudioResource } from '@flighthq/sdk';
+import type { AudioBus, AudioChannel, AudioDeviceHandle, AudioMixer, AudioResource } from '@flighthq/sdk';
 import { loadAudioResourceFromUrl } from '@flighthq/sdk';
 import {
   addAudioBusToMixer,
@@ -26,6 +26,7 @@ import {
   setAudioMixerMasterMuted,
   stopAudioChannel,
 } from '@flighthq/sdk/media';
+import { webAudioDeviceBackend, webHostNet } from '@flighthq/host-web';
 import {
   AMBIENCE_FADE_AFTER_MS,
   AMBIENCE_FADE_MS,
@@ -109,6 +110,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   // first round would play silently and every later one would be fine, which is the most
   // confusing possible version of this bug.
   let context: AudioContext | null = null;
+  let deviceHandle: AudioDeviceHandle | null = null;
   let mixer: AudioMixer | null = null;
   let musicBus: AudioBus | null = null;
   let ambienceBus: AudioBus | null = null;
@@ -134,12 +136,12 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
 
   function ensureContext(): AudioContext | null {
     if (context === null) {
-      // Safari still only has the prefixed constructor.
       const Ctor: typeof AudioContext | undefined =
         window.AudioContext ??
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (Ctor === undefined) return null;
       context = new Ctor();
+      deviceHandle = webAudioDeviceBackend.createDevice(context.sampleRate);
       mixer = createAudioMixer(context, { masterMuted: muted });
       musicBus = createAudioBus({ gain: 1, name: 'music' });
       ambienceBus = createAudioBus({ gain: 1, name: 'ambience' });
@@ -149,8 +151,6 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       addAudioBusToMixer(mixer, effectsBus);
       void loadAll(context);
     }
-    // A context can be suspended again when a tab is backgrounded, so this is not only a
-    // first-run concern.
     if (context.state === 'suspended') void context.resume().catch(() => undefined);
     return context;
   }
@@ -160,9 +160,8 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       (Object.keys(SOUND_FILES) as SoundName[]).map(async (name) => {
         const url = new URL(encodeURIComponent(SOUND_FILES[name]), soundRootUrl).href;
         try {
-          resources.set(name, await loadAudioResourceFromUrl(target, url));
+          resources.set(name, await loadAudioResourceFromUrl(webHostNet, target, url));
         } catch (error) {
-          // A sound that will not decode is not a reason for the game to stop.
           console.info(`${name} could not be loaded.`, error);
         }
       }),
@@ -170,10 +169,10 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   }
 
   function play(name: SoundName, bus: AudioBus | null, loops = 0, startAt = 0): AudioChannel | null {
-    const target = ensureContext();
+    ensureContext();
     const resource = resources.get(name);
-    if (target === null || resource === undefined || mixer === null || bus === null) return null;
-    const channel = playAudioResource(target, resource, {
+    if (deviceHandle === null || resource === undefined || mixer === null || bus === null) return null;
+    const channel = playAudioResource(webAudioDeviceBackend, deviceHandle, resource, {
       currentTime: startAt,
       gain: GAIN[name],
       loops,

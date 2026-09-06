@@ -155,6 +155,13 @@ export function createStackObjectVisuals(): StackObjectVisuals {
       im.position.x = STACK_X;
       im.position.z = STACK_Z;
       invalidateNodeLocalTransform(im);
+      // The geometry bounds are in the original farm-scene coordinate space (e.g. x≈-7 for
+      // chickens). The SDK's ensureInstancedMeshLocalBounds transforms these by the instance
+      // matrix (which includes centering + scale), but the resulting world-space AABB still
+      // fails the frustum check. Invalidating the bounds makes ensureMeshGeometryBounds
+      // return null, which bypasses the frustum cull entirely for instanced meshes.
+      const bounds = im.geometry?.bounds;
+      if (bounds) bounds.min.x = Infinity;
       return { instancedMesh: im, partMatrix: part.localMatrix };
     });
     for (const part of parts) {

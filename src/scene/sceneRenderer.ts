@@ -57,12 +57,14 @@ function diagInstanced(root: Node3D): void {
       if (im.instanceCount > 0) {
         withCount++;
         const m0 = im.instanceMatrices[0];
+        const subsets = im.geometry?.subsets;
+        const subsetInfo = subsets ? subsets.map((s: any) => s.indexCount).join(',') : 'none';
         console.log('[DIAG] InstancedMesh', im.name ?? '?',
           'count:', im.instanceCount,
           'enabled:', im.enabled, 'visible:', im.visible,
           'version:', im.version,
           'geo:', im.geometry != null,
-          'subsets:', im.geometry?.subsets?.length,
+          'subsets:', subsets?.length, 'indexCounts:', subsetInfo,
           'materials:', im.materials?.length,
           'pos:', im.position.x.toFixed(2), im.position.y.toFixed(2), im.position.z.toFixed(2),
           'm0[12-14]:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
@@ -139,7 +141,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   let _glDiag = 0;
   const origDrawEI = gl.drawElementsInstanced.bind(gl);
   gl.drawElementsInstanced = function(mode: GLenum, count: GLsizei, type: GLenum, offset: GLintptr, instanceCount: GLsizei) {
-    if (_glDiag++ < 20) {
+    if (count > 6 && _glDiag++ < 20) {
       console.log('[GL] drawElementsInstanced count:', count, 'instances:', instanceCount);
     }
     return origDrawEI(mode, count, type, offset, instanceCount);

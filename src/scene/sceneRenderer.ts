@@ -134,6 +134,23 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
     },
   );
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);
+  // Hook drawElementsInstanced to verify the GPU draw call actually fires for instanced meshes.
+  const gl = renderState.gl as WebGL2RenderingContext;
+  let _glDiag = 0;
+  const origDrawEI = gl.drawElementsInstanced.bind(gl);
+  gl.drawElementsInstanced = function(mode: GLenum, count: GLsizei, type: GLenum, offset: GLintptr, instanceCount: GLsizei) {
+    if (_glDiag++ < 20) {
+      console.log('[GL] drawElementsInstanced count:', count, 'instances:', instanceCount);
+    }
+    return origDrawEI(mode, count, type, offset, instanceCount);
+  };
+  const origDrawAI = gl.drawArraysInstanced.bind(gl);
+  gl.drawArraysInstanced = function(mode: GLenum, first: GLint, count: GLsizei, instanceCount: GLsizei) {
+    if (_glDiag++ < 20) {
+      console.log('[GL] drawArraysInstanced count:', count, 'instances:', instanceCount);
+    }
+    return origDrawAI(mode, first, count, instanceCount);
+  };
   registerStandardGlTextureResolvers(renderState);
   registerGlStandardPbrMaterial(renderState);
   registerGlVertexColorMaterial(renderState);

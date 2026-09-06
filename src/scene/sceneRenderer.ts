@@ -41,7 +41,7 @@ import {
 } from '@flighthq/sdk';
 import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
-import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
+import { forEachNodeDescendant, getNodeParent, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
 
@@ -59,6 +59,12 @@ function diagInstanced(root: Node3D): void {
         const m0 = im.instanceMatrices[0];
         const subsets = im.geometry?.subsets;
         const subsetInfo = subsets ? subsets.map((s: any) => s.indexCount).join(',') : 'none';
+        const parentChain: string[] = [];
+        let p = getNodeParent(im) as Node3D | null;
+        while (p !== null) {
+          parentChain.push(`${p.name ?? '?'}(e:${p.enabled},v:${p.visible})`);
+          p = getNodeParent(p) as Node3D | null;
+        }
         console.log('[DIAG] InstancedMesh', im.name ?? '?',
           'count:', im.instanceCount,
           'enabled:', im.enabled, 'visible:', im.visible,
@@ -68,6 +74,7 @@ function diagInstanced(root: Node3D): void {
           'materials:', im.materials?.length,
           'pos:', im.position.x.toFixed(2), im.position.y.toFixed(2), im.position.z.toFixed(2),
           'm0[12-14]:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
+          'parents:', parentChain.join(' > '),
         );
       }
     }

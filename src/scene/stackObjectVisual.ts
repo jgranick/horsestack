@@ -40,7 +40,7 @@ import {
 import type { InstancedMesh, Material, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
 
 // ── DEBUG TOGGLE (remove after fix) ──
-const DEBUG_UNLIT_MATERIALS = true;  // Test 3: replace PBR materials with red unlit
+const DEBUG_UNLIT_MATERIALS = false;  // Test 3: replace PBR materials with red unlit
 // ──────────────────────────────────────
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {

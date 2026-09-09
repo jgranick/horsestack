@@ -25,7 +25,6 @@ import {
   createNode3D,
   createQuaternion,
   createVector3,
-  createVertexColorMaterial,
   getNodeChildren,
   getNodeLocalMatrix4,
   invalidateInstancedMesh,
@@ -39,9 +38,6 @@ import {
 } from '@flighthq/sdk';
 import type { InstancedMesh, Material, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
 
-// ── DEBUG TOGGLE (remove after fix) ──
-const DEBUG_UNLIT_MATERIALS = false;  // Test 3: replace PBR materials with red unlit
-// ──────────────────────────────────────
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {
   HORSE_SCALE,
@@ -109,7 +105,6 @@ export function createStackObjectVisuals(): StackObjectVisuals {
   const batches = new Map<string, Batch>();
   const allInstancedNodes: Node3D[] = [];
   let frameNumber = 0;
-  let flushDiagCount = 0;
 
   const tmpPosition = createVector3();
   const tmpRotation = createQuaternion();
@@ -156,10 +151,7 @@ export function createStackObjectVisuals(): StackObjectVisuals {
   function buildBatch(templateRoot: Node3D, key: string): Batch {
     const meshParts = collectMeshParts(templateRoot);
     const parts: MeshPart[] = meshParts.map(part => {
-      const mats = DEBUG_UNLIT_MATERIALS
-        ? [createVertexColorMaterial({ tint: 0xff0000ff })]
-        : part.materials;
-      const im = createInstancedMesh(part.geometry, mats, INITIAL_CAPACITY);
+      const im = createInstancedMesh(part.geometry, part.materials, INITIAL_CAPACITY);
       im.position.x = STACK_X;
       im.position.z = STACK_Z;
       invalidateNodeLocalTransform(im);
@@ -298,24 +290,7 @@ export function createStackObjectVisuals(): StackObjectVisuals {
     },
 
     flush() {
-      for (const [key, batch] of batches.entries()) {
-        if (batch.frameCount > 0 && flushDiagCount < 3) {
-          flushDiagCount++;
-          console.log('[FLUSH]', key, 'frameCount:', batch.frameCount, 'parts:', batch.parts.length);
-          for (let pi = 0; pi < batch.parts.length; pi++) {
-            const part = batch.parts[pi]!;
-            const im = part.instancedMesh;
-            const m0 = im.instanceMatrices[0];
-            console.log('[FLUSH]  part', pi,
-              'countBefore:', im.instanceCount,
-              'version:', im.version,
-              'geo:', im.geometry != null,
-              'geoBounds:', im.geometry?.bounds?.min?.x, im.geometry?.bounds?.max?.x,
-              'matrix[0].m12-14:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
-              'partMatrix.m12-14:', part.partMatrix.m[12]?.toFixed(4), part.partMatrix.m[13]?.toFixed(4), part.partMatrix.m[14]?.toFixed(4),
-            );
-          }
-        }
+      for (const [, batch] of batches.entries()) {
         for (const part of batch.parts) {
           setInstancedMeshInstanceCount(part.instancedMesh, batch.frameCount);
           invalidateInstancedMesh(part.instancedMesh);

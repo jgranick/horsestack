@@ -290,7 +290,7 @@ export function createStackObjectVisuals(): StackObjectVisuals {
     },
 
     flush() {
-      for (const [, batch] of batches.entries()) {
+      for (const batch of batches.values()) {
         for (const part of batch.parts) {
           setInstancedMeshInstanceCount(part.instancedMesh, batch.frameCount);
           invalidateInstancedMesh(part.instancedMesh);

@@ -25,6 +25,8 @@ import {
   createAmbientLight,
   createCamera3D,
   createDirectionalLight,
+  createInstancedMesh,
+  createMatrix4,
   createMesh,
   createNode3D,
   createOrthographicProjection,
@@ -35,8 +37,12 @@ import {
   createVertexColorMaterial,
   getMeshGeometryVertexCount,
   getMeshGeometryVertexPosition,
+  invalidateInstancedMesh,
+  invalidateNodeLocalTransform,
   Node3DKind,
   normalizeVector3,
+  setInstancedMeshInstanceCount,
+  setInstancedMeshInstanceMatrix,
   setMeshGeometryVertexColor0,
   srgbChannelToLinear,
 } from '@flighthq/sdk';
@@ -103,6 +109,45 @@ export function createSceneGraph(): SceneGraph {
   addNodeChild(root, skyDome);
   const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
   addNodeChild(root, stackLayer);
+
+  // ── DEBUG: standalone instanced mesh test (remove after fix) ──
+  // A green sphere at the stack position, always visible with 1 instance.
+  // If this appears but game pieces don't, the issue is in the game's instancing pipeline.
+  // If this ALSO doesn't appear, the SDK's instanced mesh path is broken.
+  {
+    const testGeo = createSphereMeshGeometry(0.15, 12, 8);
+    const testMat = createVertexColorMaterial({ tint: 0x00ff00ff });
+    const testIM = createInstancedMesh(testGeo, [testMat], 4);
+    testIM.name = 'DEBUG-instanced-sphere';
+    testIM.position.x = STACK_X;
+    testIM.position.y = 0.3;
+    testIM.position.z = STACK_Z;
+    invalidateNodeLocalTransform(testIM);
+    const identity = createMatrix4();
+    setInstancedMeshInstanceMatrix(testIM, 0, identity);
+    setInstancedMeshInstanceCount(testIM, 1);
+    invalidateInstancedMesh(testIM);
+    addNodeChild(root, testIM);
+    console.log('[DEBUG-TEST] Added standalone instanced sphere at',
+      STACK_X, 0.3, STACK_Z, 'count:', testIM.instanceCount);
+
+    // Also add a REGULAR (non-instanced) mesh sphere as a control.
+    // If this red sphere appears but the green instanced one doesn't, the issue is
+    // specifically in the instanced mesh draw path.
+    const controlGeo = createSphereMeshGeometry(0.15, 12, 8);
+    const controlMat = createVertexColorMaterial({ tint: 0xff0000ff });
+    const controlMesh = createMesh(controlGeo, [controlMat]);
+    controlMesh.name = 'DEBUG-control-sphere';
+    controlMesh.position.x = STACK_X + 0.4;
+    controlMesh.position.y = 0.3;
+    controlMesh.position.z = STACK_Z;
+    invalidateNodeLocalTransform(controlMesh);
+    addNodeChild(root, controlMesh);
+    console.log('[DEBUG-TEST] Added control (non-instanced) sphere at',
+      STACK_X + 0.4, 0.3, STACK_Z);
+  }
+  // ── end DEBUG ──
+
   const previewLayer = createNode3D(Node3DKind, { name: 'landing-preview-layer' });
 
   const camera: Camera3D = createCamera3D({

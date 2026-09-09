@@ -40,6 +40,7 @@ import {
   renderGlBackground,
 } from '@flighthq/sdk';
 import { drawGlScene3D, drawGlScene3DShadowMap, registerGlUnlitMaterial } from '@flighthq/sdk/rendering';
+import { prepareScene3DRender } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
 import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
@@ -51,6 +52,7 @@ const DEBUG_NO_SHADOWS = true;    // Test 2: skip shadow pass entirely
 // ──────────────────────────────────────
 
 let _sceneDiagDone = false;
+let _listDiagDone = false;
 function diagInstanced(root: Node3D): void {
   if (_sceneDiagDone) return;
   let total = 0;
@@ -233,6 +235,20 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       if (sceneTarget !== null) {
         diagInstanced(root);
         beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
+        // ── DEBUG: inspect prepareScene3DRender result before draw ──
+        if (!_listDiagDone) {
+          const aspect = canvas.width / (canvas.height || 1);
+          const list = prepareScene3DRender(renderState, root, camera, lights, aspect);
+          console.log('[LIST-DIAG] meshCount:', list.meshCount,
+            'instancedMeshCount:', list.instancedMeshCount);
+          for (let i = 0; i < list.instancedMeshCount; i++) {
+            const im = list.visibleInstancedMeshes[i] as InstancedMesh;
+            console.log('[LIST-DIAG] instanced[' + i + ']:', im.name ?? '?',
+              'count:', im.instanceCount, 'materials:', im.materials?.length,
+              'materialKinds:', im.materials?.map((m: any) => m?.kind).join(','));
+          }
+          if (list.instancedMeshCount > 0 || list.meshCount > 0) _listDiagDone = true;
+        }
         drawGlScene3D(renderState, root, camera, lights);
         endGlRenderPass(renderState);
       }

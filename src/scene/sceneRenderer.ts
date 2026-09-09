@@ -39,7 +39,7 @@ import {
   removeNodeChild,
   renderGlBackground,
 } from '@flighthq/sdk';
-import { drawGlScene3D, drawGlScene3DShadowMap } from '@flighthq/sdk/rendering';
+import { drawGlScene3D, drawGlScene3DShadowMap, registerGlUnlitMaterial } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
 import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
@@ -167,6 +167,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   };
   registerStandardGlTextureResolvers(renderState);
   registerGlStandardPbrMaterial(renderState);
+  registerGlUnlitMaterial(renderState);
   registerGlVertexColorMaterial(renderState);
   registerGlBlurEffect(renderState);
   registerGlVignetteEffect(renderState);

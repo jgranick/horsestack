@@ -25,6 +25,7 @@ import {
   createNode3D,
   createQuaternion,
   createVector3,
+  createVertexColorMaterial,
   getNodeChildren,
   getNodeLocalMatrix4,
   invalidateInstancedMesh,
@@ -37,6 +38,10 @@ import {
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
 import type { InstancedMesh, Material, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
+
+// ── DEBUG TOGGLE (remove after fix) ──
+const DEBUG_UNLIT_MATERIALS = true;  // Test 3: replace PBR materials with red unlit
+// ──────────────────────────────────────
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {
   HORSE_SCALE,
@@ -151,7 +156,10 @@ export function createStackObjectVisuals(): StackObjectVisuals {
   function buildBatch(templateRoot: Node3D, key: string): Batch {
     const meshParts = collectMeshParts(templateRoot);
     const parts: MeshPart[] = meshParts.map(part => {
-      const im = createInstancedMesh(part.geometry, part.materials, INITIAL_CAPACITY);
+      const mats = DEBUG_UNLIT_MATERIALS
+        ? [createVertexColorMaterial({ tint: 0xff0000ff })]
+        : part.materials;
+      const im = createInstancedMesh(part.geometry, mats, INITIAL_CAPACITY);
       im.position.x = STACK_X;
       im.position.z = STACK_Z;
       invalidateNodeLocalTransform(im);

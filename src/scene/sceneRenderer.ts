@@ -45,6 +45,11 @@ import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
 import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
 
+// ── DEBUG TOGGLES (remove after fix) ──
+const DEBUG_NO_MSAA = true;       // Test 1: sampleCount 1 instead of 4
+const DEBUG_NO_SHADOWS = true;    // Test 2: skip shadow pass entirely
+// ──────────────────────────────────────
+
 let _sceneDiagDone = false;
 function diagInstanced(root: Node3D): void {
   if (_sceneDiagDone) return;
@@ -166,7 +171,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   registerGlBlurEffect(renderState);
   registerGlVignetteEffect(renderState);
   const pipeline = createGlRenderEffectPipeline(renderState, {
-    sampleCount: 4,
+    sampleCount: DEBUG_NO_MSAA ? 1 : 4,
     format: 'rgba16f',
     depth: 'depth-stencil',
   });
@@ -213,7 +218,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       // draws every node with geometry, and a dome that ENCLOSES the shadow camera would
       // write depth in front of the whole farm and shadow all of it.
       if (skyParent !== null) removeNodeChild(skyParent, skyDome);
-      drawGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
+      if (!DEBUG_NO_SHADOWS) drawGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
       if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
       if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
 

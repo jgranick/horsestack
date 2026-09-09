@@ -40,57 +40,8 @@ import {
   renderGlBackground,
 } from '@flighthq/sdk';
 import { drawGlScene3D, drawGlScene3DShadowMap, registerGlUnlitMaterial } from '@flighthq/sdk/rendering';
-import { prepareScene3DRender } from '@flighthq/sdk/rendering';
 import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
-import { forEachNodeDescendant, isInstancedMesh } from '@flighthq/sdk';
-import type { InstancedMesh, Node3D } from '@flighthq/sdk';
 import type { SceneGraph } from './sceneGraph';
-
-// ── DEBUG TOGGLES (remove after fix) ──
-const DEBUG_NO_MSAA = true;       // Test 1: sampleCount 1 instead of 4
-const DEBUG_NO_SHADOWS = true;    // Test 2: skip shadow pass entirely
-// ──────────────────────────────────────
-
-let _sceneDiagDone = false;
-let _listDiagDone = false;
-function diagInstanced(root: Node3D): void {
-  if (_sceneDiagDone) return;
-  let total = 0;
-  let withCount = 0;
-  forEachNodeDescendant(root, (node) => {
-    if (isInstancedMesh(node)) {
-      const im = node as InstancedMesh;
-      total++;
-      if (im.instanceCount > 0) {
-        withCount++;
-        const m0 = im.instanceMatrices[0];
-        const subsets = im.geometry?.subsets;
-        const subsetInfo = subsets ? subsets.map((s: any) => s.indexCount).join(',') : 'none';
-        const parentChain: string[] = [];
-        let p = getNodeParent(im) as Node3D | null;
-        while (p !== null) {
-          parentChain.push(`${p.name ?? '?'}(e:${p.enabled},v:${p.visible})`);
-          p = getNodeParent(p) as Node3D | null;
-        }
-        console.log('[DIAG] InstancedMesh', im.name ?? '?',
-          'count:', im.instanceCount,
-          'enabled:', im.enabled, 'visible:', im.visible,
-          'version:', im.version,
-          'geo:', im.geometry != null,
-          'subsets:', subsets?.length, 'indexCounts:', subsetInfo,
-          'materials:', im.materials?.length,
-          'pos:', im.position.x.toFixed(2), im.position.y.toFixed(2), im.position.z.toFixed(2),
-          'm0[12-14]:', m0?.m[12]?.toFixed(4), m0?.m[13]?.toFixed(4), m0?.m[14]?.toFixed(4),
-          'parents:', parentChain.join(' > '),
-        );
-      }
-    }
-  });
-  if (withCount > 0) {
-    console.log('[DIAG] total instanced:', total, 'with instances:', withCount);
-    _sceneDiagDone = true;
-  }
-}
 
 export interface SceneRenderer {
   canvas: HTMLCanvasElement;
@@ -150,23 +101,6 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
     },
   );
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);
-  // Hook drawElementsInstanced to verify the GPU draw call actually fires for instanced meshes.
-  const gl = renderState.gl as WebGL2RenderingContext;
-  let _glDiag = 0;
-  const origDrawEI = gl.drawElementsInstanced.bind(gl);
-  gl.drawElementsInstanced = function(mode: GLenum, count: GLsizei, type: GLenum, offset: GLintptr, instanceCount: GLsizei) {
-    if (count > 6 && _glDiag++ < 20) {
-      console.log('[GL] drawElementsInstanced count:', count, 'instances:', instanceCount);
-    }
-    return origDrawEI(mode, count, type, offset, instanceCount);
-  };
-  const origDrawAI = gl.drawArraysInstanced.bind(gl);
-  gl.drawArraysInstanced = function(mode: GLenum, first: GLint, count: GLsizei, instanceCount: GLsizei) {
-    if (_glDiag++ < 20) {
-      console.log('[GL] drawArraysInstanced count:', count, 'instances:', instanceCount);
-    }
-    return origDrawAI(mode, first, count, instanceCount);
-  };
   registerStandardGlTextureResolvers(renderState);
   registerGlStandardPbrMaterial(renderState);
   registerGlUnlitMaterial(renderState);
@@ -174,7 +108,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   registerGlBlurEffect(renderState);
   registerGlVignetteEffect(renderState);
   const pipeline = createGlRenderEffectPipeline(renderState, {
-    sampleCount: DEBUG_NO_MSAA ? 1 : 4,
+    sampleCount: 4,
     format: 'rgba16f',
     depth: 'depth-stencil',
   });
@@ -221,7 +155,7 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       // draws every node with geometry, and a dome that ENCLOSES the shadow camera would
       // write depth in front of the whole farm and shadow all of it.
       if (skyParent !== null) removeNodeChild(skyParent, skyDome);
-      if (!DEBUG_NO_SHADOWS) drawGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
+      drawGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
       if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
       if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
 
@@ -233,31 +167,17 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       // same job three raw depthMask/clearDepth/clear calls used to do by hand.
       const sceneTarget = pipeline.sceneTarget;
       if (sceneTarget !== null) {
-        diagInstanced(root);
         beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
-        // ── DEBUG: inspect prepareScene3DRender result before draw ──
-        if (!_listDiagDone) {
-          const aspect = canvas.width / (canvas.height || 1);
-          const list = prepareScene3DRender(renderState, root, camera, lights, aspect);
-          console.log('[LIST-DIAG] meshCount:', list.meshCount,
-            'instancedMeshCount:', list.instancedMeshCount);
-          for (let i = 0; i < list.instancedMeshCount; i++) {
-            const im = list.visibleInstancedMeshes[i] as InstancedMesh;
-            console.log('[LIST-DIAG] instanced[' + i + ']:', im.name ?? '?',
-              'count:', im.instanceCount, 'materials:', im.materials?.length,
-              'materialKinds:', im.materials?.map((m: any) => m?.kind).join(','));
-          }
-          if (list.instancedMeshCount > 0 || list.meshCount > 0) _listDiagDone = true;
-        }
         drawGlScene3D(renderState, root, camera, lights);
         endGlRenderPass(renderState);
       }
       // An empty list is the fast path: no ping-pong targets are acquired and no pass runs,
       // so the game pays for the defocus only on the screens that show it.
+      const activeEffects = backdropFocus > 0.002 ? getBackdropEffects(backdropFocus) : NO_EFFECTS;
       endGlRenderEffectPipeline(
         renderState,
         pipeline,
-        backdropFocus > 0.002 ? getBackdropEffects(backdropFocus) : NO_EFFECTS,
+        activeEffects,
       );
     },
 

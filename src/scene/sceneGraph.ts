@@ -18,7 +18,6 @@ import type {
 } from '@flighthq/sdk';
 import {
   addNodeChild,
-  appendInstancedMeshInstance,
   clamp,
   configureDirectionalShadowCamera3DTightFit,
   convertMeshGeometryLayout,
@@ -26,20 +25,16 @@ import {
   createAmbientLight,
   createCamera3D,
   createDirectionalLight,
-  createInstancedMesh,
-  createMatrix4,
   createMesh,
   createNode3D,
   createOrthographicProjection,
   createPerspectiveProjection,
   createPointLight,
   createSphereMeshGeometry,
-  createUnlitMaterial,
   createVector3,
   createVertexColorMaterial,
   getMeshGeometryVertexCount,
   getMeshGeometryVertexPosition,
-  invalidateNodeLocalTransform,
   Node3DKind,
   normalizeVector3,
   setMeshGeometryVertexColor0,
@@ -108,27 +103,6 @@ export function createSceneGraph(): SceneGraph {
   addNodeChild(root, skyDome);
   const stackLayer = createNode3D(Node3DKind, { name: 'horse-stack' });
   addNodeChild(root, stackLayer);
-
-  // ── DEBUG: clean instanced mesh probe (remove after fix) ──
-  // Per upstream: use appendInstancedMeshInstance (correct API), createUnlitMaterial
-  // (a material combination covered by Flight's functional tests), and place at the
-  // exact position where the prior red control sphere was confirmed visible.
-  {
-    const probeGeo = createSphereMeshGeometry(0.15, 12, 8);
-    const probeMat = createUnlitMaterial({ baseColor: 0x00ff00ff });
-    const probeIM = createInstancedMesh(probeGeo, [probeMat], 1);
-    probeIM.name = 'DEBUG-instanced-probe';
-    probeIM.position.x = STACK_X + 0.4;
-    probeIM.position.y = 0.3;
-    probeIM.position.z = STACK_Z;
-    invalidateNodeLocalTransform(probeIM);
-    appendInstancedMeshInstance(probeIM, createMatrix4());
-    addNodeChild(root, probeIM);
-    console.log('[DEBUG-PROBE] instanced sphere (unlit, green) at',
-      STACK_X + 0.4, 0.3, STACK_Z,
-      'count:', probeIM.instanceCount, 'version:', probeIM.version);
-  }
-  // ── end DEBUG ──
 
   const previewLayer = createNode3D(Node3DKind, { name: 'landing-preview-layer' });
 
